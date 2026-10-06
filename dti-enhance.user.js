@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      1.2
+// @version      1.3
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -1071,6 +1071,8 @@
         gbc:   { name: 'GBC',   full: 'Gift Box Mystery Capsule — any',          caps: 1 },
         bfgbc: { name: 'BFGBC', full: 'Black Friday GBC — any (double boxes)',   caps: 1.5 },
     };
+    const NOTE_BOARD = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1.2"/><rect x="9" y="2" width="5" height="5" rx="1.2"/><rect x="2" y="9" width="5" height="5" rx="1.2"/><rect x="9" y="9" width="5" height="5" rx="1.2"/></svg>';
+    const NOTE_LIST = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><circle cx="2.6" cy="4" r=".8" fill="currentColor" stroke="none"/><circle cx="2.6" cy="8" r=".8" fill="currentColor" stroke="none"/><circle cx="2.6" cy="12" r=".8" fill="currentColor" stroke="none"/></svg>';
     const NOTE_GIFT = '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6.5" width="11" height="7.5" rx="1"/><path d="M1.8 4.2h12.4v2.3H1.8zM8 4.2V14M8 4.2C6.6 1.6 3.9 2 4.5 3.5 4.9 4.4 8 4.2 8 4.2zm0 0c1.4-2.6 4.1-2.2 3.5-.7C11.1 4.4 8 4.2 8 4.2z"/></svg>';
     // "1-2" → [1, 2], "3" → [3, 3]; anything without a number (Overstock, —) → null
     const parseCaps = v => { const m = String(v || '').match(/(\d+(?:\.\d+)?)\s*(?:[-–]\s*(\d+(?:\.\d+)?))?/); return m ? [parseFloat(m[1]), parseFloat(m[2] || m[1])] : null; };
@@ -1714,16 +1716,28 @@
                         <option value="created">Newest first</option>
                         <option value="az">A → Z</option>
                     </select>
+                    <button type="button" class="dti-nx-boardbtn" title="Trade board \u2014 every trade report as a tile">${NOTE_BOARD}</button>
                 </div>
                 <div class="dti-nx-list"></div>
             </section>
-            <section class="dti-nx-detail"></section>`;
+            <section class="dti-nx-detail"></section>
+            <section class="dti-nx-board" hidden>
+                <div class="dti-nb-head">
+                    <span class="dti-nb-titles"><b>Trade board</b><span class="dti-nb-count"></span></span>
+                    <div class="dti-nb-chips"></div>
+                    <span class="dti-nb-spacer"></span>
+                    <label class="dti-nx-searchwrap dti-nb-search">${NAV_ICON_SEARCH}<input type="search" placeholder="Search trades\u2026" autocomplete="off"></label>
+                    <button type="button" class="dti-nb-new">\uff0b Trade Report</button>
+                    <button type="button" class="dti-nb-list" title="Back to the list">${NOTE_LIST}List</button>
+                </div>
+                <div class="dti-nb-grid"></div>
+            </section>`;
         host.appendChild(app);
         const $ = s => app.querySelector(s);
         makeCustomSelect($('.dti-nx-sort'), { className: 'dti-nx-sortsel' });
         // sel: a note key, 'new' (the new-note chooser) or null. draft: { key, ref } for an item/user
         // picked from the chooser that has no note yet — its editor shows, and typing creates the note.
-        const st = { f: 'all', q: '', sort: 'updated', sel: null, draft: null, newType: '', fresh: fresh ? open : null };
+        const st = { f: 'all', q: '', sort: 'updated', sel: null, draft: null, newType: '', fresh: fresh ? open : null, view: 'list', bst: 'all', bq: '' };
         let detailEd = null;
 
         const matches = n => {
@@ -1767,8 +1781,9 @@
             listEl.innerHTML = notes.map(n => {
                 const info = noteInfo(n.key);
                 const first = n.text.trim().split('\n').find(Boolean) || (n.type === 'general' && n.title || n.type === 'trade' ? '' : 'Empty note');
+                const stv = n.trade?.status || 'planned';
                 const tradeBits = n.type === 'trade'
-                    ? `${tradeChip(n.trade?.status)}<span class="dti-tr-mini">${tradeCount(n.trade?.give)} ⇄ ${tradeCount(n.trade?.get)}</span>` : '';
+                    ? `<button type="button" class="dti-tr-chip s-${noteEsc(stv)} dti-nx-stbtn" data-key="${noteEsc(n.key)}" title="Change the status">${(TRADE_STATUS.find(([v]) => v === stv) || TRADE_STATUS[0])[1]}<i>\u25be</i></button><span class="dti-tr-mini">${tradeCount(n.trade?.give)} ⇄ ${tradeCount(n.trade?.get)}</span>` : '';
                 return `<div class="dti-nx-row${n.key === st.sel ? ' active' : ''}" data-key="${noteEsc(n.key)}" role="button" tabindex="0">
                     <span class="dti-nx-thumbwrap">${noteThumb(info, 'dti-nx-thumb')}${n.type === 'trade' && info.img ? `<span class="dti-nx-tbadge">${NOTE_TRADE}</span>` : ''}</span>
                     <span class="dti-nx-rowmain">
@@ -2054,6 +2069,7 @@
             });
         }
         function select(key, draft) {
+            if (st.view === 'board') setView('list', false);
             // A general note or trade left completely empty isn't worth keeping
             const prev = st.sel && DTINotes.get(st.sel);
             detailEd?.flush();
@@ -2153,10 +2169,133 @@
 
         $('.dti-nx-new').addEventListener('click', () => { st.newType = ''; select('new'); });
         $('.dti-nx-newtrade').addEventListener('click', () => { st.newType = ''; newTradeNote(); });   // the most common note: straight in
+        // ── Trade board: every trade report as a tile (status, who, what went each way, cap values) ──
+        // Remembered when switched with its button; opening a report goes back to the list for it.
+        function setView(v, remember) {
+            st.view = v;
+            app.classList.toggle('board', v === 'board');
+            $('.dti-nx-board').hidden = v !== 'board';
+            $('.dti-nx-boardbtn').classList.toggle('on', v === 'board');
+            if (remember) GM_setValue('dti_nx_view', v);
+            if (v === 'board') renderBoard();
+        }
+        const tradeDate = t => t.date ? new Date(t.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: t.date.slice(0, 4) === String(new Date().getFullYear()) ? undefined : 'numeric' }) : '';
+        function renderBoard() {
+            const trades = DTINotes.all().filter(n => n.type === 'trade');
+            const counts = { all: trades.length };
+            trades.forEach(n => { const v = n.trade?.status || 'planned'; counts[v] = (counts[v] || 0) + 1; });
+            if (st.bst !== 'all' && !counts[st.bst]) st.bst = 'all';
+            $('.dti-nb-count').textContent = trades.length ? trades.length : '';
+            $('.dti-nb-chips').innerHTML = [['all', 'All'], ...TRADE_STATUS].filter(([v]) => v === 'all' || counts[v])
+                .map(([v, l]) => `<button type="button" class="s-${v}${st.bst === v ? ' on' : ''}" data-bst="${v}">${l}<i>${counts[v] || 0}</i></button>`).join('');
+            const q = st.bq;
+            const list = trades.filter(n => (st.bst === 'all' || (n.trade?.status || 'planned') === st.bst)
+                    && (!q || [noteInfo(n.key).title, n.text, n.trade?.partner?.name, ...[...(n.trade?.give || []), ...(n.trade?.get || [])].map(x => x.name)].join('\n').toLowerCase().includes(q)))
+                .sort((a, b) => (b.trade?.date || '').localeCompare(a.trade?.date || '') || b.updated - a.updated);
+            const grid = $('.dti-nb-grid');
+            if (!list.length) {
+                grid.innerHTML = `<div class="dti-nb-empty">${NOTE_TRADE}<b>${trades.length ? 'No trades match' : 'No trade reports yet'}</b><span>${trades.length ? 'Try another status or search.' : 'Start one with \uff0b Trade Report \u2014 who it was with, what you gave and what you got.'}</span></div>`;
+                return;
+            }
+            const thumbs = arr => arr.length ? arr.slice(0, 5).map(x => {
+                const g = GBC_KINDS[x.id], qty = x.qty > 1 ? `<i>\u00d7${x.qty}</i>` : '';
+                return g ? `<span class="dti-nb-th gbc" title="${noteEsc(g.full)}">${NOTE_GIFT}<em>${g.name}</em>${qty}</span>`
+                    : `<span class="dti-nb-th" title="${noteEsc(x.name)}${x.qty > 1 ? ' \u00d7' + x.qty : ''}"><img src="${noteEsc(x.img)}" alt="" loading="lazy">${qty}</span>`;
+            }).join('') + (arr.length > 5 ? `<span class="dti-nb-more">+${arr.length - 5}</span>` : '') : '<span class="dti-nb-none">Nothing yet</span>';
+            grid.innerHTML = list.map(n => {
+                const t = cleanTrade(n.trade), v = t.status, info = noteInfo(n.key);
+                const label = (TRADE_STATUS.find(([x]) => x === v) || TRADE_STATUS[0])[1];
+                const snip = String(n.text || '').trim().split('\n').find(Boolean) || '';
+                return `<div class="dti-nb-tile s-${noteEsc(v)}" data-key="${noteEsc(n.key)}" role="button" tabindex="0" title="Open this trade report">
+                    <div class="dti-nb-top">
+                        <button type="button" class="dti-tr-chip s-${noteEsc(v)} dti-nx-stbtn" data-key="${noteEsc(n.key)}" title="Change the status">${label}<i>\u25be</i></button>
+                        <span class="dti-nb-date">${noteEsc(tradeDate(t))}</span>
+                    </div>
+                    <div class="dti-nb-title">${noteEsc(info.title)}</div>
+                    <div class="dti-nb-sides">
+                        <div class="dti-nb-side"><span class="dti-nb-lbl">You give \u00b7 ${tradeCount(t.give)}</span><div class="dti-nb-ths">${thumbs(t.give)}</div><span class="dti-nb-val" data-side="give"></span></div>
+                        <span class="dti-nb-swap" aria-hidden="true">\u21c4</span>
+                        <div class="dti-nb-side"><span class="dti-nb-lbl">You get \u00b7 ${tradeCount(t.get)}</span><div class="dti-nb-ths">${thumbs(t.get)}</div><span class="dti-nb-val" data-side="get"></span></div>
+                    </div>
+                    <div class="dti-nb-bal" hidden></div>
+                    ${snip ? `<p class="dti-nb-snip">${noteEsc(snip.slice(0, 160))}</p>` : ''}
+                </div>`;
+            }).join('');
+            // cap values: each side's total, and which way it leans (the same reading as the report)
+            const gen = (renderBoard.gen = (renderBoard.gen || 0) + 1);
+            list.forEach(n => {
+                const t = cleanTrade(n.trade), tile = grid.querySelector(`.dti-nb-tile[data-key="${CSS.escape(n.key)}"]`), tot = {};
+                ['give', 'get'].forEach(side => {
+                    const acc = { min: 0, max: 0, unknown: 0 };
+                    let pending = t[side].length;
+                    const done = () => {
+                        if (gen !== renderBoard.gen || !tile.isConnected) return;
+                        tot[side] = acc;
+                        tile.querySelector(`.dti-nb-val[data-side="${side}"]`).textContent = acc.max ? '\u2248 ' + fmtCaps(acc.min, acc.max) : '';
+                        if (!tot.give || !tot.get || (!tot.give.max && !tot.get.max)) return;
+                        const diff = (tot.get.min + tot.get.max) / 2 - (tot.give.min + tot.give.max) / 2, el = tile.querySelector('.dti-nb-bal');
+                        el.hidden = false;
+                        el.className = 'dti-nb-bal ' + (Math.abs(diff) < 0.25 ? 'even' : diff > 0 ? 'up' : 'down');
+                        el.textContent = Math.abs(diff) < 0.25 ? 'About even' : `You ${diff > 0 ? 'get' : 'give'} \u2248 ${fmtNum(Math.abs(diff))} cap${Math.abs(diff) === 1 ? '' : 's'} more`;
+                    };
+                    if (!pending) return done();
+                    t[side].forEach(x => tradeItemCaps(x, v => { if (v) { acc.min += v[0] * x.qty; acc.max += v[1] * x.qty; } else acc.unknown += x.qty; if (--pending === 0) done(); }));
+                });
+            });
+        }
+        $('.dti-nx-boardbtn').addEventListener('click', () => {
+            if (st.view === 'board') return setView('list', true);
+            st.f = 'trade'; st.q = ''; $('.dti-nx-search').value = '';
+            renderSide(); renderList();
+            setView('board', true);
+        });
+        $('.dti-nb-list').addEventListener('click', () => setView('list', true));
+        $('.dti-nb-new').addEventListener('click', () => { st.newType = ''; newTradeNote(); });
+        $('.dti-nb-chips').addEventListener('click', e => { const b = e.target.closest('[data-bst]'); if (b) { st.bst = b.dataset.bst; renderBoard(); } });
+        let bqT = 0;
+        $('.dti-nb-search input').addEventListener('input', e => { clearTimeout(bqT); bqT = setTimeout(() => { st.bq = e.target.value.trim().toLowerCase(); renderBoard(); }, 140); });
+        $('.dti-nb-grid').addEventListener('keydown', e => {
+            const tile = e.target.closest?.('.dti-nb-tile');
+            if (tile && e.target === tile && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(tile.dataset.key); }
+        });
+
+        // The status menu (Planned / Pending / Completed / Fell through), from a trade row's chip
+        function openStatusMenu(btn) {
+            const was = document.querySelector('.dti-nx-stmenu');
+            was?.remove();
+            if (was && was.dataset.key === btn.dataset.key) return;   // a second click closes it
+            const key = btn.dataset.key, cur = DTINotes.get(key)?.trade?.status || 'planned';
+            const m = document.createElement('div');
+            m.className = 'dti-nx-stmenu'; m.dataset.key = key;
+            m.innerHTML = TRADE_STATUS.map(([v, l]) => `<button type="button" class="s-${v}${v === cur ? ' on' : ''}" data-v="${v}"><i></i>${l}${v === cur ? '<b>\u2713</b>' : ''}</button>`).join('');
+            document.body.appendChild(m);
+            const r = btn.getBoundingClientRect();
+            m.style.left = Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8)) + 'px';
+            m.style.top = (r.bottom + 6 + m.offsetHeight > innerHeight - 8 ? r.top - m.offsetHeight - 6 : r.bottom + 6) + 'px';
+            const close = () => { m.remove(); document.removeEventListener('mousedown', out, true); document.removeEventListener('keydown', esc, true); };
+            const out = ev => { if (!m.contains(ev.target) && !ev.target.closest?.('.dti-nx-stbtn')) close(); };
+            const esc = ev => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); close(); } };
+            document.addEventListener('mousedown', out, true);
+            document.addEventListener('keydown', esc, true);
+            m.addEventListener('click', ev => {
+                const b = ev.target.closest('[data-v]');
+                if (!b) return;
+                const n = DTINotes.get(key);
+                if (n && b.dataset.v !== cur) DTINotes.save(key, { trade: Object.assign({}, n.trade, { status: b.dataset.v }) });
+                close();
+                // the same trade open on the right: its status buttons follow
+                if (key === st.sel) $('.dti-nx-detail .dti-tr-stat')?.querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.v === b.dataset.v));
+            });
+        }
         app.addEventListener('click', e => {
+            const sb = e.target.closest('.dti-nx-stbtn');
+            if (sb) { e.stopPropagation(); openStatusMenu(sb); return; }
+            const tile = e.target.closest('.dti-nb-tile');
+            if (tile) { select(tile.dataset.key); return; }
             const del = e.target.closest('.dti-nx-rowdel');
             if (del) { deleteNote(del.closest('.dti-nx-row').dataset.key); return; }
             const f = e.target.closest('[data-f]');
+            if (f && st.view === 'board' && f.dataset.f !== 'trade') setView('list', false);
             if (f) { st.f = f.dataset.f === st.f && f.dataset.f.startsWith('tag:') ? 'all' : f.dataset.f; renderSide(); renderList(); return; }
             const row = e.target.closest('.dti-nx-row');
             if (row && row.dataset.key !== st.sel) select(row.dataset.key);
@@ -2222,6 +2361,7 @@
             const listEl = $('.dti-nx-list'), top = listEl.scrollTop;
             renderSide(); renderList();
             listEl.scrollTop = top;
+            if (st.view === 'board') { const g = $('.dti-nb-grid'), gt = g.scrollTop; renderBoard(); g.scrollTop = gt; }
             if (keys === null) return renderDetail();
             // A picked item/user just got its first words — it's a real note now
             const saved = st.draft && DTINotes.get(st.draft.key);
@@ -2260,7 +2400,8 @@
 
         const want = page ? decodeURIComponent(location.hash.replace(/^#notes\/?/, '')) : open;
         select(want === 'new' || (want && DTINotes.get(want)) ? want : null);
-        if (!page && !open) $('.dti-nx-search').focus();
+        if (!want && GM_getValue('dti_nx_view', 'list') === 'board') { st.f = 'trade'; renderSide(); renderList(); setView('board', false); }
+        else if (!page && !open) $('.dti-nx-search').focus();
         return app;
     }
 
@@ -4430,9 +4571,10 @@
         x: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l8 8M11 3l-8 8"/></svg>',
         left: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 5 8l5 5"/></svg>',
         right: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 3 5 5-5 5"/></svg>',
+        up: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 5-5 5 5"/></svg>',
     };
     const MG_KINDS = [['all', 'All'], ['wearable', 'Wearables'], ['capsule', 'Capsules'], ['trinket', 'Trinkets'], ['collectible', 'Collectibles'], ['event', 'Event'],
-        ['sticker', 'Stickers'], ['styling', 'Styling Studio'], ['cookie', 'Fortune Cookies'], ['home', 'Neohome'], ['other', 'Other']];
+        ['sticker', 'Stickers'], ['styling', 'Styling Studio'], ['cookie', 'Fortune Cookies'], ['home', 'Neohome'], ['other', 'Other'], ['free', 'Free']];
     const MG_SORTS = [['new', 'Newest first'], ['leaving', 'Leaving soonest'], ['price-asc', 'Price: low to high'], ['price-desc', 'Price: high to low'], ['discount', 'Biggest discount'], ['value', 'Highest cap value'], ['name', 'Name A–Z']];
     const MG_KIND_NAME = { wearable: 'Wearable', capsule: 'Mystery Capsule', collectible: 'NC Collectible', event: 'Event item', sticker: 'Sticker pack', styling: 'Styling Studio', cookie: 'Fortune Cookie', home: 'Neohome', other: 'NC Mall item' };
     const mgLeft = end => {
@@ -4445,11 +4587,13 @@
     const mgDate = ts => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: new Date(ts).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
     const mgNc = n => n ? `${n.toLocaleString('en-US')} NC` : 'Free';
     const mgLabel = mi => mi.kind === 'capsule' ? (mi.gbc ? 'GBC' : 'Cap') : mi.kind === 'trinket' ? mi.trinket : mi.kind === 'event' ? 'Event' : mi.kind === 'sticker' ? 'Stickers'
+        : mi.kind === 'cookie' ? 'Cookie' : mi.kind === 'styling' ? 'Styling' : mi.kind === 'other' && mi.game ? mi.game : mi.kind === 'other' && mi.pass ? 'PASS' : mi.kind === 'other' && mi.tvw ? 'TVW'
         : mi.kind === 'collectible' ? (mi.collectible.bonus ? 'Bonus' : `Collectible${mi.collectible.n ? ' #' + mi.collectible.n : ''}`) : '';
     // Bundles and packs of one thing ("… 5-Bundle", "… 3-Pack") share a tile: its name without the count, and each one's tag
     const MG_BUNDLE_RE = /\s*\d+[-\s]*(?:x[-\s]*)?(?:bundle|pack)s?$/i;
     const mgBaseName = name => name.replace(MG_BUNDLE_RE, '').replace(/\s+bundles?$/i, '').trim() || name;
     const mgBundleTag = name => name.match(MG_BUNDLE_RE)?.[0].trim() || 'Single';
+    const mgCls = mi => mi.kind === 'other' && mi.game ? (mi.game === 'Snowager' ? 'snowager' : 'grave') : mi.kind === 'other' && mi.pass ? 'pass' : mi.kind === 'other' && mi.tvw ? 'tvw' : mi.kind;   // (the badge's colour)
     const mgBig = (r, mi) => mi.wearable && r.image_id ? `https://cdn.itemdb.com.br/preview/${r.image_id}.png` : '';   // the item worn on a pet, 600×600
     // Neopets time: the mall's days (new items arrive at 11am NST)
     const mgDayKey = ts => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
@@ -4483,8 +4627,8 @@
     function mountMallApp(host, { inModal = false } = {}) {
         _injectPageModalCSS();   // (the detail panel uses the item popups' sections: Dyeworks, Neofriends…)
         const saved = GM_getValue('dti_mall_ui', {}) || {};
-        const ui = { view: 'all', kind: saved.kind || 'all', sort: saved.sort || 'new', picked: saved.sort || 'new', hideOwned: !!saved.hideOwned, show: 'new', q: '' };
-        const saveUi = () => GM_setValue('dti_mall_ui', { kind: ui.kind, sort: ui.picked, hideOwned: ui.hideOwned });   // (only a sort you picked)
+        const ui = { view: 'all', kind: saved.kind || 'all', sort: saved.sort || 'new', picked: saved.sort || 'new', hideOwned: !!saved.hideOwned, hidePerm: saved.hidePerm !== false, showFold: !!saved.showFold, show: 'new', q: '' };
+        const saveUi = () => GM_setValue('dti_mall_ui', { kind: ui.kind, sort: ui.picked, hideOwned: ui.hideOwned, hidePerm: ui.hidePerm, showFold: ui.showFold });   // (only a sort you picked)
         const app = document.createElement('div');
         app.id = 'dti-mall-app';
         if (inModal) app.classList.add('in-modal');
@@ -4493,15 +4637,11 @@
                 <section class="dti-mg-hero">
                     <div class="dti-mg-head">
                         <span class="dti-mg-ico">${MALL_ICO}</span>
-                        <div class="dti-mg-titles">
-                            <h1>NC Mall Guide</h1>
-                            <p>Everything in the NC Mall right now — what’s new, what’s leaving, what’s on sale, what’s inside each capsule, and what it’s all worth.</p>
-                        </div>
-                        <div class="dti-mg-headacts">
-                            <span class="dti-mg-updated"></span>
-                            <button type="button" class="dti-mg-refresh" title="Check the NC Mall again">${NF_ICO.refresh}</button>
-                            <a class="dti-mg-shop" href="https://www.neopets.com/ncmall/index.phtml" target="_blank" rel="noopener">Shop the Mall ${NF_ICO.ext}</a>
-                        </div>
+                        <h1>NC Mall Guide</h1>
+                        <span class="dti-mg-spacer"></span>
+                        <span class="dti-mg-updated"></span>
+                        <button type="button" class="dti-mg-refresh" title="Check the NC Mall again">${NF_ICO.refresh}</button>
+                        <a class="dti-mg-shop" href="https://www.neopets.com/ncmall/index.phtml" target="_blank" rel="noopener">Shop the Mall ${NF_ICO.ext}</a>
                     </div>
                     <div class="dti-mg-stats"><div class="dti-mg-loading"><span class="dti-mg-spin"></span>Opening the NC Mall…</div></div>
                 </section>
@@ -4512,6 +4652,7 @@
                         <span class="dti-mg-spacer"></span>
                         <button type="button" class="dti-mg-arrow" data-dir="-1" title="Back">${MG_ICO.left}</button>
                         <button type="button" class="dti-mg-arrow" data-dir="1" title="More">${MG_ICO.right}</button>
+                        <button type="button" class="dti-mg-fold">${MG_ICO.up}</button>
                     </div>
                     <div class="dti-mg-strip"></div>
                 </section>
@@ -4520,6 +4661,7 @@
                         <label class="dti-mg-search">${NF_ICO.search}<input type="search" placeholder="Search the NC Mall…" autocomplete="off" spellcheck="false"><kbd>/</kbd></label>
                         <div class="dti-mg-count"></div>
                         <button type="button" class="dti-mg-owned" hidden title="Hide what you already own">✓ Hide owned</button>
+                        <button type="button" class="dti-mg-perm" title="Permanent buyables: marked \u201cPermanent Buyable\u201d on the NC value lists, or in the NC Mall since before 2025 with no end date. Items on sale, free items and new releases (last 3 months) always show.">\u2713 Hide permanent</button>
                         <div class="dti-mg-sortwrap"><span>Sort</span><select class="dti-mg-sort">${MG_SORTS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
                     </div>
                     <div class="dti-mg-kinds"></div>
@@ -4553,7 +4695,7 @@
         function build(items) {
             const groups = new Map();
             (items || []).filter(r => r.name && r.price != null && mallBuyable(r)).forEach(r => {
-                const key = (r.slug || r.name).toLowerCase().replace(/-?\d+[-\s]*x?[-\s]*bundles?$/, '').replace(/-?\d+[-\s]*packs?$/, '').replace(/-bundles?$/, '').replace(/[-\s]\d+[-\s]*b\.?$/, '').replace(/[-\s]+$/, '').trim();
+                const key = (r.name || r.slug).toLowerCase().replace(/-?\d+[-\s]*x?[-\s]*bundles?$/, '').replace(/-?\d+[-\s]*packs?$/, '').replace(/-bundles?$/, '').replace(/[-\s]\d+[-\s]*b\.?$/, '').replace(/[-\s]+$/, '').trim();
                 if (!groups.has(key)) groups.set(key, []);
                 groups.get(key).push(r);
             });
@@ -4563,7 +4705,12 @@
             });
             byKey = new Map(entries.map(e => [e.k, e]));
             // cap values for everything (the value lists load once, then this is instant) — for the value sort
-            valsReady = Promise.all(entries.map(e => ncCapRange(e.r.name).then(v => { e.val = v; })));
+            const before2025 = Date.parse('2025-01-01'), recent = Date.now() - 92 * 864e5;   // (new releases show for 3 months)
+            valsReady = Promise.all(entries.map(e => new Promise(res => lookupNcValue(e.r.name, val => {
+                e.val = capNums(val);
+                e.perm = !e.mi.ends && !e.mi.sale && e.mi.price > 0 && e.mi.added < recent && (/^\s*permanent buyable/i.test(val || '') || e.mi.added < before2025);
+                res();
+            }))));
         }
         async function load(force) {
             const btn = $('.dti-mg-refresh');
@@ -4577,25 +4724,28 @@
                 return;
             }
             build(items);
+            const ready = await Promise.race([valsReady.then(() => true), new Promise(r => setTimeout(() => r(false), 4000))]);
+            if (!app.isConnected) return;
             paintAll();
-            valsReady.then(() => { if (app.isConnected && ui.sort === 'value') paintGrid(); });
+            if (!ready) valsReady.then(() => { if (app.isConnected) paintAll(); });   // the value lists were slow: repaint with them
             if (force) dtiToast('NC Mall up to date', { duration: 1500 });
         }
         const paintUpdated = () => { const t = mallFeedAt(); $('.dti-mg-updated').textContent = t ? `Updated ${noteAgo(t)}` : ''; };
         const isNew = e => e.mi.added >= Date.now() - 31 * 864e5;
         const isLeaving = e => e.mi.ends && e.mi.ends - Date.now() <= 15 * 864e5;
         const isWished = e => !!mineOf(e.r.item_id)?.want;
+        const live = () => ui.hidePerm ? entries.filter(e => !e.perm) : entries;   // what the cards, types and showcase count
 
         // ── hero: five views as big cards ──
         function paintStats() {
-            const fresh = entries.filter(isNew);
-            const leaving = entries.filter(isLeaving).sort((a, b) => a.mi.ends - b.mi.ends);
-            const sale = entries.filter(e => e.mi.sale), best = Math.max(0, ...sale.map(e => e.mi.pct));
-            const wish = _mineMap ? entries.filter(isWished) : null;
+            const pool = live(), fresh = pool.filter(isNew);
+            const leaving = pool.filter(isLeaving).sort((a, b) => a.mi.ends - b.mi.ends);
+            const sale = pool.filter(e => e.mi.sale), best = Math.max(0, ...sale.map(e => e.mi.pct));
+            const wish = _mineMap ? pool.filter(isWished) : null;
             const wishSoon = wish?.filter(e => e.mi.ends).sort((a, b) => a.mi.ends - b.mi.ends)[0];
             const short = s => s.length > 20 ? s.slice(0, 19).trim() + '\u2026' : s;
             const cards = [
-                ['all', MALL_ICO, entries.length, 'In the mall', `${entries.filter(e => e.mi.wearable).length} wearables · ${entries.filter(e => e.mi.kind === 'capsule').length} capsules`],
+                ['all', MALL_ICO, pool.length, 'In the mall', `${pool.filter(e => e.mi.wearable).length} wearables · ${pool.filter(e => e.mi.kind === 'capsule').length} capsules`],
                 ['new', NEW_ITEMS_ICO, fresh.length, 'New this month', fresh.length ? `latest ${mgGroupLabel(Math.max(...fresh.map(e => e.mi.added))).toLowerCase()}` : 'nothing new lately'],
                 ['leaving', MG_ICO.clock, leaving.length, 'Leaving soon', leaving[0] ? `next one in ${mgLeft(leaving[0].mi.ends)}` : 'nothing in the next 2 weeks', leaving[0] ? mgUrgency(leaving[0].mi.ends) : ''],
                 ['sale', MG_ICO.tag, sale.length, 'On sale', sale.length ? `up to −${best}% off` : 'no sales right now'],
@@ -4608,8 +4758,9 @@
         // ── the showcase: the newest wearables (or what's about to leave), big, on a pet ──
         function paintShowcase() {
             const show = $('.dti-mg-show');
+            paintFold();
             const sets = {
-                new: entries.filter(e => e.mi.wearable).sort((a, b) => b.mi.added - a.mi.added).slice(0, 16),
+                new: live().filter(e => e.mi.wearable).sort((a, b) => b.mi.added - a.mi.added).slice(0, 16),
                 leaving: entries.filter(isLeaving).sort((a, b) => a.mi.ends - b.mi.ends).slice(0, 16),
             };
             if (!sets[ui.show].length) ui.show = 'new';
@@ -4625,7 +4776,7 @@
                 const big = mgBig(e.r, e.mi), label = mgLabel(e.mi);
                 return `<button type="button" class="dti-mg-fcard" data-k="${e.k}" title="${noteEsc(e.name)}"${e.mi.ends && ui.show === 'leaving' ? ` data-urgency="${mgUrgency(e.mi.ends)}"` : ''}>
                     <span class="dti-mg-fpic"><img src="${noteEsc(big || e.r.image)}" alt="" loading="lazy"${big ? ` data-fallback="${noteEsc(e.r.image)}"` : ' class="small"'}></span>
-                    ${label ? `<span class="dti-mg-badge k-${e.mi.kind}">${noteEsc(label)}</span>` : ''}
+                    ${!e.mi.price ? '<span class="dti-mg-badge k-free">Free</span>' : label ? `<span class="dti-mg-badge k-${mgCls(e.mi)}">${noteEsc(label)}</span>` : ''}
                     ${ui.show === 'leaving' ? `<span class="dti-mg-fcd" data-end="${e.mi.ends}">${MG_ICO.clock}<em>${mgLeft(e.mi.ends)}</em></span>` : ''}
                     <span class="dti-mg-fname">${noteEsc(e.name)}</span>
                     <span class="dti-mg-fprice">${e.mi.sale ? `<s>${e.r.price}</s> ` : ''}${e.bundles ? 'from ' : ''}${mgNc(e.mi.price)}</span></button>`;
@@ -4640,24 +4791,27 @@
 
         // ── toolbar: the types (with counts) ──
         function paintKinds() {
-            const counts = { all: entries.length };
-            entries.forEach(e => { counts[e.mi.kind] = (counts[e.mi.kind] || 0) + 1; });
+            const pool = live(), counts = { all: pool.length, free: pool.filter(e => !e.mi.price).length };   // (Free: a filter across the types)
+            pool.forEach(e => { counts[e.mi.kind] = (counts[e.mi.kind] || 0) + 1; });
             if (!counts[ui.kind]) ui.kind = 'all';
             $('.dti-mg-kinds').innerHTML = MG_KINDS.filter(([k]) => counts[k]).map(([k, l]) => `<button type="button" class="k-${k}${ui.kind === k ? ' on' : ''}" data-kind="${k}">${l}<i>${counts[k].toLocaleString('en-US')}</i></button>`).join('');
             $('.dti-mg-owned').hidden = !_mineMap;
             $('.dti-mg-owned').classList.toggle('on', ui.hideOwned);
+            $('.dti-mg-perm').classList.toggle('on', ui.hidePerm);
         }
 
         // ── the grid ──
-        let list = [], shown = 0, groupCount = null, lastGroup = '';
+        let list = [], shown = 0, groupCount = null, lastGroup = '', permHidden = 0;
         function filtered() {
             const q = ui.q;
-            let out = entries.filter(e => (ui.kind === 'all' || e.mi.kind === ui.kind) && (!q || e.name.toLowerCase().includes(q)));
+            let out = entries.filter(e => (ui.kind === 'all' || (ui.kind === 'free' ? !e.mi.price : e.mi.kind === ui.kind)) && (!q || e.name.toLowerCase().includes(q)));
             if (ui.view === 'new') out = out.filter(isNew);
             else if (ui.view === 'leaving') out = out.filter(isLeaving);
             else if (ui.view === 'sale') out = out.filter(e => e.mi.sale);
             else if (ui.view === 'wish') out = out.filter(isWished);
             if (ui.hideOwned && _mineMap) out = out.filter(e => !mineOf(e.r.item_id)?.own);
+            permHidden = ui.hidePerm ? out.filter(e => e.perm).length : 0;
+            if (ui.hidePerm) out = out.filter(e => !e.perm);
             const cmp = {
                 'new': (a, b) => b.mi.added - a.mi.added,
                 'leaving': (a, b) => (a.mi.ends || Infinity) - (b.mi.ends || Infinity),
@@ -4675,7 +4829,7 @@
             const soon = mi.ends && mi.ends - Date.now() <= 31 * 864e5;
             return `<a class="dti-mg-tile" href="${mi.wearable ? '/items/' + r.item_id : noteEsc(itemdbHref(r.name))}"${mi.wearable ? '' : ' target="_blank" rel="noopener" data-nm-wear="0"'} data-note-id="${r.item_id}" data-k="${e.k}"${soon ? ` data-urgency="${mgUrgency(mi.ends)}"` : ''} title="${noteEsc(e.name)}">
                 <span class="dti-mg-pic"><img src="${noteEsc(r.image)}" alt="${noteEsc(e.name)}" loading="lazy"></span>
-                ${label ? `<span class="dti-mg-badge k-${mi.kind}">${noteEsc(label)}</span>` : mi.added >= Date.now() - 7 * 864e5 ? '<span class="dti-mg-badge k-new">New</span>' : ''}
+                ${!mi.price ? '<span class="dti-mg-badge k-free">Free</span>' : label ? `<span class="dti-mg-badge k-${mgCls(mi)}">${noteEsc(label)}</span>` : mi.added >= Date.now() - 7 * 864e5 ? '<span class="dti-mg-badge k-new">New</span>' : ''}
                 <span class="dti-mg-name">${noteEsc(e.name)}</span>
                 <span class="dti-mg-price">${mi.sale ? `<s>${r.price}</s>` : ''}<b>${e.bundles ? '<small>from</small> ' : ''}${mgNc(mi.price)}</b>${mi.sale ? `<i>−${mi.pct}%</i>` : ''}</span>
                 <span class="dti-mg-val"${e.val ? '' : ' hidden'}>${e.val ? '≈ ' + capShort(e.val) : ''}</span>
@@ -4700,7 +4854,7 @@
                 if (e.val === undefined) ncCapRange(e.r.name).then(v => { e.val = v; const p = t.querySelector('.dti-mg-val'); if (v && p) { p.textContent = '≈ ' + capShort(v); p.hidden = false; } });
                 if (e.mi.kind === 'wearable' && isNew(e)) {
                     const mark = d => {
-                        if (!d?.v?.length || !t.isConnected || t.querySelector('.k-dyeworks')) return;
+                        if (!d?.v?.length || !t.isConnected || t.querySelector('.dti-mg-badge:not(.k-new)')) return;
                         t.querySelector('.dti-mg-badge.k-new')?.remove();
                         t.querySelector('.dti-mg-pic').insertAdjacentHTML('afterend', '<span class="dti-mg-badge k-dyeworks">Dyeworks</span>');
                     };
@@ -4718,9 +4872,9 @@
             const viewName = { all: '', new: 'new this month', leaving: 'leaving within 2 weeks', sale: 'on sale', wish: 'from your wishlist' }[ui.view];
             const kindName = ui.kind === 'all' ? '' : MG_KINDS.find(([k]) => k === ui.kind)[1];
             const narrowed = ui.view !== 'all' || ui.kind !== 'all' || ui.q;
-            $('.dti-mg-count').innerHTML = `<span><b>${list.length.toLocaleString('en-US')}</b> ${list.length === 1 ? 'item' : 'items'}${kindName ? ` · ${noteEsc(kindName)}` : ''}${viewName ? ` · ${viewName}` : ''}${ui.q ? ` · “${noteEsc(ui.q)}”` : ''}</span>${narrowed ? '<button type="button" class="dti-mg-clear" title="Show everything">' + MG_ICO.x + 'Clear</button>' : ''}`;
+            $('.dti-mg-count').innerHTML = `<span><b>${list.length.toLocaleString('en-US')}</b> ${list.length === 1 ? 'item' : 'items'}${kindName ? ` · ${noteEsc(kindName)}` : ''}${viewName ? ` · ${viewName}` : ''}${ui.q ? ` · “${noteEsc(ui.q)}”` : ''}${permHidden ? ` <em class="dti-mg-permn">+ ${permHidden.toLocaleString('en-US')} permanent hidden</em>` : ''}</span>${narrowed ? '<button type="button" class="dti-mg-clear" title="Show everything">' + MG_ICO.x + 'Clear</button>' : ''}`;
             if (!list.length) {
-                grid.innerHTML = `<div class="dti-mg-empty"><span>${MALL_ICO}</span><b>Nothing here</b>${ui.view === 'wish' && !_mineMap ? 'Open My Items once (logged in) so your wishlist is known.' : ui.view === 'sale' ? 'There’s no sale in the NC Mall right now.' : 'Try another type, or clear the filters.'}</div>`;
+                grid.innerHTML = `<div class="dti-mg-empty"><span>${MALL_ICO}</span><b>Nothing here</b>${ui.view === 'wish' && !_mineMap ? 'Open My Items once (logged in) so your wishlist is known.' : permHidden ? `${permHidden.toLocaleString('en-US')} permanent item${permHidden === 1 ? '' : 's'} match \u2014 turn off \u201cHide permanent\u201d to see ${permHidden === 1 ? 'it' : 'them'}.` : ui.view === 'sale' ? 'There’s no sale in the NC Mall right now.' : 'Try another type, or clear the filters.'}</div>`;
                 $('.dti-mg-more').classList.add('done');
                 return;
             }
@@ -4745,12 +4899,25 @@
             paintStats(); paintGrid();
             if (b.dataset.view !== 'all') (inModal ? scroller.scrollTo({ top: $('.dti-mg-bar').offsetTop - 8, behavior: 'smooth' }) : $('.dti-mg-bar').scrollIntoView({ behavior: 'smooth', block: 'start' }));
         });
-        $('.dti-mg-showtabs').addEventListener('click', e => { const b = e.target.closest('button[data-show]'); if (b && ui.show !== b.dataset.show) { ui.show = b.dataset.show; paintShowcase(); } });
+        $('.dti-mg-showtabs').addEventListener('click', e => {
+            const b = e.target.closest('button[data-show]');
+            if (!b) return;
+            if (ui.showFold) { ui.showFold = false; saveUi(); paintFold(); }
+            if (ui.show !== b.dataset.show) { ui.show = b.dataset.show; paintShowcase(); }
+        });
+        function paintFold() {
+            $('.dti-mg-show').classList.toggle('folded', ui.showFold);
+            const f = $('.dti-mg-fold');
+            f.title = ui.showFold ? 'Show this row' : 'Hide this row';
+            f.setAttribute('aria-expanded', String(!ui.showFold));
+        }
+        $('.dti-mg-fold').addEventListener('click', () => { ui.showFold = !ui.showFold; saveUi(); paintFold(); if (!ui.showFold) paintArrows(); });
         app.querySelectorAll('.dti-mg-arrow').forEach(b => b.addEventListener('click', () => { const s = $('.dti-mg-strip'); s.scrollBy({ left: +b.dataset.dir * (s.clientWidth - 120), behavior: 'smooth' }); }));
         $('.dti-mg-strip').addEventListener('scroll', () => paintArrows(), { passive: true });
         $('.dti-mg-kinds').addEventListener('click', e => { const b = e.target.closest('button[data-kind]'); if (!b) return; ui.kind = b.dataset.kind; saveUi(); paintKinds(); paintGrid(); toTop(); });
         sortSel.addEventListener('change', () => { ui.sort = ui.picked = sortSel.value; saveUi(); paintGrid(); toTop(); });
         $('.dti-mg-owned').addEventListener('click', () => { ui.hideOwned = !ui.hideOwned; saveUi(); paintKinds(); paintGrid(); });
+        $('.dti-mg-perm').addEventListener('click', () => { ui.hidePerm = !ui.hidePerm; saveUi(); paintStats(); paintShowcase(); paintKinds(); paintGrid(); });
         let qT = 0;
         $('.dti-mg-search input').addEventListener('input', e => { clearTimeout(qT); qT = setTimeout(() => { ui.q = e.target.value.trim().toLowerCase(); paintGrid(); }, 140); });
         $('.dti-mg-count').addEventListener('click', e => {
@@ -4840,7 +5007,7 @@
                 <div class="dti-mg-dbody">
                     <div class="dti-mg-dpic${big ? '' : ' flat'}"><img src="${noteEsc(big || r.image)}" alt=""${big ? ` data-fallback="${noteEsc(r.image)}"` : ' class="small"'}></div>
                     <h2>${noteEsc(e.name)}</h2>
-                    <div class="dti-mg-dlabels">${label ? `<span class="dti-mg-badge k-${mi.kind}">${noteEsc(label)}</span>` : ''}${mi.sale ? `<span class="dti-mg-badge k-sale">−${mi.pct}%</span>` : ''}${mi.added >= Date.now() - 7 * 864e5 ? '<span class="dti-mg-badge k-new">New</span>' : ''}<span class="dti-mg-dlabelslot"></span></div>
+                    <div class="dti-mg-dlabels">${!mi.price ? '<span class="dti-mg-badge k-free">Free</span>' : ''}${label ? `<span class="dti-mg-badge k-${mgCls(mi)}">${noteEsc(label)}</span>` : ''}${mi.tvw && label !== 'TVW' ? '<span class="dti-mg-badge k-tvw">TVW</span>' : ''}${mi.sale ? `<span class="dti-mg-badge k-sale">−${mi.pct}%</span>` : ''}${mi.added >= Date.now() - 7 * 864e5 ? '<span class="dti-mg-badge k-new">New</span>' : ''}<span class="dti-mg-dlabelslot"></span></div>
                     <div class="dti-mg-dprice">
                         <div class="dti-mg-dnum">${mi.sale ? `<s>${mgNc(r.price)}</s>` : ''}<b>${mgNc(mi.price)}</b>${mi.sale && r.discountEnd ? `<small>sale ends ${mgDate(Date.parse(r.discountEnd))}</small>` : ''}</div>
                         ${e.bundles ? `<div class="dti-mg-dbund">${e.bundles.map(b => `<span>${noteEsc(mgBundleTag(b.name))}<b>${mgNc(b.price)}</b></span>`).join('')}</div>` : ''}
@@ -4948,75 +5115,52 @@
             #dti-mall-app.in-modal { width: 100%; height: 100%; max-width: none; padding: 0; overflow: hidden; }
             #dti-mall-app.in-modal .dti-mg-scroll { height: 100%; overflow-y: auto; padding: 14px 16px 28px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 
-            /* Hero */
-            .dti-mg-hero {
-                position: relative; overflow: hidden; padding: 22px 24px 20px; border-radius: 22px; border: 1px solid var(--border);
-                background:
-                    radial-gradient(110% 150% at 0% 0%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 58%),
-                    radial-gradient(70% 120% at 100% 0%, color-mix(in srgb, #f59e0b 13%, transparent), transparent 62%),
-                    radial-gradient(60% 90% at 72% 125%, color-mix(in srgb, #ec4899 11%, transparent), transparent 70%),
-                    var(--surface);
-                box-shadow: var(--shadow-sm);
-            }
-            .dti-mg-hero::before {
-                content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .6;
-                background-image: radial-gradient(color-mix(in srgb, var(--accent) 24%, transparent) 1px, transparent 1.5px); background-size: 18px 18px;
-                -webkit-mask-image: linear-gradient(100deg, transparent 38%, #000 80%); mask-image: linear-gradient(100deg, transparent 38%, #000 80%);
-            }
-            .dti-mg-hero > * { position: relative; }
-            .dti-mg-head { display: flex; align-items: center; gap: 16px; }
+            /* Header (the same row as Customs / Rainbow Pool: icon chip · title · actions) */
+            .dti-mg-head { display: flex; align-items: center; gap: 12px; margin: 2px 0 14px; }
             .dti-mg-ico {
-                width: 56px; height: 56px; flex: none; border-radius: 17px; display: grid; place-items: center; color: #fff;
-                background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 50%, #f59e0b));
-                box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 34%, transparent), inset 0 1px 0 rgba(255,255,255,.25);
+                width: 40px; height: 40px; flex-shrink: 0; border-radius: 12px; display: grid; place-items: center;
+                background: var(--accent-glow); color: var(--accent-text, var(--accent));
             }
-            .dti-mg-ico svg { width: 29px; height: 29px; }
-            .dti-mg-titles { flex: 1; min-width: 0; }
-            #dti-mall-app .dti-mg-titles h1 {
+            .dti-mg-ico svg { width: 20px; height: 20px; }
+            #dti-mall-app .dti-mg-head h1 {
                 margin: 0; padding: 0; border: 0; background: none; text-shadow: none; text-align: left;
-                font-family: inherit; font-size: 27px; font-weight: 800; letter-spacing: -.6px; line-height: 1.15; color: var(--text);
+                font-family: inherit; font-size: 26px; font-weight: 800; letter-spacing: -.5px; line-height: 1.2; color: var(--text);
             }
-            .dti-mg-titles p { margin: 5px 0 0; max-width: 640px; font-size: 13px; line-height: 1.5; color: var(--text-muted); }
-            .dti-mg-headacts { display: flex; align-items: center; gap: 8px; flex: none; align-self: flex-start; }
-            .dti-mg-updated { font-size: 11.5px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+            .dti-mg-updated { font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
             #dti-mall-app .dti-mg-refresh {
-                width: 34px; height: 34px; padding: 0; display: grid; place-items: center; cursor: pointer; border-radius: 10px;
-                border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); transition: color .12s, border-color .12s;
+                width: 34px; height: 34px; flex: none; padding: 0; display: grid; place-items: center; cursor: pointer; border-radius: 10px;
+                border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); transition: border-color .13s, color .13s;
             }
             .dti-mg-refresh svg { width: 15px; height: 15px; }
-            #dti-mall-app .dti-mg-refresh:hover { color: var(--accent-text, var(--accent)); border-color: var(--accent); }
+            #dti-mall-app .dti-mg-refresh:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
             .dti-mg-refresh.busy svg { animation: dti-spin .8s linear infinite; }
             #dti-mall-app a.dti-mg-shop {
-                height: 34px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; border-radius: 10px; white-space: nowrap;
-                background: var(--accent); color: var(--accent-fg, #fff) !important; font-size: 12.5px; font-weight: 700; text-decoration: none !important;
-                box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent); transition: filter .12s, transform .12s;
+                height: 34px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; flex: none; border-radius: 10px; white-space: nowrap;
+                background: var(--accent); color: var(--accent-fg, #fff) !important; font-size: 13px; font-weight: 700; text-decoration: none !important; transition: filter .13s;
             }
-            #dti-mall-app a.dti-mg-shop:hover { filter: brightness(1.08); transform: translateY(-1px); }
+            #dti-mall-app a.dti-mg-shop:hover { filter: brightness(1.08); }
             .dti-mg-shop svg { width: 11px; height: 11px; }
+            #dti-mall-app.in-modal :is(.dti-mg-ico, .dti-mg-head h1) { display: none; }   /* the popup's own header has them */
 
-            /* Hero: the five views */
-            .dti-mg-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+            /* The five views: plain cards */
+            .dti-mg-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
             #dti-mall-app .dti-mg-stat {
-                --c: var(--accent); display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "ico label" "num num" "sub sub";
-                align-items: center; column-gap: 9px; padding: 12px 14px; text-align: left; cursor: pointer; border-radius: 15px; min-width: 0;
-                border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 80%, transparent); color: var(--text);
-                -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: none;
-                transition: transform .14s, border-color .14s, box-shadow .14s, background .14s;
+                display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "ico label" "num num" "sub sub";
+                align-items: center; column-gap: 8px; padding: 12px 14px; min-width: 0; text-align: left; cursor: pointer; border-radius: 14px;
+                border: 1px solid var(--border); background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm);
+                transition: border-color .13s, background .13s;
             }
-            #dti-mall-app .dti-mg-stat:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--c) 50%, var(--border)); box-shadow: var(--shadow-md); }
-            #dti-mall-app .dti-mg-stat.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 10%, var(--surface)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 20%, transparent); }
-            .dti-mg-statico { grid-area: ico; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: color-mix(in srgb, var(--c) 15%, transparent); color: var(--c); }
-            .dti-mg-statico svg { width: 16px; height: 16px; }
+            #dti-mall-app .dti-mg-stat:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+            #dti-mall-app .dti-mg-stat.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+            .dti-mg-statico { grid-area: ico; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--surface-2); color: var(--text-muted); }
+            .dti-mg-statico svg { width: 14px; height: 14px; }
+            .dti-mg-stat.on .dti-mg-statico { background: var(--accent-glow); color: var(--accent-text, var(--accent)); }
             .dti-mg-statlabel { grid-area: label; font-size: 12px; font-weight: 700; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-            .dti-mg-stat > b { grid-area: num; margin-top: 9px; font-size: 27px; font-weight: 800; letter-spacing: -.8px; line-height: 1.05; color: var(--text); }
-            .dti-mg-stat > small { grid-area: sub; margin-top: 2px; font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-            .dti-mg-stat[data-view="new"] { --c: #0ea5e9; }
-            .dti-mg-stat[data-view="leaving"] { --c: #f59e0b; }
-            .dti-mg-stat[data-view="leaving"]:is([data-urgency="day"], [data-urgency="soon"]) { --c: #ef4444; }
-            .dti-mg-stat[data-view="sale"] { --c: #10b981; }
-            .dti-mg-stat[data-view="wish"] { --c: #ec4899; }
-            .dti-mg-stat[data-urgency] > small::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; vertical-align: 1px; border-radius: 50%; background: var(--c); animation: dti-mg-pulse 1.6s ease-in-out infinite; }
-            @keyframes dti-mg-pulse { 50% { opacity: .3; transform: scale(.7); } }
+            .dti-mg-stat > b { grid-area: num; margin-top: 8px; font-size: 24px; font-weight: 800; letter-spacing: -.5px; line-height: 1.1; color: var(--text); }
+            .dti-mg-stat > small { grid-area: sub; margin-top: 1px; font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            /* Leaving soon: a dot when the next one is close (amber this week, red within 3 days) */
+            .dti-mg-stat[data-urgency] > small::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; vertical-align: 1px; border-radius: 50%; background: #f59e0b; }
+            .dti-mg-stat:is([data-urgency="day"], [data-urgency="soon"]) > small::before { background: #ef4444; }
             .dti-mg-loading { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 26px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
             .dti-mg-loading.small { justify-content: flex-start; padding: 6px 2px; font-size: 12px; font-weight: 500; }
             .dti-mg-spin { width: 16px; height: 16px; flex: none; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: dti-spin .7s linear infinite; }
@@ -5041,6 +5185,17 @@
             .dti-mg-arrow svg { width: 14px; height: 14px; }
             #dti-mall-app .dti-mg-arrow:disabled { opacity: .35; cursor: default; box-shadow: none; }
             #dti-mall-app .dti-mg-arrow:not(:disabled):hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            /* Fold the row away (remembered) */
+            #dti-mall-app .dti-mg-fold {
+                width: 32px; height: 32px; flex: none; padding: 0; display: grid; place-items: center; cursor: pointer; border-radius: 10px;
+                border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); transition: border-color .13s, color .13s;
+            }
+            .dti-mg-fold svg { width: 14px; height: 14px; transition: transform .18s; }
+            #dti-mall-app .dti-mg-fold:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-mg-show.folded .dti-mg-fold svg { transform: rotate(180deg); }
+            #dti-mall-app .dti-mg-show.folded :is(.dti-mg-strip, .dti-mg-arrow) { display: none; }
+            .dti-mg-show.folded .dti-mg-showhead { margin-bottom: 0; }
+            #dti-mall-app .dti-mg-show.folded .dti-mg-showtabs button.on { background: transparent; box-shadow: none; color: var(--text-muted); }
             .dti-mg-strip {
                 display: grid; grid-auto-flow: column; grid-auto-columns: 186px; gap: 12px; overflow-x: auto; scroll-snap-type: x proximity;
                 scrollbar-width: none; padding: 3px 3px 12px; margin: -3px -3px 0;
@@ -5104,12 +5259,13 @@
             }
             .dti-mg-clear svg { width: 9px; height: 9px; }
             #dti-mall-app .dti-mg-clear:hover { color: var(--danger); border-color: var(--danger); }
-            #dti-mall-app .dti-mg-owned {
+            #dti-mall-app :is(.dti-mg-owned, .dti-mg-perm) {
                 flex: none; height: 36px; padding: 0 12px; cursor: pointer; border-radius: 10px; white-space: nowrap;
                 border: 1.5px solid var(--border); background: var(--surface); color: var(--text-muted); font-size: 12.5px; font-weight: 700;
             }
-            #dti-mall-app .dti-mg-owned:hover { border-color: var(--text-sub); }
-            #dti-mall-app .dti-mg-owned.on { background: color-mix(in srgb, var(--success) 12%, var(--surface)); border-color: color-mix(in srgb, var(--success) 55%, transparent); color: var(--success); }
+            #dti-mall-app :is(.dti-mg-owned, .dti-mg-perm):hover { border-color: var(--text-sub); }
+            .dti-mg-permn { font-style: normal; color: var(--text-sub); }
+            #dti-mall-app :is(.dti-mg-owned, .dti-mg-perm).on { background: color-mix(in srgb, var(--success) 12%, var(--surface)); border-color: color-mix(in srgb, var(--success) 55%, transparent); color: var(--success); }
             .dti-mg-sortwrap { display: flex; align-items: center; gap: 7px; flex: none; font-size: 12px; font-weight: 700; color: var(--text-muted); }
             .dti-mg-sortsel .dti-csel-trigger { height: 36px; padding: 0 11px; min-width: 170px; font-size: 12.5px; font-weight: 600; }
             .dti-mg-sortsel .dti-csel-opt { font-size: 13px; }
@@ -5192,6 +5348,16 @@
             .dti-mg-badge.k-dyeworks { --k: #d946ef; }
             .dti-mg-badge.k-sale { --k: var(--success); }
             .dti-mg-badge.k-new { --k: #f43f5e; }
+            .dti-mg-badge.k-free { --k: #22c55e; }
+            .dti-mg-badge.k-cookie { --k: #f97316; }
+            .dti-mg-badge.k-styling { --k: #9333ea; }
+            .dti-mg-badge.k-pass { --k: #ca8a04; }
+            .dti-mg-badge.k-tvw { --k: #334155; }
+            .dti-mg-badge.k-grave { --k: #92400e; }
+            .dti-mg-badge.k-snowager { --k: #0e7490; }
+            html[data-mode="dark"] .dti-mg-badge.k-grave { --k: #e7b98a; }
+            html[data-mode="dark"] .dti-mg-badge.k-snowager { --k: #67e8f9; }
+            html[data-mode="dark"] .dti-mg-badge.k-tvw { --k: #cbd5e1; }
 
             /* The detail panel */
             .dti-mg-shade {
@@ -5888,6 +6054,110 @@
             .dti-tr-chip.s-done { background: color-mix(in srgb, var(--success) 16%, transparent); color: var(--success); }
             .dti-tr-chip.s-off { background: var(--surface-3); color: var(--text-sub); text-decoration: line-through; }
             .dti-tr-mini { flex-shrink: 0; font-size: 11px; font-weight: 700; color: var(--text-muted); }
+            /* Trade board */
+            .dti-nx-boardbtn {
+                width: 36px; height: 36px; flex: none; padding: 0; display: grid; place-items: center; cursor: pointer; border-radius: 10px;
+                border: 1.5px solid var(--border); background: var(--surface); color: var(--text-muted); transition: border-color .13s, color .13s;
+            }
+            .dti-nx-boardbtn:hover, .dti-nx-boardbtn.on { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            #dti-notes-app.board { grid-template-columns: 228px minmax(0, 1fr); }
+            #dti-notes-app.in-modal.board { grid-template-columns: 200px minmax(0, 1fr); }
+            #dti-notes-app.board :is(.dti-nx-listcol, .dti-nx-detail) { display: none; }
+            .dti-nx-board { display: flex; flex-direction: column; overflow: hidden; }
+            .dti-nx-board[hidden] { display: none !important; }
+            .dti-nb-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+            .dti-nb-titles { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 800; color: var(--text); }
+            .dti-nb-count { padding: 1px 8px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--border); font-size: 11.5px; font-weight: 800; color: var(--text-muted); }
+            .dti-nb-count:empty { display: none; }
+            .dti-nb-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+            .dti-nb-chips button {
+                height: 28px; padding: 0 5px 0 10px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border-radius: 99px;
+                border: 1px solid var(--border); background: var(--surface); color: var(--text); font-family: inherit; font-size: 12px; font-weight: 600;
+            }
+            .dti-nb-chips button i { min-width: 18px; height: 18px; padding: 0 5px; display: inline-grid; place-items: center; border-radius: 99px; font-style: normal; font-size: 10.5px; font-weight: 800; background: var(--surface-2); color: var(--text-muted); }
+            .dti-nb-chips button:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+            .dti-nb-chips button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg, #fff); }
+            .dti-nb-chips button.on i { background: rgba(255,255,255,.22); color: inherit; }
+            .dti-nb-spacer { flex: 1; }
+            .dti-nb-search { flex: 0 1 220px; min-width: 150px; }
+            #dti-notes-app .dti-nb-search input {
+                width: 100%; min-width: 0; height: 34px; padding: 0 10px 0 33px; border-radius: 10px; box-sizing: border-box;
+                border: 1.5px solid var(--border); background: var(--surface-2); color: var(--text); font-family: inherit; font-size: 13px; outline: none;
+            }
+            #dti-notes-app .dti-nb-search input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); background: var(--surface); }
+            .dti-nb-new, .dti-nb-list {
+                height: 34px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; flex: none; cursor: pointer; border-radius: 10px;
+                font-family: inherit; font-size: 12.5px; font-weight: 700; white-space: nowrap;
+            }
+            .dti-nb-new { border: none; background: var(--accent); color: var(--accent-fg, #fff); }
+            .dti-nb-new:hover { filter: brightness(1.08); }
+            .dti-nb-list { border: 1.5px solid var(--border); background: var(--surface); color: var(--text-muted); }
+            .dti-nb-list:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-nb-list svg { width: 14px; height: 14px; }
+            .dti-nb-grid { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-content: start; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+            .dti-nb-tile {
+                position: relative; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 13px; cursor: pointer; text-align: left;
+                border: 1px solid var(--border); border-top: 3px solid var(--accent); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-sm);
+                transition: border-color .13s, box-shadow .13s, transform .13s;
+            }
+            .dti-nb-tile:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+            .dti-nb-tile:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-glow); }
+            .dti-nb-tile.s-pending { border-top-color: var(--nc); }
+            .dti-nb-tile.s-done { border-top-color: var(--success); }
+            .dti-nb-tile.s-off { border-top-color: var(--text-sub); }
+            .dti-nb-tile.s-off :is(.dti-nb-sides, .dti-nb-title) { opacity: .6; }
+            .dti-nb-top { display: flex; align-items: center; gap: 8px; }
+            .dti-nb-date { margin-left: auto; font-size: 11.5px; font-weight: 600; color: var(--text-muted); }
+            .dti-nb-title { font-size: 14px; font-weight: 800; color: var(--text); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .dti-nb-sides { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: start; gap: 8px; }
+            .dti-nb-side { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 8px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); }
+            .dti-nb-lbl { font-size: 9.5px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--text-muted); }
+            .dti-nb-ths { display: flex; flex-wrap: wrap; gap: 4px; min-height: 36px; align-items: center; }
+            .dti-nb-th { position: relative; width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 8px; background: #fff; border: 1px solid var(--border); }
+            .dti-nb-th img { width: 32px; height: 32px; object-fit: contain; }
+            .dti-nb-th i { position: absolute; right: -4px; bottom: -4px; padding: 0 4px; border-radius: 99px; background: rgba(15,15,20,.75); color: #fff; font-style: normal; font-size: 9px; font-weight: 800; line-height: 1.6; }
+            .dti-nb-th.gbc { width: auto; padding: 0 6px; gap: 3px; display: inline-flex; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); color: var(--accent-text, var(--accent)); }
+            .dti-nb-th.gbc svg { width: 14px; height: 14px; }
+            .dti-nb-th.gbc em { font-style: normal; font-size: 10px; font-weight: 800; }
+            .dti-nb-th.gbc i { position: static; margin-left: 1px; }
+            .dti-nb-more { font-size: 11px; font-weight: 800; color: var(--text-muted); }
+            .dti-nb-none { font-size: 11.5px; color: var(--text-sub); }
+            .dti-nb-val { font-size: 11px; font-weight: 700; color: var(--text-muted); }
+            .dti-nb-val:empty { display: none; }
+            .dti-nb-swap { align-self: center; font-size: 16px; color: var(--text-sub); }
+            .dti-nb-bal { align-self: flex-start; padding: 2px 9px; border-radius: 99px; font-size: 11.5px; font-weight: 700; background: var(--surface-2); color: var(--text-muted); }
+            .dti-nb-bal.up { background: color-mix(in srgb, var(--success) 14%, var(--surface)); color: var(--success); }
+            .dti-nb-bal.down { background: color-mix(in srgb, var(--nc) 14%, var(--surface)); color: var(--nc); }
+            .dti-nb-snip { margin: 0; font-size: 12px; line-height: 1.45; color: var(--text-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+            .dti-nb-empty { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 60px 20px; text-align: center; font-size: 13px; color: var(--text-muted); }
+            .dti-nb-empty svg { width: 30px; height: 30px; margin-bottom: 4px; color: var(--text-sub); }
+            .dti-nb-empty b { font-size: 15px; color: var(--text); }
+            @media (max-width: 1100px) {
+                #dti-notes-app.board { grid-template-columns: minmax(0, 1fr); }
+                .dti-nx-board { height: calc(100vh - 220px); }
+            }
+            /* A trade row's status chip opens a little menu */
+            button.dti-nx-stbtn { display: inline-flex; align-items: center; gap: 3px; border: none; cursor: pointer; font-family: inherit; line-height: 1.5; }
+            button.dti-nx-stbtn i { font-style: normal; font-size: 8px; opacity: .65; }
+            button.dti-nx-stbtn:hover { box-shadow: 0 0 0 1.5px currentColor; }
+            button.dti-nx-stbtn:focus { outline: none; }
+            button.dti-nx-stbtn:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+            .dti-nx-stmenu {
+                position: fixed; z-index: 10080; min-width: 156px; padding: 4px; display: flex; flex-direction: column; gap: 2px; box-sizing: border-box;
+                background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lg);
+                font-family: 'Poppins', system-ui, sans-serif; animation: dti-lp-in .12s ease-out;
+            }
+            .dti-nx-stmenu button {
+                display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 10px; border: none; border-radius: 8px; cursor: pointer;
+                background: transparent; color: var(--text); font-family: inherit; font-size: 12.5px; font-weight: 600; text-align: left;
+            }
+            .dti-nx-stmenu button:hover { background: var(--surface-2); }
+            .dti-nx-stmenu button.on { font-weight: 800; }
+            .dti-nx-stmenu i { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--accent); }
+            .dti-nx-stmenu .s-pending i { background: var(--nc); }
+            .dti-nx-stmenu .s-done i { background: var(--success); }
+            .dti-nx-stmenu .s-off i { background: var(--text-sub); }
+            .dti-nx-stmenu b { margin-left: auto; color: var(--accent-text, var(--accent)); }
             .dti-tr-status, .dti-tr-date {
                 width: auto !important; height: 34px; padding: 0 10px; border-radius: 9px; border: 1.5px solid var(--border);
                 background-color: var(--surface-2); color: var(--text); font-family: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
@@ -6172,11 +6442,13 @@
         const cookie = /fortune cookie/i.test(n);   // (NC Fortune Cookies open too — they aren't capsules)
         const sale = r.discountPrice > 0 && r.discountPrice < r.price
             && (!r.discountBegin || Date.parse(r.discountBegin) <= Date.now()) && (!r.discountEnd || Date.parse(r.discountEnd) >= Date.now());
-        const kind = isEventItem(d) ? 'event' : /\bsticker pack\b/i.test(n) || /neosignature/i.test(d) ? 'sticker' : trinket ? 'trinket' : collectible ? 'collectible'
-            : cookie ? 'cookie' : openable ? 'capsule' : wearable ? 'wearable' : /styling studio|hue brew/i.test(n) ? 'styling'
-            : /\b(bed|sofa|desk|lamp|rug|stove|fence|lights|bench)\b/i.test(n) || /neohome/i.test(d) ? 'home' : 'other';
+        const game = wearable || cookie ? '' : /snowager/i.test(n + ' ' + d) ? 'Snowager' : /grave danger|fester detector/i.test(n + ' ' + d) ? 'Grave Danger' : '';
+        const kind = game ? 'other' : isEventItem(d) ? 'event' : /\bsticker pack\b/i.test(n) || /neosignature/i.test(d) ? 'sticker' : trinket ? 'trinket' : collectible ? 'collectible'
+            : cookie ? 'cookie' : /styling studio|hue brew/i.test(n) ? 'styling' : /\bcapsule\b/i.test(n) ? 'capsule' : wearable ? 'wearable'
+            : /\b(bed|sofa|desk|lamp|rug|stove|fence|lights|bench)\b|room in a bag/i.test(n) || /neohome/i.test(d) ? 'home' : 'other';
         return {
             kind, trinket, collectible, openable, wearable, sale, gbc: kind === 'capsule' && isGbcName(n),
+            game, pass: /adventure pass|ultimate adventure/i.test(n), tvw: !wearable && /\bvoid\b/i.test(n + ' ' + d),
             price: sale ? r.discountPrice : r.price, pct: sale && r.price ? Math.round((1 - r.discountPrice / r.price) * 100) : 0,
             added: Date.parse(r.saleBegin || r.addedAt) || 0, ends: Date.parse(r.saleEnd) || 0,
         };
@@ -10091,7 +10363,21 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-nm-tile[data-nm-type=trinket] a::after { background: color-mix(in srgb, #f59e0b 18%, var(--surface)); color: #b45309; }
             html[data-mode="dark"] .dti-nm-tile[data-nm-type=trinket] a::after { color: #fbbf24; }
             .dti-nm-tile[data-nm-type=dyeworks] a::after { background: color-mix(in srgb, #d946ef 16%, var(--surface)); color: #c026d3; }
+            .dti-nm-tile[data-nm-type=cookie] a::after { background: color-mix(in srgb, #f97316 16%, var(--surface)); color: #c2410c; }
+            html[data-mode="dark"] .dti-nm-tile[data-nm-type=cookie] a::after { color: #fdba74; }
+            .dti-nm-tile[data-nm-type=styling] a::after { background: color-mix(in srgb, #9333ea 16%, var(--surface)); color: #7e22ce; }
+            html[data-mode="dark"] .dti-nm-tile[data-nm-type=styling] a::after { color: #d8b4fe; }
+            .dti-nm-tile[data-nm-type=pass] a::after { background: color-mix(in srgb, #eab308 18%, var(--surface)); color: #a16207; }
+            html[data-mode="dark"] .dti-nm-tile[data-nm-type=pass] a::after { color: #fde047; }
+            .dti-nm-tile[data-nm-type=tvw] a::after { background: color-mix(in srgb, #334155 14%, var(--surface)); color: #334155; }
+            html[data-mode="dark"] .dti-nm-tile[data-nm-type=tvw] a::after { background: color-mix(in srgb, #cbd5e1 14%, var(--surface)); color: #cbd5e1; }
+            .dti-nm-tile[data-nm-type=grave] a::after { background: color-mix(in srgb, #92400e 14%, var(--surface)); color: #92400e; }
+            html[data-mode="dark"] .dti-nm-tile[data-nm-type=grave] a::after { background: color-mix(in srgb, #e7b98a 14%, var(--surface)); color: #e7b98a; }
+            .dti-nm-tile[data-nm-type=snowager] a::after { background: color-mix(in srgb, #0e7490 14%, var(--surface)); color: #0e7490; }
+            html[data-mode="dark"] .dti-nm-tile[data-nm-type=snowager] a::after { background: color-mix(in srgb, #67e8f9 14%, var(--surface)); color: #67e8f9; }
             html[data-mode="dark"] .dti-nm-tile[data-nm-type=dyeworks] a::after { color: #e879f9; }
+            .dti-nm-tile[data-nm-type=free] a::after { background: color-mix(in srgb, #22c55e 16%, var(--surface)); color: #15803d; }
+            html[data-mode="dark"] .dti-nm-tile[data-nm-type=free] a::after { color: #4ade80; }
             .dti-nm-cd { width: 100%; margin-top: 1px; text-align: center; white-space: nowrap; font-size: 11px; font-weight: 700; color: var(--text-muted); }
             /* Leaving soon: amber within a week, red within 3 days; the last day tints the whole tile */
             .dti-nm-tile[data-urgency="week"] .dti-nm-cd { color: #d97706; }
@@ -11261,7 +11547,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             function nmGroupBundles(rows) {
                 const groups = new Map();
                 rows.forEach(r => {
-                    const key = (r.slug || r.name || '')
+                    const key = (r.name || r.slug || '')
                         .toLowerCase()
                         .replace(/-?\d+[-\s]*x?[-\s]*bundles?$/, '')
                         .replace(/-?\d+[-\s]*packs?$/, '')   // "… 3-Pack" (slingshots, keys, widgets)
@@ -11332,22 +11618,32 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     const openable = r.canOpen === 'true' || r.canOpen === true || (r.canOpen !== 'false' && /\bcapsule\b/i.test(r.name || ''));
                     const event = isEventItem(r.description);
                     const collectible = collectibleInfo(r.description);
-                    const isCap  = !trinket && !event && openable && !/fortune cookie/i.test(r.name || '');   // (NC Fortune Cookies open too)
+                    const isCap  = !trinket && !event && /\bcapsule\b/i.test(r.name || '');   // (bundles, Superpacks, NC Fortune Cookies… open too)
+                    const cookie = /fortune cookie/i.test(r.name || ''), styling = /styling studio|hue brew/i.test(r.name || '');
+                    const pass = /adventure pass|ultimate adventure/i.test(r.name || ''), tvw = r.isWearable === false && /\bvoid\b/i.test((r.name || '') + ' ' + (r.description || ''));
+                    const nd = (r.name || '') + ' ' + (r.description || '');
+                    const game = r.isWearable !== false || cookie ? '' : /snowager/i.test(nd) ? 'Snowager' : /grave danger|fester detector/i.test(nd) ? 'Grave Danger' : '';
                     const sticker = /\bsticker pack\b/i.test(r.name || '') || /neosignature/i.test(r.description || '');   // Neosignature stickers
                     const li = document.createElement('li');
                     li.className = 'dti-nm-tile';
-                    li.dataset.nmType = mode === 'leaving' ? 'leaving' : isSale ? 'sale' : isCap ? 'capsule' : trinket ? 'trinket' : sticker ? 'sticker' : event ? 'event' : collectible ? 'collectible' : '';
+                    li.dataset.nmType = mode === 'leaving' ? 'leaving' : isSale ? 'sale' : !r.price ? 'free' : isCap ? 'capsule' : trinket ? 'trinket' : sticker ? 'sticker' : game ? (game === 'Snowager' ? 'snowager' : 'grave') : event ? 'event' : collectible ? 'collectible' : cookie ? 'cookie' : styling ? 'styling' : pass ? 'pass' : tvw ? 'tvw' : '';
                     // DTI only keeps wearables: capsules and other non-wearables get no "Add to your lists"
                     if (r.isWearable === false || (r.isWearable == null && openable)) li.dataset.nmWear = '0';
                     const a = document.createElement('a');
                     a.href = r.item_id ? `/items/${r.item_id}` : 'https://www.neopets.com/ncmall/index.phtml';
                     a.dataset.turbo = 'false';
-                    if (isCap)                   a.dataset.nmBadge = isGbcName(r.name) ? 'GBC' : 'Cap';   // Gift Box Mystery Capsule
+                    if (!r.price)                a.dataset.nmBadge = 'Free';
+                    else if (isCap)              a.dataset.nmBadge = isGbcName(r.name) ? 'GBC' : 'Cap';   // Gift Box Mystery Capsule
                     else if (isSale)             a.dataset.nmBadge = 'Sale';
                     else if (trinket)            a.dataset.nmBadge = trinket;
                     else if (sticker)            a.dataset.nmBadge = 'Stickers';
+                    else if (game)               a.dataset.nmBadge = game;   // Snowager / Grave Danger
                     else if (event)              a.dataset.nmBadge = 'Event';
                     else if (collectible)        a.dataset.nmBadge = collectible.bonus ? 'Bonus' : `Collectible${collectible.n ? ' #' + collectible.n : ''}`;
+                    else if (cookie)             a.dataset.nmBadge = 'Cookie';
+                    else if (styling)            a.dataset.nmBadge = 'Styling';
+                    else if (pass)               a.dataset.nmBadge = 'PASS';
+                    else if (tvw)                a.dataset.nmBadge = 'TVW';   // The Void Within
                     // Dyeworks: dyeable wearables get a badge (looked up on DTI once, then remembered)
                     if (!a.dataset.nmBadge && r.isWearable !== false) {
                         const markDye = e => { if (e?.v?.length && !a.dataset.nmBadge) { a.dataset.nmBadge = 'Dyeworks'; li.dataset.nmType = 'dyeworks'; } };
@@ -11368,7 +11664,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         const pct = nmDiscountPct(r);
                         price.innerHTML = `<s>${r.price}</s> ${r.discountPrice} NC${pct ? ` <span class="dti-nm-tile-pct">-${pct}%</span>` : ''}`;
                     } else {
-                        price.textContent = `${r.price} NC`;
+                        price.textContent = r.price ? `${r.price} NC` : 'Free';
                     }
                     a.appendChild(price);
                     if (r._bundlePrices) {
