@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      1.1
+// @version      1.2
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -19,6 +19,7 @@
 // @grant        GM_addStyle
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_listValues
 // @grant        GM_addValueChangeListener
 // @grant        GM_xmlhttpRequest
 // @connect      lebron-values.netlify.app
@@ -710,6 +711,24 @@
         }, opts.duration || 2200);
     }
 
+    // Item pages: "Brought to you by" can be dozens of names — folded to one line ("24 contributors ▾") each visit
+    function foldItemContributors(box) {
+        const names = box.querySelectorAll(':scope > ul > li');
+        if (box.dataset.dtiFold || names.length < 2) return;
+        box.dataset.dtiFold = '1';
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'dti-contrib-toggle';
+        const paint = open => {
+            box.classList.toggle('dti-folded', !open);
+            btn.setAttribute('aria-expanded', String(open));
+            btn.innerHTML = open ? 'Hide <i>\u25b4</i>' : `${names.length} contributors <i>\u25be</i>`;
+            btn.title = open ? 'Fold the list' : 'Show everyone who helped with this item';
+        };
+        btn.addEventListener('click', () => paint(box.classList.contains('dti-folded')));
+        (box.querySelector(':scope > header') || box.firstElementChild)?.after(btn);
+        paint(false);
+    }
+
     function _buildContribLocaleRow(_attempt) {
         if (document.getElementById('dti-contrib-locale-row')) return;
         const contrib = document.querySelector('#item-contributors, div.contributions, section.contributions, #dia-hp-contrib, #latest-contribution');
@@ -738,6 +757,7 @@
         contrib.parentNode.insertBefore(row, contrib);
         row.appendChild(contrib);
         row.appendChild(localeForm);
+        if (contrib.id === 'item-contributors') foldItemContributors(contrib);
         const sel = localeForm.querySelector('select[name="locale"]');
         if (sel && !sel.dataset.dtiLocaleWired) {
             sel.dataset.dtiLocaleWired = '1';
@@ -991,6 +1011,7 @@
     const NAV_ICON_SPARKLE = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 1.8l1.5 3.7 3.7 1.5-3.7 1.5L7 12.2 5.5 8.5 1.8 7l3.7-1.5z"/><path d="M12.6 10.6v3.6M10.8 12.4h3.6"/></svg>';
     // Open in a popup: two overlapping windows (drawn cut-out, so it works on any button background)
     const SETTINGS_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.6v1.8M8 12.6v1.8M1.6 8h1.8M12.6 8h1.8M3.5 3.5l1.3 1.3M11.2 11.2l1.3 1.3M3.5 12.5l1.3-1.3M11.2 4.8l1.3-1.3"/></svg>';
+    const BAG_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 5.2h9.6l-.8 8.2c-.1.6-.6 1.1-1.2 1.1H5.2c-.6 0-1.1-.5-1.2-1.1z"/><path d="M5.8 5.2V4.4a2.2 2.2 0 0 1 4.4 0v.8"/></svg>';
     const NEW_ITEMS_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.6v2.6M8 11.8v2.6M1.6 8h2.6M11.8 8h2.6M3.5 3.5l1.8 1.8M10.7 10.7l1.8 1.8M3.5 12.5l1.8-1.8M10.7 5.3l1.8-1.8"/></svg>';
     const POPUP_ICO = '<svg viewBox="0 0 13 13" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 3.75H2A1.25 1.25 0 0 0 .75 5v4A1.25 1.25 0 0 0 2 10.25h4A1.25 1.25 0 0 0 7.25 9V8"/><rect x="5.75" y=".75" width="6.5" height="6.5" rx="1.25"/></svg>';
     const NOTE_PIN = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.8 1.8l4.4 4.4-2.1.7-2.6 2.6.3 3-1.3 1.3L5.3 10.7 2 14 1.9 14.1M5.3 10.7L2.1 7.5l1.3-1.3 3 .3 2.6-2.6z"/></svg>';
@@ -1118,18 +1139,20 @@
 
     // ── Item tiles outside My Items get a pencil (My Items builds its own into each card) ──
     // (label > input + .item-container = item cards in the outfit editor, full page and popup)
-    const NOTE_TILE_SEL = '#dti-newest-items-grid li.object, #dti-nm-grid li.dti-nm-tile, #dti-items-direct-grid div.object, #search-new-items div.object, body.items-latest .item-list li.object, #dti-wp-items a.dti-wp-item, label > input + .item-container, a.dti-pm-item-card, #dti-nf-app a.dti-nf-item';
+    const NOTE_TILE_SEL = '#dti-newest-items-grid li.object, #dti-nm-grid li.dti-nm-tile, #dti-items-direct-grid div.object, #search-new-items div.object, body.items-latest .item-list li.object, #dti-wp-items a.dti-wp-item, label > input + .item-container, a.dti-pm-item-card, #dti-nf-app a.dti-nf-item, #dti-mall-app a.dti-mg-tile';
     function decorateNoteTile(tile) {
         if (tile.dataset.dtiNote) return;
         const a = tile.matches('a[href]') ? tile : tile.querySelector('a[href*="/items/"]');
-        const id = a?.getAttribute('href')?.match(/\/items\/(\d+)/)?.[1]
+        const id = a?.getAttribute('href')?.match(/\/items\/(\d+)/)?.[1] || tile.dataset.noteId   // (NC Mall Guide: non-wearables link to itemdb)
             || tile.closest('label')?.querySelector(':scope > input')?.value?.match(/^\d+$/)?.[0];   // editor: radio/checkbox value
         if (!id || id === '0') return;
         tile.dataset.dtiNote = '1';
         const img = tile.querySelector('img');
-        const name = (tile.querySelector('.name, .dti-ni-name, .dti-nm-tile-name, .dti-pm-item-name, .dti-nf-iname, [id$="-item-' + id + '-name"]')?.textContent
+        const name = (tile.querySelector('.name, .dti-ni-name, .dti-nm-tile-name, .dti-pm-item-name, .dti-nf-iname, .dti-mg-name, [id$="-item-' + id + '-name"]')?.textContent
             || img?.alt || '').replace(/^Thumbnail (?:art )?for /, '').trim();
         tile.appendChild(makeNoteBtn('item:' + id, { id, name, img: img?.src || '' }));
+        tile.dataset.dtiItem = id;
+        paintMineMark(tile);
         if (tile.dataset.nmWear !== '0') tile.appendChild(makeListBtn({ id, name, img: img?.src || '' }));   // NC Mall capsules etc. aren't on DTI
     }
     function watchNoteTiles() {
@@ -1170,6 +1193,7 @@
         const { pop, anchor, cleanup } = _listPop;
         _listPop = null;
         cleanup(); pop.remove(); anchor.classList.remove('open');
+        window.__dtiClosetFlush?.();   // (My Items: lists changed → refresh)
     }
     async function openListPopover(anchor, ref) {
         const again = _listPop?.anchor === anchor;
@@ -1235,16 +1259,16 @@
             onChange?.();
             return;
         }
-        const groups = [...form.querySelectorAll('.closet-hangers-ownership-groups > div')].map(g => ({
-            want: /want/i.test(g.querySelector('h4')?.textContent || ''),
-            rows: [...g.querySelectorAll('li')].map(li => {
+        const groups = [...form.querySelectorAll('.closet-hangers-ownership-groups > div')].map(g => {
+            const want = /want/i.test(g.querySelector('h4')?.textContent || '');
+            return { want, rows: [...g.querySelectorAll('li')].map(li => {
                 const inp = li.querySelector('input[type="number"]');
                 if (!inp) return null;
                 const unlisted = /^quantity\[(true|false)\]$/.test(inp.name);
                 const orig = Math.max(0, parseInt(inp.value, 10) || 0);
-                return { key: inp.name, orig, cur: orig, unlisted, label: unlisted ? 'Not in a list' : (li.querySelector('label')?.textContent.trim() || 'List') };
-            }).filter(Boolean),
-        })).filter(g => g.rows.length).sort((a, b) => wantFirst ? b.want - a.want : a.want - b.want);
+                return { key: inp.name, orig, cur: orig, unlisted, want, label: unlisted ? 'Not in a list' : (li.querySelector('label')?.textContent.trim() || 'List') };
+            }).filter(Boolean) };
+        }).filter(g => g.rows.length).sort((a, b) => wantFirst ? b.want - a.want : a.want - b.want);
         const rows = groups.flatMap(g => g.rows);
         foot.innerHTML = (mine ? `<a class="dti-lp-mine" target="_blank" title="Open Your Items" href="${noteEsc(form.querySelector('h3 a')?.getAttribute('href') || '/users/current-user/closet')}">Your Items \u2197</a>` : '')
             + '<span class="dti-lp-status" aria-live="polite"></span><button type="button" class="dti-lp-save" disabled>Save</button>';
@@ -1288,7 +1312,12 @@
             } catch (_) {}
             saving = false;
             if (!alive()) return;
-            if (ok) changed.forEach(r => { r.orig = r.cur; });
+            if (ok) {
+                changed.forEach(r => { r.orig = r.cur; });
+                const sum = w => rows.filter(r => r.want === w).reduce((n, r) => n + r.cur, 0);
+                mineSet(id, sum(false), sum(true));
+                window.__dtiClosetDirty?.();
+            }
             paint();
             status.textContent = ok ? 'Saved \u2713' : 'Couldn\u2019t save \u2014 try again';
             status.classList.toggle('err', !ok);
@@ -1568,6 +1597,41 @@
         header.appendChild(strip);
     }
 
+    // ── Item page: Dyeworks colors (NC items) and the Neofriends who have / want it, above "Your notes" ──
+    function mountItemExtras() {
+        const header = document.querySelector('header.item-header');
+        const id = location.pathname.match(/^\/items\/(\d+)/)?.[1];
+        if (!header || !id || id === '0' || header.querySelector('.dti-item-extras')) return;
+        const name = (header.querySelector('.item-header-main h2, .item-header-main h1, h2')?.textContent || '').trim()
+            || document.title.replace(/^DTI\s*\|\s*/i, '').split('|')[0].trim();
+        const box = document.createElement('div');
+        box.className = 'dti-item-extras';
+        const note = header.querySelector('.dti-item-note');
+        if (note) note.before(box); else header.appendChild(box);
+        const strip = (cls, ico, label, html) => {
+            const el = document.createElement('div');
+            el.className = 'dti-item-strip ' + cls;
+            el.innerHTML = `<div class="dti-item-note-label">${ico}<span>${label}</span></div><div class="dti-item-chips">${html}</div>`;
+            box.appendChild(el);
+            return el;
+        };
+        const isNc = (header.querySelector('abbr.item-kind')?.textContent || '').includes('NC') || !!header.querySelector('.item-kind[data-type="nc"], [data-item-kind="nc"]');
+        if (isNc && name) dyeLookup(name).then(e => {
+            if (!e?.v?.length || !box.isConnected) return;
+            const base = dyeBase(name);
+            const tiles = (e.o ? [['Original', e.o[0], e.o[1]]] : []).concat(e.v);
+            strip('dti-item-dye', '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8s4.4 4.6 4.4 7.6a4.4 4.4 0 0 1-8.8 0C3.6 6.4 8 1.8 8 1.8z"/></svg>', 'Dyeworks',
+                tiles.map(([c, vid, img]) => `<a class="dti-item-chip${String(vid) === String(id) ? ' on' : ''}" href="/items/${vid}" title="${noteEsc(c === 'Original' ? base : `Dyeworks ${c}: ${base}`)}">${img ? `<img src="${noteEsc(img)}" alt="" loading="lazy">` : ''}<span>${noteEsc(c)}</span></a>`).join(''));
+        });
+        if (NF.list().length) nfIndex().then(map => {
+            const hits = (map.get(+id) || []).slice().sort((a, b) => b.owned - a.owned || NF.label(a.f).localeCompare(NF.label(b.f)));
+            if (!hits.length || !box.isConnected) return;
+            const el = strip('dti-item-nfs', NF_SMILE, 'Neofriends', hits.map(h => `<button type="button" class="dti-item-chip nf" data-f="${noteEsc(h.f.id)}" data-l="${noteEsc(h.lists[0]?.id || '')}" title="Open ${noteEsc(NF.label(h.f))}\u2019s ${noteEsc(h.lists.map(l => l.name).join(', '))}">
+                <b>${noteEsc(NF.label(h.f))}</b><i class="${h.owned ? 'has' : 'wants'}">${h.owned ? (h.qty > 1 ? `has ${h.qty}` : 'has it') : 'wants it'}</i></button>`).join(''));
+            el.addEventListener('click', e => { const b = e.target.closest('[data-f]'), f = b && NF.get(b.dataset.f); if (f) nfOpenItems(f, b.dataset.l); });
+        });
+    }
+
     // ── Trade lists (Offering / Seeking): pencil + note preview next to each owner ──
     function addTraderNote(td, srcRow) {
         const href = [...srcRow.querySelectorAll('a[href*="/user/"]')].map(a => a.getAttribute('href') || '').find(h => /\/user\/\d+/.test(h));
@@ -1628,6 +1692,7 @@
             <aside class="dti-nx-side">
                 <div class="dti-nx-brand"><span class="dti-nx-brand-ico">${NOTE_PENCIL}</span>Notes</div>
                 <button type="button" class="dti-nx-new">＋ New note</button>
+                <button type="button" class="dti-nx-newtrade" title="Start a trade report: who, what you gave and what you got">＋ Trade Report</button>
                 <nav class="dti-nx-filters">
                     ${[['all', 'All notes', NOTE_STACK], ['trade', 'Trades', NOTE_TRADE], ['item', 'Items', NOTE_ITEM], ['user', 'Users', NOTE_USER],
                        ['general', 'General', NOTE_DOC], ['pinned', 'Pinned', NOTE_PIN]].map(([f, label, ico]) =>
@@ -2087,6 +2152,7 @@
         }
 
         $('.dti-nx-new').addEventListener('click', () => { st.newType = ''; select('new'); });
+        $('.dti-nx-newtrade').addEventListener('click', () => { st.newType = ''; newTradeNote(); });   // the most common note: straight in
         app.addEventListener('click', e => {
             const del = e.target.closest('.dti-nx-rowdel');
             if (del) { deleteNote(del.closest('.dti-nx-row').dataset.key); return; }
@@ -2639,6 +2705,7 @@
             return `<div class="dti-tk-card${info.own ? ' own' : ''}${info.want ? ' want' : ''}" data-key="${noteEsc(info.key)}">
                 ${info.own ? `<span class="dti-tk-flag own" title="${noteEsc(from ? 'Imported: ' + from + (info.hand ? ' · added by you ' + info.hand : '') : 'Added by you')}">Own${info.own > 1 ? ' ×' + info.own : ''}</span>` : info.want ? '<span class="dti-tk-flag want">Want</span>' : ''}
                 ${info.isNew ? '<span class="dti-tk-new" title="DTI hasn’t named this style yet">New</span>' : ''}
+                <span class="dti-tk-val${info.isNew ? ' low' : ''}" hidden></span>
                 <div class="dti-tk-pic" title="See it full size">${info.img ? `<img src="${noteEsc(info.img)}" alt="" loading="lazy">` : ''}</div>
                 <div class="dti-tk-name" title="${noteEsc(info.name)}">${noteEsc(info.name)}</div>
                 <div class="dti-tk-meta">${noteEsc(meta)}${info.known || info.essence ? '' : ' <i title="Not on DTI’s style list yet">• not on DTI</i>'}</div>
@@ -2689,7 +2756,14 @@
         function paintStats() {
             const infos = (() => { const mine = DTITokens.read().mine, imported = tokImported(cat); return [...new Set([...Object.keys(mine), ...imported.keys()])].map(k => tokInfo(k, cat, mine, imported)); })();
             const owned = infos.filter(i => i.own), wanted = infos.filter(i => i.want);
-            $('.dti-tk-stats').innerHTML = `<span><b>${owned.reduce((s, i) => s + i.own, 0)}</b> owned</span><span><b>${wanted.length}</b> wanted</span><span><b>${owned.filter(i => i.essence).length}</b> essences</span>`;
+            $('.dti-tk-stats').innerHTML = `<span><b>${owned.reduce((s, i) => s + i.own, 0)}</b> owned</span><span><b>${wanted.length}</b> wanted</span><span><b>${owned.filter(i => i.essence).length}</b> essences</span><span class="dti-tk-worth" hidden></span>`;
+            if (showNcValues && owned.length) ncCapTotal(owned.map(i => ({ name: i.name, qty: i.own }))).then(t => {
+                const el = $('.dti-tk-worth');
+                if (!el || !t.valued) return;
+                el.innerHTML = `<b>${noteEsc(capTotalText(t).replace(/ caps$/, ''))}</b> caps`;
+                el.title = capTotalTitle(t);
+                el.hidden = false;
+            });
         }
         function render() {
             app.querySelectorAll('.dti-tk-seg').forEach(seg => seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (ui[seg.dataset.ui] || ''))));
@@ -2729,9 +2803,22 @@
                         : '<b>Loading the token list…</b>';
             }
         }
+        // Cap values from the NC value lists (Lebron, then Valisar) — filled in as each card appears
+        function fillTokVals() {
+            grid.querySelectorAll('.dti-tk-card:not([data-v])').forEach(c => {
+                c.dataset.v = '1';
+                const info = list.find(x => x.key === c.dataset.key), pill = c.querySelector('.dti-tk-val');
+                if (!info || !pill || !showNcValues) return;
+                lookupNcValue(info.name, (val, src) => {
+                    if (!capNums(val)) return;
+                    pill.textContent = val.replace(/\*$/, '') + ' caps'; pill.title = `${src}: ${val}`; pill.hidden = false;
+                });
+            });
+        }
         function showMore() {
             const next = list.slice(shown, shown + 120);
             grid.insertAdjacentHTML('beforeend', next.map(card).join(''));
+            fillTokVals();
             shown += next.length;
             more.hidden = shown >= list.length;
             more.textContent = `Showing ${shown} of ${list.length}`;
@@ -2978,6 +3065,13 @@
                 font-size: 9.5px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase;
             }
             .dti-tk-flag { right: 8px; }
+            .dti-tk-val {
+                position: absolute; top: 8px; left: 8px; padding: 1px 7px; border-radius: 99px; line-height: 1.6; pointer-events: none;
+                font-size: 9.5px; font-weight: 800; letter-spacing: .1px; color: var(--bdg-ncval-fg, var(--accent-text, var(--accent)));
+                background: color-mix(in srgb, var(--accent) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+            }
+            .dti-tk-val.low { top: 30px; }
+            .dti-tk-val[hidden] { display: none; }
             .dti-tk-flag.own { background: var(--accent); color: var(--accent-fg, #fff); }
             .dti-tk-flag.want { background: color-mix(in srgb, #ec4899 16%, var(--surface)); color: #db2777; }
             .dti-tk-new { left: 8px; background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
@@ -3274,7 +3368,11 @@
         return p;
     }
     // Your own lists, for matches: saved whenever My Items opens, else fetched when older than 6 hours
-    function nfSaveMine(parsed) { NFDB.put('me', { at: Date.now(), lists: parsed.lists, items: parsed.items }).catch(() => {}); }
+    function nfSaveMine(parsed) {
+        const me = { at: Date.now(), lists: parsed.lists, items: parsed.items };
+        _mineFrom(me); _mineP = Promise.resolve(_mineMap);
+        NFDB.put('me', me).catch(() => {});
+    }
     async function nfMine(force) {
         const cur = await NFDB.get('me');
         if (cur && !force && Date.now() - cur.at < 6 * 3600e3) return cur;
@@ -3331,8 +3429,119 @@
     // works there too. A list id opens just that list (My Items reads #closet-list-<id>).
     const nfItemsHref = (f, listId) => `/user/${encodeURIComponent(f.slug || f.id)}/closet${listId ? '#closet-list-' + encodeURIComponent(listId) : ''}`;
     function nfOpenItems(f, listId) {
+        injectNeofriendsCSS();
         _openFramedPageModal(`${NF.label(f)}’s items`, nfItemsHref(f, listId),
             { icon: NF_SMILE, cls: 'dti-pm-closet', css: '#dti-closet-wrap { height: 100vh !important; }', loading: 'Opening their items…' });
+    }
+
+    // Once a day, look through everyone's lists in the background — one at a time, a few seconds apart, skipping
+    // anyone checked in the last 12 hours — so What's new fills itself. One tab at a time (a lock in GM storage).
+    function nfAutoCheck() {
+        if (window.top !== window || window.__dtiNfAuto || !GM_getValue('dti_nf_autocheck', true) || !NF.list().length) return;
+        if (Date.now() - GM_getValue('dti_nf_autocheck_at', 0) < 22 * 3600e3) return;
+        if (Date.now() - GM_getValue('dti_nf_autocheck_lock', 0) < 5 * 60e3) return;   // another tab is on it
+        window.__dtiNfAuto = true;
+        setTimeout(async () => {
+            GM_setValue('dti_nf_autocheck_lock', Date.now());
+            for (const f of NF.list().filter(x => Date.now() - (x.checked || 0) > 12 * 3600e3)) {
+                if (!GM_getValue('dti_nf_autocheck', true)) break;
+                try { await nfRefresh(f.id); } catch (_) {}
+                GM_setValue('dti_nf_autocheck_lock', Date.now());
+                await new Promise(r => setTimeout(r, 3000));
+            }
+            GM_setValue('dti_nf_autocheck_at', Date.now());
+            GM_setValue('dti_nf_autocheck_lock', 0);
+            window.__dtiNfAuto = false;
+        }, 15000);
+    }
+
+    // ── Wishlist trade finder: who's offering the items on your wishlist — each item's Offering list, one at a time
+    // (gently), then the traders who have the most of what you want. Kept for 6 hours. ──
+    const TF_LS = 'dti_tradefinder_v1', TF_MAX = 150;
+    async function _openTradeFinder() {
+        injectNeofriendsCSS();
+        const modal = _buildPageModal('Wishlist trade finder', '', '', { icon: NF_ICO.search, cls: 'dti-pm-tf' });
+        const content = modal.querySelector('#dti-pm-content');
+        content.classList.add('dti-tf');
+        const me = await nfMine();
+        if (!modal.isConnected) return;
+        const want = [];
+        (me?.lists || []).filter(l => !l.owned).forEach(l => l.items.forEach(([id]) => { if (!want.some(w => w.id === id)) want.push({ id, name: me.items[id]?.[0] || `Item ${id}`, img: tokImg(me.items[id]?.[1] || '') }); }));
+        if (!want.length) { content.innerHTML = `<div class="dti-pm-empty">${me ? 'Your wishlist is empty.' : 'Open My Items once (logged in) so your wishlist is known.'}</div>`; return; }
+        const items = want.slice(0, TF_MAX);
+        const myName = (GM_getValue('dti_user_slug', '') || '').replace(/^\d+-/, '').toLowerCase();
+        let cache = null;
+        try { cache = JSON.parse(localStorage.getItem(TF_LS) || 'null'); } catch (_) {}
+        let stop = false;
+        const paintIntro = () => {
+            content.innerHTML = `<div class="dti-tf-intro">
+                    <p>Finds who\u2019s offering the <b>${items.length}</b> item${items.length === 1 ? '' : 's'} on your wishlist${want.length > TF_MAX ? ` (the first ${TF_MAX})` : ''} \u2014 it reads each item\u2019s Offering list, one at a time, so it takes about ${Math.max(1, Math.round(items.length * 0.9 / 60))} minute${items.length * 0.9 > 90 ? 's' : ''}.</p>
+                    <button type="button" class="dti-tf-go">${NF_ICO.search}Find traders</button>
+                    ${cache?.byItem ? `<button type="button" class="dti-tf-last">See the last results (${noteAgo(cache.at)})</button>` : ''}
+                </div>`;
+            content.querySelector('.dti-tf-go').onclick = run;
+            content.querySelector('.dti-tf-last')?.addEventListener('click', () => paintResults(cache));
+        };
+        async function run() {
+            stop = false;
+            content.innerHTML = `<div class="dti-tf-run"><div class="dti-tf-bar"><i style="width:0"></i></div><div class="dti-tf-runtxt">Starting\u2026</div><button type="button" class="dti-tf-stop">Stop</button></div>`;
+            content.querySelector('.dti-tf-stop').onclick = () => { stop = true; };
+            const byItem = {};
+            for (let i = 0; i < items.length && !stop && modal.isConnected; i++) {
+                const it = items[i];
+                content.querySelector('.dti-tf-runtxt').textContent = `Checking ${i + 1} of ${items.length}: ${it.name}`;
+                content.querySelector('.dti-tf-bar i').style.width = Math.round(i / items.length * 100) + '%';
+                try {
+                    const html = await fetch(`/items/${it.id}/trades/offering`, { credentials: 'same-origin' }).then(r => r.ok ? r.text() : '');
+                    byItem[it.id] = [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('table tbody tr')].map(row => {
+                        const cells = row.querySelectorAll('td');
+                        if (cells.length < 3) return null;
+                        const closet = (cells[1].querySelector('a') || cells[2].querySelector('a[href*="/user/"]'))?.getAttribute('href')?.replace(/#.*$/, '') || '';
+                        return { owner: cells[1].textContent.trim(), closet, active: cells[0].textContent.trim(),
+                            lists: [...cells[2].querySelectorAll('a')].map(a => ({ name: a.textContent.trim(), href: a.getAttribute('href') })) };
+                    }).filter(Boolean);
+                } catch (_) {}
+                await new Promise(r => setTimeout(r, 700));
+            }
+            if (!modal.isConnected) return;
+            const res = { at: Date.now(), items, byItem, partial: stop };
+            try { localStorage.setItem(TF_LS, JSON.stringify(res)); } catch (_) {}
+            cache = res;
+            paintResults(res);
+        }
+        function paintResults(res) {
+            const traders = new Map();
+            res.items.forEach(it => (res.byItem[it.id] || []).forEach((row, rank) => {
+                if (!row.owner || row.owner.toLowerCase() === myName) return;
+                const t = traders.get(row.owner) || { owner: row.owner, closet: row.closet, active: row.active, items: [], rank: 0 };
+                if (!t.items.some(x => x.id === it.id)) t.items.push({ ...it, lists: row.lists });
+                t.rank += rank;
+                if (!t.closet) t.closet = row.closet;
+                traders.set(row.owner, t);
+            }));
+            const list = [...traders.values()].sort((a, b) => b.items.length - a.items.length || a.rank / a.items.length - b.rank / b.items.length);
+            const checked = res.items.filter(it => res.byItem[it.id]), nobody = checked.filter(it => !res.byItem[it.id].length);
+            content.innerHTML = `<div class="dti-tf-head">
+                    <span><b>${list.length}</b> trader${list.length === 1 ? '' : 's'} offer items on your wishlist \u00b7 checked ${checked.length} of ${res.items.length}${res.partial ? ' (stopped)' : ''} \u00b7 ${noteAgo(res.at)}</span>
+                    <button type="button" class="dti-tf-again">${NF_ICO.refresh}Check again</button>
+                </div>
+                <div class="dti-tf-list">${list.slice(0, 60).map((t, i) => `<div class="dti-tf-row" data-i="${i}">
+                    <div class="dti-tf-who"><b>${noteEsc(t.owner)}</b><small>has <strong>${t.items.length}</strong> of your wishlist${t.active ? ` \u00b7 active ${noteEsc(t.active)}` : ''}</small></div>
+                    <div class="dti-tf-items">${t.items.slice(0, 10).map(x => `<a href="/items/${x.id}" target="_blank" title="${noteEsc(x.name)}${x.lists?.length ? ' \u2014 in ' + noteEsc(x.lists.map(l => l.name).join(', ')) : ''}">${x.img ? `<img src="${noteEsc(x.img)}" alt="" loading="lazy">` : ''}</a>`).join('')}${t.items.length > 10 ? `<span>+${t.items.length - 10}</span>` : ''}</div>
+                    <div class="dti-tf-acts">${t.closet ? `<button type="button" class="dti-tf-open" title="Open their items in a popup">${POP_ICO.window}Their items</button>` : ''}</div>
+                </div>`).join('') || '<div class="dti-pm-empty">Nobody\u2019s offering anything on your wishlist right now.</div>'}</div>
+                ${nobody.length ? `<details class="dti-tf-nobody"><summary>Nobody\u2019s offering ${nobody.length} of your items</summary><div>${nobody.map(x => noteEsc(x.name)).join(' \u00b7 ')}</div></details>` : ''}`;
+            content.querySelector('.dti-tf-again').onclick = run;
+            content.querySelectorAll('.dti-tf-row').forEach(row => {
+                const t = list[+row.dataset.i];
+                const acts = row.querySelector('.dti-tf-acts');
+                const follow = t.closet && nfFollowBtn(t.closet, t.owner);
+                if (follow) acts.appendChild(follow);
+                acts.querySelector('.dti-tf-open')?.addEventListener('click', () =>
+                    _openFramedPageModal(`${t.owner}\u2019s items`, t.closet, { icon: NF_SMILE, cls: 'dti-pm-closet', css: '#dti-closet-wrap { height: 100vh !important; }', loading: 'Opening their items\u2026' }));
+            });
+        }
+        if (cache?.byItem && Date.now() - cache.at < 6 * 3600e3) paintResults(cache); else paintIntro();
     }
 
     // ── The page (/terms#neofriends[/<id>] — a real DTI page, like Notes) and the popup ──
@@ -3367,7 +3576,9 @@
                 <label class="dti-nf-search">${NF_ICO.search}<input type="search" placeholder="Search Neofriends…" autocomplete="off" spellcheck="false"></label>
                 <div class="dti-nf-chips"></div>
                 <div class="dti-nf-list"></div>
-                <div class="dti-nf-sidefoot"><button type="button" class="dti-nf-checkall" title="Look through everyone's lists for changes">${NF_ICO.refresh}<span>Check everyone for changes</span></button></div>
+                <div class="dti-nf-sidefoot"><button type="button" class="dti-nf-checkall" title="Look through everyone's lists for changes">${NF_ICO.refresh}<span>Check everyone for changes</span></button>
+                    <label class="dti-nf-auto" title="Once a day, in the background, one person at a time"><input type="checkbox"${GM_getValue('dti_nf_autocheck', true) ? ' checked' : ''}><span>Check automatically each day</span></label>
+                    <button type="button" class="dti-nf-finder" title="Who's offering the items on your wishlist">${NF_ICO.search}<span>Find traders for your wishlist</span></button></div>
             </aside>
             <main class="dti-nf-main"></main>`;
         host.appendChild(app);
@@ -3401,6 +3612,8 @@
         $('.dti-nf-chips').addEventListener('click', e => { const b = e.target.closest('button[data-f]'); if (!b) return; ui.filter = b.dataset.f; saveUi(); renderSide(); });
         $('.dti-nf-search input').addEventListener('input', e => { st.q = e.target.value.trim().toLowerCase(); renderSide(); });
         $('.dti-nf-addbtn').addEventListener('click', () => select('add'));
+        $('.dti-nf-auto input').addEventListener('change', e => GM_setValue('dti_nf_autocheck', e.target.checked));
+        $('.dti-nf-finder').addEventListener('click', () => _openTradeFinder());
         $('.dti-nf-checkall').addEventListener('click', async e => {
             const btn = e.currentTarget, label = btn.querySelector('span');
             if (btn.disabled) return;
@@ -3875,6 +4088,53 @@
                 border: none; border-radius: 9px; background: transparent; color: var(--text-muted); font-family: inherit; font-size: 12px; font-weight: 700;
             }
             #dti-nf-app .dti-nf-checkall:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+            #dti-nf-app .dti-nf-auto { display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 4px; cursor: pointer; font-size: 11.5px; color: var(--text-muted); }
+            #dti-nf-app .dti-nf-auto input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+            #dti-nf-app .dti-nf-finder {
+                width: 100%; height: 32px; margin-top: 6px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer;
+                border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-family: inherit; font-size: 12px; font-weight: 700;
+            }
+            #dti-nf-app .dti-nf-finder:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            #dti-nf-app .dti-nf-finder svg { width: 13px; height: 13px; }
+            /* Wishlist trade finder */
+            .dti-tf { padding: 16px 18px 24px; }
+            .dti-tf-intro { max-width: 520px; margin: 40px auto; text-align: center; font-size: 13.5px; line-height: 1.6; color: var(--text-muted); }
+            .dti-tf-intro b { color: var(--text); }
+            .dti-tf-intro button, .dti-tf-again {
+                display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 18px; margin: 6px 4px 0; cursor: pointer; border-radius: 10px;
+                border: 1px solid var(--border); background: var(--surface); color: var(--text); font-family: inherit; font-size: 13px; font-weight: 700;
+            }
+            .dti-tf-intro .dti-tf-go { border: none; background: var(--accent); color: var(--accent-fg, #fff); }
+            .dti-tf-intro svg, .dti-tf-again svg { width: 14px; height: 14px; }
+            .dti-tf-run { max-width: 520px; margin: 50px auto; text-align: center; }
+            .dti-tf-bar { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+            .dti-tf-bar i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+            .dti-tf-runtxt { margin: 10px 0 12px; font-size: 12.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .dti-tf-stop { height: 32px; padding: 0 16px; cursor: pointer; border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-family: inherit; font-size: 12.5px; font-weight: 700; }
+            .dti-tf-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; justify-content: space-between; margin-bottom: 12px; font-size: 12.5px; color: var(--text-muted); }
+            .dti-tf-head b { color: var(--text); font-size: 15px; }
+            .dti-tf-again { height: 32px; margin: 0; font-size: 12px; }
+            .dti-tf-list { display: flex; flex-direction: column; gap: 8px; }
+            .dti-tf-row { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 13px; border: 1px solid var(--border); background: var(--surface); }
+            .dti-tf-who { width: 170px; flex-shrink: 0; display: flex; flex-direction: column; line-height: 1.35; min-width: 0; }
+            .dti-tf-who b { font-size: 13.5px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .dti-tf-who small { font-size: 11px; color: var(--text-muted); }
+            .dti-tf-who strong { color: var(--accent-text, var(--accent)); }
+            .dti-tf-items { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+            .dti-tf-items a { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 9px; background: #fff; box-shadow: 0 0 0 1px var(--border); overflow: hidden; }
+            .dti-tf-items a:hover { box-shadow: 0 0 0 2px var(--accent); }
+            .dti-tf-items img { width: 36px; height: 36px; object-fit: contain; }
+            .dti-tf-items span { font-size: 11px; font-weight: 700; color: var(--text-muted); }
+            .dti-tf-acts { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+            .dti-tf-open {
+                height: 30px; padding: 0 11px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border-radius: 8px;
+                border: 1px solid var(--border); background: var(--surface); color: var(--text); font-family: inherit; font-size: 12px; font-weight: 700;
+            }
+            .dti-tf-open:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-tf-open svg { width: 13px; height: 13px; }
+            .dti-tf-nobody { margin-top: 16px; font-size: 12px; color: var(--text-muted); }
+            .dti-tf-nobody summary { cursor: pointer; font-weight: 700; }
+            .dti-tf-nobody div { margin-top: 6px; line-height: 1.6; }
             .dti-nf-checkall svg, .dti-nf-refresh svg { width: 13px; height: 13px; }
             :is(.dti-nf-checkall, .dti-nf-refresh).busy svg { animation: dti-nf-spin .8s linear infinite; }
             @keyframes dti-nf-spin { to { transform: rotate(360deg); } }
@@ -4148,7 +4408,909 @@
             #dti-nf-popup { border: none; background: var(--accent); color: var(--accent-fg, #fff) !important; }
             #dti-nf-popup:hover { filter: brightness(1.08); }
             .dti-nfs-actions a { border: 1px solid var(--border); background: var(--surface); color: var(--text) !important; }
+            .dti-nfs-finder {
+                width: 100%; height: 32px; margin-top: 6px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;
+                border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-family: inherit; font-size: 12px; font-weight: 700;
+            }
+            .dti-nfs-finder:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-nfs-finder svg { width: 12px; height: 12px; }
             .dti-nfs-actions a:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)) !important; }
+        `);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // NC MALL GUIDE — everything in the NC Mall right now: what's new, what's leaving, what's on sale, what's inside
+    // each capsule and what it's all worth. /terms#mall (a real DTI page, like Notes) and a popup.
+    // ══════════════════════════════════════════════════════════════════════════
+    const MALL_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2 3.6 2.8c.1-.3.4-.5.7-.5h7.4c.3 0 .6.2.7.5l1.1 3.4"/><path d="M2.5 6.2c0 1 .8 1.7 1.8 1.7s1.8-.8 1.8-1.7c0 1 .8 1.7 1.9 1.7s1.8-.8 1.8-1.7c0 1 .8 1.7 1.8 1.7s1.9-.8 1.9-1.7"/><path d="M3.3 7.9v5.3c0 .3.2.5.5.5h8.4c.3 0 .5-.2.5-.5V7.9M6.5 13.7v-3.2h3v3.2"/></svg>';
+    const MG_ICO = {
+        clock: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M8 4.8V8l2.2 1.4"/></svg>',
+        tag: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8.6V3.2c0-.4.3-.7.7-.7h5.4l5 5c.4.4.4 1 0 1.4l-4.6 4.6c-.4.4-1 .4-1.4 0z"/><circle cx="5.6" cy="5.6" r="1"/></svg>',
+        heart: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 13.6S2 10.1 2 6.1A3.2 3.2 0 0 1 8 4.5a3.2 3.2 0 0 1 6 1.6c0 4-6 7.5-6 7.5z"/></svg>',
+        x: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l8 8M11 3l-8 8"/></svg>',
+        left: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 5 8l5 5"/></svg>',
+        right: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 3 5 5-5 5"/></svg>',
+    };
+    const MG_KINDS = [['all', 'All'], ['wearable', 'Wearables'], ['capsule', 'Capsules'], ['trinket', 'Trinkets'], ['collectible', 'Collectibles'], ['event', 'Event'],
+        ['sticker', 'Stickers'], ['styling', 'Styling Studio'], ['cookie', 'Fortune Cookies'], ['home', 'Neohome'], ['other', 'Other']];
+    const MG_SORTS = [['new', 'Newest first'], ['leaving', 'Leaving soonest'], ['price-asc', 'Price: low to high'], ['price-desc', 'Price: high to low'], ['discount', 'Biggest discount'], ['value', 'Highest cap value'], ['name', 'Name A–Z']];
+    const MG_KIND_NAME = { wearable: 'Wearable', capsule: 'Mystery Capsule', collectible: 'NC Collectible', event: 'Event item', sticker: 'Sticker pack', styling: 'Styling Studio', cookie: 'Fortune Cookie', home: 'Neohome', other: 'NC Mall item' };
+    const mgLeft = end => {
+        const ms = end - Date.now();
+        if (ms <= 0) return 'leaving now';
+        const d = Math.floor(ms / 864e5), h = Math.floor(ms % 864e5 / 36e5), m = Math.floor(ms % 36e5 / 6e4);
+        return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${Math.max(1, m)}m`;
+    };
+    const mgUrgency = end => { const ms = end - Date.now(); return ms < 864e5 ? 'day' : ms < 3 * 864e5 ? 'soon' : ms < 7 * 864e5 ? 'week' : ''; };
+    const mgDate = ts => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: new Date(ts).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+    const mgNc = n => n ? `${n.toLocaleString('en-US')} NC` : 'Free';
+    const mgLabel = mi => mi.kind === 'capsule' ? (mi.gbc ? 'GBC' : 'Cap') : mi.kind === 'trinket' ? mi.trinket : mi.kind === 'event' ? 'Event' : mi.kind === 'sticker' ? 'Stickers'
+        : mi.kind === 'collectible' ? (mi.collectible.bonus ? 'Bonus' : `Collectible${mi.collectible.n ? ' #' + mi.collectible.n : ''}`) : '';
+    // Bundles and packs of one thing ("… 5-Bundle", "… 3-Pack") share a tile: its name without the count, and each one's tag
+    const MG_BUNDLE_RE = /\s*\d+[-\s]*(?:x[-\s]*)?(?:bundle|pack)s?$/i;
+    const mgBaseName = name => name.replace(MG_BUNDLE_RE, '').replace(/\s+bundles?$/i, '').trim() || name;
+    const mgBundleTag = name => name.match(MG_BUNDLE_RE)?.[0].trim() || 'Single';
+    const mgBig = (r, mi) => mi.wearable && r.image_id ? `https://cdn.itemdb.com.br/preview/${r.image_id}.png` : '';   // the item worn on a pet, 600×600
+    // Neopets time: the mall's days (new items arrive at 11am NST)
+    const mgDayKey = ts => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    function mgGroupLabel(ts) {
+        const days = Math.round((Date.parse(mgDayKey(Date.now())) - Date.parse(mgDayKey(ts))) / 864e5);
+        if (days <= 0) return 'Today';
+        if (days === 1) return 'Yesterday';
+        if (days < 7) return 'This week';
+        if (days < 14) return 'Last week';
+        if (days < 31) return `${Math.floor(days / 7)} weeks ago`;
+        const d = new Date(ts);
+        return d.getFullYear() === new Date().getFullYear() ? d.toLocaleDateString('en-US', { month: 'long' }) : `Added in ${d.getFullYear()}`;
+    }
+
+    function initMallPage() {
+        if (document.querySelector('#dti-mall-app:not(.in-modal)')) return;   // runPageInit also runs on turbo:load
+        document.getElementById('dti-page-modal')?.remove();
+        [...document.body.children].forEach(c => { if (c.id !== 'main-nav' && !/^dti-/.test(c.id || '')) c.style.setProperty('display', 'none', 'important'); });
+        document.title = 'DTI | NC Mall Guide';
+        injectMallCSS();
+        mountMallApp(document.body, {});
+    }
+    function _openMallModal() {
+        injectMallCSS();
+        const modal = _buildPageModal('NC Mall Guide', '/terms#mall', '', { icon: MALL_ICO, cls: 'dti-pm-mall' });
+        const content = modal.querySelector('#dti-pm-content');
+        content.innerHTML = '';
+        mountMallApp(content, { inModal: true });
+    }
+
+    function mountMallApp(host, { inModal = false } = {}) {
+        _injectPageModalCSS();   // (the detail panel uses the item popups' sections: Dyeworks, Neofriends…)
+        const saved = GM_getValue('dti_mall_ui', {}) || {};
+        const ui = { view: 'all', kind: saved.kind || 'all', sort: saved.sort || 'new', picked: saved.sort || 'new', hideOwned: !!saved.hideOwned, show: 'new', q: '' };
+        const saveUi = () => GM_setValue('dti_mall_ui', { kind: ui.kind, sort: ui.picked, hideOwned: ui.hideOwned });   // (only a sort you picked)
+        const app = document.createElement('div');
+        app.id = 'dti-mall-app';
+        if (inModal) app.classList.add('in-modal');
+        app.innerHTML = `
+            <div class="dti-mg-scroll">
+                <section class="dti-mg-hero">
+                    <div class="dti-mg-head">
+                        <span class="dti-mg-ico">${MALL_ICO}</span>
+                        <div class="dti-mg-titles">
+                            <h1>NC Mall Guide</h1>
+                            <p>Everything in the NC Mall right now — what’s new, what’s leaving, what’s on sale, what’s inside each capsule, and what it’s all worth.</p>
+                        </div>
+                        <div class="dti-mg-headacts">
+                            <span class="dti-mg-updated"></span>
+                            <button type="button" class="dti-mg-refresh" title="Check the NC Mall again">${NF_ICO.refresh}</button>
+                            <a class="dti-mg-shop" href="https://www.neopets.com/ncmall/index.phtml" target="_blank" rel="noopener">Shop the Mall ${NF_ICO.ext}</a>
+                        </div>
+                    </div>
+                    <div class="dti-mg-stats"><div class="dti-mg-loading"><span class="dti-mg-spin"></span>Opening the NC Mall…</div></div>
+                </section>
+                <section class="dti-mg-show" hidden>
+                    <div class="dti-mg-showhead">
+                        <div class="dti-mg-showtabs"></div>
+                        <small class="dti-mg-showsub"></small>
+                        <span class="dti-mg-spacer"></span>
+                        <button type="button" class="dti-mg-arrow" data-dir="-1" title="Back">${MG_ICO.left}</button>
+                        <button type="button" class="dti-mg-arrow" data-dir="1" title="More">${MG_ICO.right}</button>
+                    </div>
+                    <div class="dti-mg-strip"></div>
+                </section>
+                <div class="dti-mg-bar">
+                    <div class="dti-mg-barrow">
+                        <label class="dti-mg-search">${NF_ICO.search}<input type="search" placeholder="Search the NC Mall…" autocomplete="off" spellcheck="false"><kbd>/</kbd></label>
+                        <div class="dti-mg-count"></div>
+                        <button type="button" class="dti-mg-owned" hidden title="Hide what you already own">✓ Hide owned</button>
+                        <div class="dti-mg-sortwrap"><span>Sort</span><select class="dti-mg-sort">${MG_SORTS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
+                    </div>
+                    <div class="dti-mg-kinds"></div>
+                </div>
+                <div class="dti-mg-grid"></div>
+                <div class="dti-mg-more"></div>
+            </div>
+            <div class="dti-mg-shade" hidden></div>
+            <aside class="dti-mg-drawer" hidden aria-label="Item details"></aside>`;
+        host.appendChild(app);
+        const $ = sel => app.querySelector(sel);
+        const grid = $('.dti-mg-grid'), drawer = $('.dti-mg-drawer'), shade = $('.dti-mg-shade'), scroller = inModal ? $('.dti-mg-scroll') : null;
+        // Sort: the themed dropdown (Notes has the same); views can change it too
+        const sortSel = $('.dti-mg-sort');
+        sortSel.value = ui.sort;
+        const sortWrap = makeCustomSelect(sortSel, { className: 'dti-mg-sortsel' });
+        const setSort = v => {
+            ui.sort = v; sortSel.value = v;
+            sortWrap.querySelector('.dti-csel-trigger > span').textContent = sortSel.options[sortSel.selectedIndex]?.text || '';
+            sortWrap.querySelectorAll('.dti-csel-opt').forEach(o => o.classList.toggle('selected', o.dataset.value === v));
+        };
+        // The toolbar sticks under DTI's bar on the page
+        const nav = document.getElementById('main-nav');
+        if (!inModal && nav && /fixed|sticky/.test(getComputedStyle(nav).position)) {
+            $('.dti-mg-bar').style.top = nav.offsetHeight + 10 + 'px';
+            drawer.style.top = shade.style.top = nav.offsetHeight + 'px';   // the detail panel opens under it
+        }
+
+        // ── the mall → one entry per item (bundles of the same thing together, cheapest first) ──
+        let entries = [], byKey = new Map(), valsReady = Promise.resolve();
+        function build(items) {
+            const groups = new Map();
+            (items || []).filter(r => r.name && r.price != null && mallBuyable(r)).forEach(r => {
+                const key = (r.slug || r.name).toLowerCase().replace(/-?\d+[-\s]*x?[-\s]*bundles?$/, '').replace(/-?\d+[-\s]*packs?$/, '').replace(/-bundles?$/, '').replace(/[-\s]\d+[-\s]*b\.?$/, '').replace(/[-\s]+$/, '').trim();
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(r);
+            });
+            entries = [...groups.values()].map((grp, i) => {
+                grp.sort((a, b) => (a.price || 0) - (b.price || 0));
+                return { k: String(i), r: grp[0], name: grp.length > 1 ? mgBaseName(grp[0].name) : grp[0].name, mi: mallInfo(grp[0]), bundles: grp.length > 1 ? grp : null, val: undefined };
+            });
+            byKey = new Map(entries.map(e => [e.k, e]));
+            // cap values for everything (the value lists load once, then this is instant) — for the value sort
+            valsReady = Promise.all(entries.map(e => ncCapRange(e.r.name).then(v => { e.val = v; })));
+        }
+        async function load(force) {
+            const btn = $('.dti-mg-refresh');
+            btn.classList.add('busy'); btn.disabled = true;
+            const items = await mallFeed(force);
+            btn.classList.remove('busy'); btn.disabled = false;
+            if (!app.isConnected) return;
+            if (!items) {
+                if (!entries.length) $('.dti-mg-stats').innerHTML = '<div class="dti-mg-loading">Couldn’t reach the NC Mall — try again in a moment.</div>';
+                else dtiToast('Couldn’t reach the NC Mall — showing what was loaded before', { duration: 2500 });
+                return;
+            }
+            build(items);
+            paintAll();
+            valsReady.then(() => { if (app.isConnected && ui.sort === 'value') paintGrid(); });
+            if (force) dtiToast('NC Mall up to date', { duration: 1500 });
+        }
+        const paintUpdated = () => { const t = mallFeedAt(); $('.dti-mg-updated').textContent = t ? `Updated ${noteAgo(t)}` : ''; };
+        const isNew = e => e.mi.added >= Date.now() - 31 * 864e5;
+        const isLeaving = e => e.mi.ends && e.mi.ends - Date.now() <= 15 * 864e5;
+        const isWished = e => !!mineOf(e.r.item_id)?.want;
+
+        // ── hero: five views as big cards ──
+        function paintStats() {
+            const fresh = entries.filter(isNew);
+            const leaving = entries.filter(isLeaving).sort((a, b) => a.mi.ends - b.mi.ends);
+            const sale = entries.filter(e => e.mi.sale), best = Math.max(0, ...sale.map(e => e.mi.pct));
+            const wish = _mineMap ? entries.filter(isWished) : null;
+            const wishSoon = wish?.filter(e => e.mi.ends).sort((a, b) => a.mi.ends - b.mi.ends)[0];
+            const short = s => s.length > 20 ? s.slice(0, 19).trim() + '\u2026' : s;
+            const cards = [
+                ['all', MALL_ICO, entries.length, 'In the mall', `${entries.filter(e => e.mi.wearable).length} wearables · ${entries.filter(e => e.mi.kind === 'capsule').length} capsules`],
+                ['new', NEW_ITEMS_ICO, fresh.length, 'New this month', fresh.length ? `latest ${mgGroupLabel(Math.max(...fresh.map(e => e.mi.added))).toLowerCase()}` : 'nothing new lately'],
+                ['leaving', MG_ICO.clock, leaving.length, 'Leaving soon', leaving[0] ? `next one in ${mgLeft(leaving[0].mi.ends)}` : 'nothing in the next 2 weeks', leaving[0] ? mgUrgency(leaving[0].mi.ends) : ''],
+                ['sale', MG_ICO.tag, sale.length, 'On sale', sale.length ? `up to −${best}% off` : 'no sales right now'],
+                ['wish', MG_ICO.heart, wish ? wish.length : '–', 'From your wishlist', !wish ? 'open My Items once to see' : wishSoon ? `${short(wishSoon.name)} leaves in ${mgLeft(wishSoon.mi.ends)}` : wish.length ? 'yours to buy right now' : 'none in the mall now'],
+            ];
+            $('.dti-mg-stats').innerHTML = cards.map(([v, ico, n, label, sub, urg]) => `<button type="button" class="dti-mg-stat${ui.view === v ? ' on' : ''}" data-view="${v}"${urg ? ` data-urgency="${urg}"` : ''}>
+                <span class="dti-mg-statico">${ico}</span><b>${typeof n === 'number' ? n.toLocaleString('en-US') : n}</b><span class="dti-mg-statlabel">${label}</span><small>${noteEsc(sub)}</small></button>`).join('');
+        }
+
+        // ── the showcase: the newest wearables (or what's about to leave), big, on a pet ──
+        function paintShowcase() {
+            const show = $('.dti-mg-show');
+            const sets = {
+                new: entries.filter(e => e.mi.wearable).sort((a, b) => b.mi.added - a.mi.added).slice(0, 16),
+                leaving: entries.filter(isLeaving).sort((a, b) => a.mi.ends - b.mi.ends).slice(0, 16),
+            };
+            if (!sets[ui.show].length) ui.show = 'new';
+            const list = sets[ui.show];
+            show.hidden = !list.length;
+            if (!list.length) return;
+            $('.dti-mg-showtabs').innerHTML = [['new', NEW_ITEMS_ICO, 'Just arrived'], ['leaving', MG_ICO.clock, 'Last chance']].filter(([k]) => sets[k].length)
+                .map(([k, ico, l]) => `<button type="button" data-show="${k}" class="${ui.show === k ? 'on' : ''}">${ico}${l}</button>`).join('');
+            $('.dti-mg-showsub').textContent = ui.show === 'new' ? `Newest wearables · ${mgGroupLabel(list[0].mi.added)}` : 'Leaving the NC Mall soonest';
+            const strip = $('.dti-mg-strip');
+            strip.scrollLeft = 0;
+            strip.innerHTML = list.map(e => {
+                const big = mgBig(e.r, e.mi), label = mgLabel(e.mi);
+                return `<button type="button" class="dti-mg-fcard" data-k="${e.k}" title="${noteEsc(e.name)}"${e.mi.ends && ui.show === 'leaving' ? ` data-urgency="${mgUrgency(e.mi.ends)}"` : ''}>
+                    <span class="dti-mg-fpic"><img src="${noteEsc(big || e.r.image)}" alt="" loading="lazy"${big ? ` data-fallback="${noteEsc(e.r.image)}"` : ' class="small"'}></span>
+                    ${label ? `<span class="dti-mg-badge k-${e.mi.kind}">${noteEsc(label)}</span>` : ''}
+                    ${ui.show === 'leaving' ? `<span class="dti-mg-fcd" data-end="${e.mi.ends}">${MG_ICO.clock}<em>${mgLeft(e.mi.ends)}</em></span>` : ''}
+                    <span class="dti-mg-fname">${noteEsc(e.name)}</span>
+                    <span class="dti-mg-fprice">${e.mi.sale ? `<s>${e.r.price}</s> ` : ''}${e.bundles ? 'from ' : ''}${mgNc(e.mi.price)}</span></button>`;
+            }).join('');
+            strip.querySelectorAll('img[data-fallback]').forEach(img => img.addEventListener('error', () => { img.src = img.dataset.fallback; img.removeAttribute('data-fallback'); img.classList.add('small'); }, { once: true }));
+            paintArrows();
+        }
+        function paintArrows() {
+            const s = $('.dti-mg-strip');
+            app.querySelectorAll('.dti-mg-arrow').forEach(b => { b.disabled = +b.dataset.dir < 0 ? s.scrollLeft < 4 : s.scrollLeft + s.clientWidth >= s.scrollWidth - 4; });
+        }
+
+        // ── toolbar: the types (with counts) ──
+        function paintKinds() {
+            const counts = { all: entries.length };
+            entries.forEach(e => { counts[e.mi.kind] = (counts[e.mi.kind] || 0) + 1; });
+            if (!counts[ui.kind]) ui.kind = 'all';
+            $('.dti-mg-kinds').innerHTML = MG_KINDS.filter(([k]) => counts[k]).map(([k, l]) => `<button type="button" class="k-${k}${ui.kind === k ? ' on' : ''}" data-kind="${k}">${l}<i>${counts[k].toLocaleString('en-US')}</i></button>`).join('');
+            $('.dti-mg-owned').hidden = !_mineMap;
+            $('.dti-mg-owned').classList.toggle('on', ui.hideOwned);
+        }
+
+        // ── the grid ──
+        let list = [], shown = 0, groupCount = null, lastGroup = '';
+        function filtered() {
+            const q = ui.q;
+            let out = entries.filter(e => (ui.kind === 'all' || e.mi.kind === ui.kind) && (!q || e.name.toLowerCase().includes(q)));
+            if (ui.view === 'new') out = out.filter(isNew);
+            else if (ui.view === 'leaving') out = out.filter(isLeaving);
+            else if (ui.view === 'sale') out = out.filter(e => e.mi.sale);
+            else if (ui.view === 'wish') out = out.filter(isWished);
+            if (ui.hideOwned && _mineMap) out = out.filter(e => !mineOf(e.r.item_id)?.own);
+            const cmp = {
+                'new': (a, b) => b.mi.added - a.mi.added,
+                'leaving': (a, b) => (a.mi.ends || Infinity) - (b.mi.ends || Infinity),
+                'price-asc': (a, b) => a.mi.price - b.mi.price,
+                'price-desc': (a, b) => b.mi.price - a.mi.price,
+                'discount': (a, b) => b.mi.pct - a.mi.pct || a.mi.price - b.mi.price,
+                'value': (a, b) => (b.val ? b.val[1] : -1) - (a.val ? a.val[1] : -1),
+                'name': (a, b) => a.name.localeCompare(b.name),
+            }[ui.sort];
+            return out.sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name));
+        }
+        const capShort = v => `${_capN(v[0])}${v[1] !== v[0] ? '–' + _capN(v[1]) : ''} cap${v[1] === 1 ? '' : 's'}`;
+        function tileHtml(e) {
+            const r = e.r, mi = e.mi, label = mgLabel(mi);
+            const soon = mi.ends && mi.ends - Date.now() <= 31 * 864e5;
+            return `<a class="dti-mg-tile" href="${mi.wearable ? '/items/' + r.item_id : noteEsc(itemdbHref(r.name))}"${mi.wearable ? '' : ' target="_blank" rel="noopener" data-nm-wear="0"'} data-note-id="${r.item_id}" data-k="${e.k}"${soon ? ` data-urgency="${mgUrgency(mi.ends)}"` : ''} title="${noteEsc(e.name)}">
+                <span class="dti-mg-pic"><img src="${noteEsc(r.image)}" alt="${noteEsc(e.name)}" loading="lazy"></span>
+                ${label ? `<span class="dti-mg-badge k-${mi.kind}">${noteEsc(label)}</span>` : mi.added >= Date.now() - 7 * 864e5 ? '<span class="dti-mg-badge k-new">New</span>' : ''}
+                <span class="dti-mg-name">${noteEsc(e.name)}</span>
+                <span class="dti-mg-price">${mi.sale ? `<s>${r.price}</s>` : ''}<b>${e.bundles ? '<small>from</small> ' : ''}${mgNc(mi.price)}</b>${mi.sale ? `<i>−${mi.pct}%</i>` : ''}</span>
+                <span class="dti-mg-val"${e.val ? '' : ' hidden'}>${e.val ? '≈ ' + capShort(e.val) : ''}</span>
+                ${soon ? `<span class="dti-mg-cd" data-end="${mi.ends}">${MG_ICO.clock}<em>${mgLeft(mi.ends)}</em></span>` : ''}
+            </a>`;
+        }
+        function showMore() {
+            const next = list.slice(shown, shown + 96);
+            const grouped = ui.sort === 'new' && ui.view !== 'leaving';
+            grid.insertAdjacentHTML('beforeend', next.map(e => {
+                if (!grouped) return tileHtml(e);
+                const g = mgGroupLabel(e.mi.added);
+                const head = g !== lastGroup ? `<div class="dti-mg-day"><b>${noteEsc(g)}</b><span>${groupCount.get(g)} item${groupCount.get(g) === 1 ? '' : 's'}</span></div>` : '';
+                lastGroup = g;
+                return head + tileHtml(e);
+            }).join(''));
+            shown += next.length;
+            // late arrivals: values, and Dyeworks for this month's wearables that have no other label
+            next.forEach(e => {
+                const t = grid.querySelector(`.dti-mg-tile[data-k="${e.k}"]`);
+                if (!t) return;
+                if (e.val === undefined) ncCapRange(e.r.name).then(v => { e.val = v; const p = t.querySelector('.dti-mg-val'); if (v && p) { p.textContent = '≈ ' + capShort(v); p.hidden = false; } });
+                if (e.mi.kind === 'wearable' && isNew(e)) {
+                    const mark = d => {
+                        if (!d?.v?.length || !t.isConnected || t.querySelector('.k-dyeworks')) return;
+                        t.querySelector('.dti-mg-badge.k-new')?.remove();
+                        t.querySelector('.dti-mg-pic').insertAdjacentHTML('afterend', '<span class="dti-mg-badge k-dyeworks">Dyeworks</span>');
+                    };
+                    const hit = dyeCached(e.r.name);
+                    if (hit) mark(hit); else dyeLookup(e.r.name).then(mark);
+                }
+            });
+            $('.dti-mg-more').classList.toggle('done', shown >= list.length);
+        }
+        function paintGrid() {
+            list = filtered(); shown = 0; lastGroup = '';
+            groupCount = new Map();
+            if (ui.sort === 'new' && ui.view !== 'leaving') list.forEach(e => { const g = mgGroupLabel(e.mi.added); groupCount.set(g, (groupCount.get(g) || 0) + 1); });
+            grid.innerHTML = '';
+            const viewName = { all: '', new: 'new this month', leaving: 'leaving within 2 weeks', sale: 'on sale', wish: 'from your wishlist' }[ui.view];
+            const kindName = ui.kind === 'all' ? '' : MG_KINDS.find(([k]) => k === ui.kind)[1];
+            const narrowed = ui.view !== 'all' || ui.kind !== 'all' || ui.q;
+            $('.dti-mg-count').innerHTML = `<span><b>${list.length.toLocaleString('en-US')}</b> ${list.length === 1 ? 'item' : 'items'}${kindName ? ` · ${noteEsc(kindName)}` : ''}${viewName ? ` · ${viewName}` : ''}${ui.q ? ` · “${noteEsc(ui.q)}”` : ''}</span>${narrowed ? '<button type="button" class="dti-mg-clear" title="Show everything">' + MG_ICO.x + 'Clear</button>' : ''}`;
+            if (!list.length) {
+                grid.innerHTML = `<div class="dti-mg-empty"><span>${MALL_ICO}</span><b>Nothing here</b>${ui.view === 'wish' && !_mineMap ? 'Open My Items once (logged in) so your wishlist is known.' : ui.view === 'sale' ? 'There’s no sale in the NC Mall right now.' : 'Try another type, or clear the filters.'}</div>`;
+                $('.dti-mg-more').classList.add('done');
+                return;
+            }
+            showMore();
+        }
+        function paintAll() { paintUpdated(); paintStats(); paintShowcase(); paintKinds(); paintGrid(); }
+        new IntersectionObserver(es => { if (es.some(x => x.isIntersecting) && shown < list.length) showMore(); }, { root: scroller, rootMargin: '600px' }).observe($('.dti-mg-more'));
+        const toTop = () => {
+            const bar = $('.dti-mg-bar');
+            if (inModal) { if (scroller.scrollTop > bar.offsetTop) scroller.scrollTo({ top: bar.offsetTop - 8, behavior: 'smooth' }); }
+            else if (bar.getBoundingClientRect().top < parseFloat(bar.style.top || 0) + 2) bar.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        };
+
+        // ── wiring ──
+        $('.dti-mg-stats').addEventListener('click', e => {
+            const b = e.target.closest('.dti-mg-stat');
+            if (!b) return;
+            ui.view = ui.view === b.dataset.view || b.dataset.view === 'all' ? 'all' : b.dataset.view;
+            if (ui.view === 'leaving') setSort('leaving');
+            else if (ui.view === 'sale') setSort(ui.picked === 'new' ? 'discount' : ui.picked);
+            else setSort(ui.picked);
+            paintStats(); paintGrid();
+            if (b.dataset.view !== 'all') (inModal ? scroller.scrollTo({ top: $('.dti-mg-bar').offsetTop - 8, behavior: 'smooth' }) : $('.dti-mg-bar').scrollIntoView({ behavior: 'smooth', block: 'start' }));
+        });
+        $('.dti-mg-showtabs').addEventListener('click', e => { const b = e.target.closest('button[data-show]'); if (b && ui.show !== b.dataset.show) { ui.show = b.dataset.show; paintShowcase(); } });
+        app.querySelectorAll('.dti-mg-arrow').forEach(b => b.addEventListener('click', () => { const s = $('.dti-mg-strip'); s.scrollBy({ left: +b.dataset.dir * (s.clientWidth - 120), behavior: 'smooth' }); }));
+        $('.dti-mg-strip').addEventListener('scroll', () => paintArrows(), { passive: true });
+        $('.dti-mg-kinds').addEventListener('click', e => { const b = e.target.closest('button[data-kind]'); if (!b) return; ui.kind = b.dataset.kind; saveUi(); paintKinds(); paintGrid(); toTop(); });
+        sortSel.addEventListener('change', () => { ui.sort = ui.picked = sortSel.value; saveUi(); paintGrid(); toTop(); });
+        $('.dti-mg-owned').addEventListener('click', () => { ui.hideOwned = !ui.hideOwned; saveUi(); paintKinds(); paintGrid(); });
+        let qT = 0;
+        $('.dti-mg-search input').addEventListener('input', e => { clearTimeout(qT); qT = setTimeout(() => { ui.q = e.target.value.trim().toLowerCase(); paintGrid(); }, 140); });
+        $('.dti-mg-count').addEventListener('click', e => {
+            if (!e.target.closest('.dti-mg-clear')) return;
+            ui.view = 'all'; ui.kind = 'all'; ui.q = ''; $('.dti-mg-search input').value = '';
+            setSort(ui.picked);
+            saveUi(); paintStats(); paintKinds(); paintGrid();
+        });
+        $('.dti-mg-refresh').addEventListener('click', () => load(true));
+        // a tile or showcase card opens the detail panel (Ctrl / ⌘ / middle click still opens the item's page)
+        app.addEventListener('click', e => {
+            const t = e.target.closest('a.dti-mg-tile, .dti-mg-fcard');
+            if (!t || e.target.closest('.dti-note-btn, .dti-list-btn') || e.ctrlKey || e.metaKey || e.shiftKey) return;
+            e.preventDefault();
+            const ent = byKey.get(t.dataset.k);
+            if (ent) openDrawer(ent);
+        });
+        // keys: / searches · Esc closes the panel · ← → step through the items
+        const covered = () => document.querySelector('#dti-trades-modal, .dti-lp, #dti-item-info-popup, .dti-note-pop') || app.closest('[data-parked]') || (!inModal && document.getElementById('dti-page-modal'));
+        const onKey = e => {
+            if (!app.isConnected) return document.removeEventListener('keydown', onKey, true);
+            if (covered()) return;
+            const typing = /^(input|textarea|select)$/i.test(document.activeElement?.tagName || '') || document.activeElement?.isContentEditable;
+            if (openKey) {
+                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDrawer(); }
+                else if (!typing && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); step(e.key === 'ArrowLeft' ? -1 : 1); }
+                return;
+            }
+            if (e.key === '/' && !typing) { e.preventDefault(); $('.dti-mg-search input').focus(); }
+        };
+        document.addEventListener('keydown', onKey, true);
+        // countdowns and "Updated …" tick
+        const tick = setInterval(() => {
+            if (!app.isConnected) return clearInterval(tick);
+            app.querySelectorAll('[data-end]').forEach(el => {
+                const end = +el.dataset.end, em = el.querySelector('em');
+                if (em) em.textContent = mgLeft(end);
+                const t = el.closest('.dti-mg-tile, .dti-mg-fcard, .dti-mg-dleave');
+                if (t) t.dataset.urgency = mgUrgency(end);
+            });
+            paintUpdated();
+        }, 20000);
+        // ✓ / ♥ — what you own and want — arrives on its own: then the wishlist card and "Hide owned" can show
+        mineLoad().then(() => { if (app.isConnected && entries.length) { paintStats(); paintKinds(); } });
+
+        // ── the detail panel ──
+        let openKey = '';
+        function closeDrawer() {
+            if (!openKey) return;
+            drawer.classList.remove('open'); shade.classList.remove('open');
+            drawer.removeAttribute('role');
+            app.querySelector('.dti-mg-tile.sel')?.classList.remove('sel');
+            openKey = '';
+            setTimeout(() => { if (!openKey) { drawer.hidden = true; shade.hidden = true; drawer.innerHTML = ''; } }, 240);
+        }
+        shade.addEventListener('click', closeDrawer);
+        function step(dir) {
+            const i = list.findIndex(x => x.k === openKey);
+            const next = i < 0 ? null : list[i + dir];
+            if (!next) return;
+            while (shown <= i + dir) showMore();
+            openDrawer(next);
+            grid.querySelector(`.dti-mg-tile[data-k="${next.k}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+        function openDrawer(e) {
+            const r = e.r, mi = e.mi, big = mgBig(r, mi), label = mgLabel(mi);
+            const idx = list.findIndex(x => x.k === e.k);
+            openKey = e.k;
+            app.querySelector('.dti-mg-tile.sel')?.classList.remove('sel');
+            grid.querySelector(`.dti-mg-tile[data-k="${e.k}"]`)?.classList.add('sel');
+            drawer.hidden = false; shade.hidden = false;
+            drawer.setAttribute('role', 'dialog');   // (the Try-On Haul button steps aside while it's open, as for popups)
+            requestAnimationFrame(() => { drawer.classList.add('open'); shade.classList.add('open'); });
+            const kindName = mi.kind === 'trinket' ? mi.trinket + ' Trinket' : mi.gbc ? 'Gift Box Mystery Capsule' : MG_KIND_NAME[mi.kind];
+            const leaves = mi.ends
+                ? `<span class="dti-mg-dleave" data-end="${mi.ends}" data-urgency="${mgUrgency(mi.ends)}">${MG_ICO.clock}Leaves ${mgDate(mi.ends)} · <em>${mgLeft(mi.ends)}</em> left</span>`
+                : '<span class="dti-mg-dleave none">No end date announced</span>';
+            drawer.innerHTML = `
+                <div class="dti-mg-dhead">
+                    <span class="dti-mg-dkind k-${mi.kind}">${noteEsc(kindName)}</span>
+                    <span class="dti-mg-spacer"></span>
+                    ${idx >= 0 ? `<span class="dti-mg-dpos">${idx + 1} of ${list.length.toLocaleString('en-US')}</span>
+                    <button type="button" class="dti-mg-dnav" data-dir="-1" title="Previous (←)"${idx === 0 ? ' disabled' : ''}>${MG_ICO.left}</button>
+                    <button type="button" class="dti-mg-dnav" data-dir="1" title="Next (→)"${idx === list.length - 1 ? ' disabled' : ''}>${MG_ICO.right}</button>` : ''}
+                    <button type="button" class="dti-mg-dx" title="Close (Esc)">${MG_ICO.x}</button>
+                </div>
+                <div class="dti-mg-dbody">
+                    <div class="dti-mg-dpic${big ? '' : ' flat'}"><img src="${noteEsc(big || r.image)}" alt=""${big ? ` data-fallback="${noteEsc(r.image)}"` : ' class="small"'}></div>
+                    <h2>${noteEsc(e.name)}</h2>
+                    <div class="dti-mg-dlabels">${label ? `<span class="dti-mg-badge k-${mi.kind}">${noteEsc(label)}</span>` : ''}${mi.sale ? `<span class="dti-mg-badge k-sale">−${mi.pct}%</span>` : ''}${mi.added >= Date.now() - 7 * 864e5 ? '<span class="dti-mg-badge k-new">New</span>' : ''}<span class="dti-mg-dlabelslot"></span></div>
+                    <div class="dti-mg-dprice">
+                        <div class="dti-mg-dnum">${mi.sale ? `<s>${mgNc(r.price)}</s>` : ''}<b>${mgNc(mi.price)}</b>${mi.sale && r.discountEnd ? `<small>sale ends ${mgDate(Date.parse(r.discountEnd))}</small>` : ''}</div>
+                        ${e.bundles ? `<div class="dti-mg-dbund">${e.bundles.map(b => `<span>${noteEsc(mgBundleTag(b.name))}<b>${mgNc(b.price)}</b></span>`).join('')}</div>` : ''}
+                        <div class="dti-mg-ddates"><span>${NEW_ITEMS_ICO}Added ${mgDate(mi.added)}</span>${leaves}</div>
+                    </div>
+                    <div class="dti-mg-dval" hidden></div>
+                    ${r.description ? `<p class="dti-mg-ddesc">${noteEsc(r.description)}</p>` : ''}
+                    ${mi.collectible ? `<div class="dti-ip-collect">${noteEsc(collectibleText(mi.collectible))}</div>` : ''}
+                    <div class="dti-mg-dpool"></div>
+                    <div class="dti-ip-dye-host"></div>
+                    <div class="dti-ip-nf-host"></div>
+                    <div class="dti-mg-dtrades" hidden></div>
+                </div>
+                <div class="dti-mg-dacts">
+                    ${mi.wearable ? `<button type="button" class="dti-mg-dbtn primary" data-a="tryon">✦ Try it on</button>${listBtnHtml({ id: String(r.item_id), name: r.name, img: r.image }, 'inline dti-mg-dlist')}<a class="dti-mg-dbtn" href="/items/${r.item_id}">View on DTI</a>` : ''}
+                    <a class="dti-mg-dbtn" href="${noteEsc(itemdbHref(r.name))}" target="_blank" rel="noopener">itemdb ${NF_ICO.ext}</a>
+                    <a class="dti-mg-dbtn" href="https://www.neopets.com/ncmall/index.phtml" target="_blank" rel="noopener">NC Mall ${NF_ICO.ext}</a>
+                </div>`;
+            drawer.querySelector('.dti-mg-dx').addEventListener('click', closeDrawer);
+            drawer.querySelectorAll('.dti-mg-dnav').forEach(b => b.addEventListener('click', () => step(+b.dataset.dir)));
+            drawer.querySelector('img[data-fallback]')?.addEventListener('error', ev => { const img = ev.target; img.src = img.dataset.fallback; img.classList.add('small'); img.parentElement.classList.add('flat'); }, { once: true });
+            drawer.querySelector('[data-a="tryon"]')?.addEventListener('click', ev => {
+                document.dispatchEvent(new CustomEvent('dti:add-to-haul', { detail: { id: String(r.item_id), name: r.name, img: r.image } }));
+                ev.currentTarget.textContent = '✓ In your Try-On Haul';
+                ev.currentTarget.classList.add('done');
+            });
+            const key = e.k, alive = () => openKey === key && drawer.isConnected;
+            // what it's worth
+            lookupNcValue(r.name, (val, src) => {
+                const v = capNums(val), el = drawer.querySelector('.dti-mg-dval');
+                if (!alive() || !el || !val) return;
+                el.hidden = false;
+                el.innerHTML = v ? `<span class="dti-mg-dvlabel">Trade value</span><b>≈ ${noteEsc(capShort(v))}</b><small>${noteEsc(src)}</small>`
+                    : `<span class="dti-mg-dvlabel">Value</span><em>${noteEsc(val)}</em><small>${noteEsc(src)}</small>`;
+            });
+            // what's inside (capsules) / what it comes with (trinkets)
+            if (mi.openable || mi.trinket) paintPool(drawer.querySelector('.dti-mg-dpool'), r, mi, alive);
+            if (mi.wearable) {
+                dyeFillSection(drawer.querySelector('.dti-ip-dye-host'), String(r.item_id), r.name);
+                dyeLookup(r.name).then(d => { const s = drawer.querySelector('.dti-mg-dlabelslot'); if (d?.v?.length && alive() && s && !label) s.outerHTML = '<span class="dti-mg-badge k-dyeworks">Dyeworks</span>'; });
+                nfFillSection(drawer.querySelector('.dti-ip-nf-host'), String(r.item_id));
+                fetch(`/items/${r.item_id}.json`, { credentials: 'include' }).then(x => x.ok ? x.json() : null).then(d => {
+                    if (!d || !alive()) return;
+                    const tEl = drawer.querySelector('.dti-mg-dtrades');
+                    if (!tEl) return;
+                    tEl.hidden = false;
+                    tEl.innerHTML = `<div class="dti-ip-section">Trades on DTI</div><div class="dti-mg-dtbtns">
+                        <button type="button" data-t="offering"><b>${d.num_trades_offering ?? 0}</b>offering it</button><button type="button" data-t="seeking"><b>${d.num_trades_seeking ?? 0}</b>looking for it</button></div>`;
+                    tEl.addEventListener('click', ev => { const b = ev.target.closest('button[data-t]'); if (b) _openTradesModal(String(r.item_id), r.name, b.dataset.t, r.image, ''); });
+                }).catch(() => {});
+            }
+        }
+        async function paintPool(host, r, mi, alive) {
+            const title = mi.trinket ? 'Comes with' : mi.kind === 'capsule' ? 'Inside this capsule' : 'What you can get';
+            host.innerHTML = `<div class="dti-ip-section">${title}</div><div class="dti-mg-loading small"><span class="dti-mg-spin"></span>Looking inside…</div>`;
+            let pool = null;
+            try { pool = r.iid ? await fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + r.iid).then(x => x.ok ? x.json() : null) : null; } catch (_) {}
+            const its = pool?.items || [];
+            if (!alive()) return;
+            if (!its.length) { host.innerHTML = mi.kind === 'capsule' ? `<div class="dti-ip-section">${title}</div><div class="dti-mg-loading small">What’s inside isn’t known yet.</div>` : ''; return; }
+            const vals = await Promise.all(its.map(x => ncCapRange(x.name)));
+            if (!alive()) return;
+            const rows = its.map((x, i) => ({ ...x, v: vals[i], always: x.rate != null && x.rate >= 100 }));
+            const random = rows.filter(x => !x.always);
+            const rated = random.filter(x => x.rate != null && x.v);
+            const wsum = rated.reduce((s, x) => s + x.rate, 0);
+            const avg = wsum ? rated.reduce((s, x) => s + x.rate * (x.v[0] + x.v[1]) / 2, 0) / wsum : 0;
+            const tot = rows.filter(x => x.v).reduce((t, x) => [t[0] + x.v[0], t[1] + x.v[1]], [0, 0]);
+            const le = rows.filter(x => x.isLE).length;
+            const maxRate = Math.max(1, ...random.map(x => x.rate || 0));
+            const facts = mi.trinket
+                ? [`<b>${rows.length}</b> item${rows.length === 1 ? '' : 's'}`, tot[1] ? `together ≈ <b>${capShort(tot)}</b>` : '']
+                : [`<b>${random.length}</b> possible prize${random.length === 1 ? '' : 's'}`, le ? `<b class="le">${le} LE</b>` : '', avg ? `average prize ≈ <b>${_capN(avg)} caps</b>` : ''];
+            rows.sort((a, b) => b.always - a.always || b.isLE - a.isLE || (a.rate ?? 999) - (b.rate ?? 999) || a.name.localeCompare(b.name));
+            host.innerHTML = `<div class="dti-ip-section">${title}</div>
+                <div class="dti-mg-psum">${facts.filter(Boolean).join('<span>·</span>')}</div>
+                <div class="dti-mg-pool">${rows.map(x => `<a class="dti-mg-prow${x.isLE ? ' le' : ''}" href="/items?q=${encodeURIComponent(x.name)}" target="_blank" rel="noopener" title="Find ${noteEsc(x.name)} on DTI">
+                    <img src="${noteEsc(x.image || '')}" alt="" loading="lazy">
+                    <span class="dti-mg-pmain"><span class="dti-mg-pname">${noteEsc(x.name)}${x.always ? '<i class="bonus">Always</i>' : x.isLE ? '<i class="le">LE</i>' : ''}</span>
+                        ${x.rate != null && !x.always ? `<span class="dti-mg-pbar"><i style="width:${Math.max(3, x.rate / maxRate * 100).toFixed(1)}%"></i></span>` : ''}</span>
+                    ${x.rate != null && !x.always ? `<span class="dti-mg-prate">${x.rate < 1 ? x.rate.toFixed(1) : Math.round(x.rate)}%</span>` : '<span class="dti-mg-prate"></span>'}
+                    <span class="dti-mg-pval">${x.v ? noteEsc(capShort(x.v)) : '–'}</span></a>`).join('')}</div>
+                ${random.some(x => x.rate != null) ? '<div class="dti-mg-pnote">Odds from itemdb, values from the NC value lists — a guide, not a promise.</div>' : ''}`;
+        }
+
+        load(false);
+        return app;
+    }
+
+    function injectMallCSS() {
+        if (window.__dtiMallCSS) return;
+        window.__dtiMallCSS = true;
+        GM_addStyle(`
+            /* ── NC Mall Guide ───────────────────────────────────────────── */
+            #dti-mall-app {
+                position: relative; box-sizing: border-box; max-width: 1280px; margin: 0 auto; padding: 20px 24px 64px;
+                font-family: 'Poppins', system-ui, sans-serif; color: var(--text); text-align: left;
+            }
+            #dti-mall-app * { box-sizing: border-box; }
+            #dti-mall-app button { font-family: inherit; }
+            #dti-mall-app [hidden] { display: none !important; }
+            /* In the popup: the guide scrolls inside, the detail panel slides over it */
+            #dti-page-modal.dti-pm-mall .dti-pm-box { max-width: 1240px !important; height: 90vh !important; max-height: 90vh !important; }
+            #dti-page-modal.dti-pm-mall .dti-pm-content { padding: 0 !important; overflow: hidden !important; display: flex; }
+            #dti-mall-app.in-modal { width: 100%; height: 100%; max-width: none; padding: 0; overflow: hidden; }
+            #dti-mall-app.in-modal .dti-mg-scroll { height: 100%; overflow-y: auto; padding: 14px 16px 28px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+            /* Hero */
+            .dti-mg-hero {
+                position: relative; overflow: hidden; padding: 22px 24px 20px; border-radius: 22px; border: 1px solid var(--border);
+                background:
+                    radial-gradient(110% 150% at 0% 0%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 58%),
+                    radial-gradient(70% 120% at 100% 0%, color-mix(in srgb, #f59e0b 13%, transparent), transparent 62%),
+                    radial-gradient(60% 90% at 72% 125%, color-mix(in srgb, #ec4899 11%, transparent), transparent 70%),
+                    var(--surface);
+                box-shadow: var(--shadow-sm);
+            }
+            .dti-mg-hero::before {
+                content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .6;
+                background-image: radial-gradient(color-mix(in srgb, var(--accent) 24%, transparent) 1px, transparent 1.5px); background-size: 18px 18px;
+                -webkit-mask-image: linear-gradient(100deg, transparent 38%, #000 80%); mask-image: linear-gradient(100deg, transparent 38%, #000 80%);
+            }
+            .dti-mg-hero > * { position: relative; }
+            .dti-mg-head { display: flex; align-items: center; gap: 16px; }
+            .dti-mg-ico {
+                width: 56px; height: 56px; flex: none; border-radius: 17px; display: grid; place-items: center; color: #fff;
+                background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 50%, #f59e0b));
+                box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 34%, transparent), inset 0 1px 0 rgba(255,255,255,.25);
+            }
+            .dti-mg-ico svg { width: 29px; height: 29px; }
+            .dti-mg-titles { flex: 1; min-width: 0; }
+            #dti-mall-app .dti-mg-titles h1 {
+                margin: 0; padding: 0; border: 0; background: none; text-shadow: none; text-align: left;
+                font-family: inherit; font-size: 27px; font-weight: 800; letter-spacing: -.6px; line-height: 1.15; color: var(--text);
+            }
+            .dti-mg-titles p { margin: 5px 0 0; max-width: 640px; font-size: 13px; line-height: 1.5; color: var(--text-muted); }
+            .dti-mg-headacts { display: flex; align-items: center; gap: 8px; flex: none; align-self: flex-start; }
+            .dti-mg-updated { font-size: 11.5px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+            #dti-mall-app .dti-mg-refresh {
+                width: 34px; height: 34px; padding: 0; display: grid; place-items: center; cursor: pointer; border-radius: 10px;
+                border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); transition: color .12s, border-color .12s;
+            }
+            .dti-mg-refresh svg { width: 15px; height: 15px; }
+            #dti-mall-app .dti-mg-refresh:hover { color: var(--accent-text, var(--accent)); border-color: var(--accent); }
+            .dti-mg-refresh.busy svg { animation: dti-spin .8s linear infinite; }
+            #dti-mall-app a.dti-mg-shop {
+                height: 34px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; border-radius: 10px; white-space: nowrap;
+                background: var(--accent); color: var(--accent-fg, #fff) !important; font-size: 12.5px; font-weight: 700; text-decoration: none !important;
+                box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent); transition: filter .12s, transform .12s;
+            }
+            #dti-mall-app a.dti-mg-shop:hover { filter: brightness(1.08); transform: translateY(-1px); }
+            .dti-mg-shop svg { width: 11px; height: 11px; }
+
+            /* Hero: the five views */
+            .dti-mg-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+            #dti-mall-app .dti-mg-stat {
+                --c: var(--accent); display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "ico label" "num num" "sub sub";
+                align-items: center; column-gap: 9px; padding: 12px 14px; text-align: left; cursor: pointer; border-radius: 15px; min-width: 0;
+                border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 80%, transparent); color: var(--text);
+                -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: none;
+                transition: transform .14s, border-color .14s, box-shadow .14s, background .14s;
+            }
+            #dti-mall-app .dti-mg-stat:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--c) 50%, var(--border)); box-shadow: var(--shadow-md); }
+            #dti-mall-app .dti-mg-stat.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 10%, var(--surface)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 20%, transparent); }
+            .dti-mg-statico { grid-area: ico; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: color-mix(in srgb, var(--c) 15%, transparent); color: var(--c); }
+            .dti-mg-statico svg { width: 16px; height: 16px; }
+            .dti-mg-statlabel { grid-area: label; font-size: 12px; font-weight: 700; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .dti-mg-stat > b { grid-area: num; margin-top: 9px; font-size: 27px; font-weight: 800; letter-spacing: -.8px; line-height: 1.05; color: var(--text); }
+            .dti-mg-stat > small { grid-area: sub; margin-top: 2px; font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .dti-mg-stat[data-view="new"] { --c: #0ea5e9; }
+            .dti-mg-stat[data-view="leaving"] { --c: #f59e0b; }
+            .dti-mg-stat[data-view="leaving"]:is([data-urgency="day"], [data-urgency="soon"]) { --c: #ef4444; }
+            .dti-mg-stat[data-view="sale"] { --c: #10b981; }
+            .dti-mg-stat[data-view="wish"] { --c: #ec4899; }
+            .dti-mg-stat[data-urgency] > small::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; vertical-align: 1px; border-radius: 50%; background: var(--c); animation: dti-mg-pulse 1.6s ease-in-out infinite; }
+            @keyframes dti-mg-pulse { 50% { opacity: .3; transform: scale(.7); } }
+            .dti-mg-loading { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 26px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
+            .dti-mg-loading.small { justify-content: flex-start; padding: 6px 2px; font-size: 12px; font-weight: 500; }
+            .dti-mg-spin { width: 16px; height: 16px; flex: none; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: dti-spin .7s linear infinite; }
+
+            /* Showcase: Just arrived / Last chance */
+            .dti-mg-show { margin-top: 20px; }
+            .dti-mg-showhead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+            .dti-mg-showtabs { display: flex; gap: 3px; padding: 3px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); }
+            #dti-mall-app .dti-mg-showtabs button {
+                height: 30px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 9px; cursor: pointer;
+                background: transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 700; box-shadow: none;
+            }
+            .dti-mg-showtabs button svg { width: 14px; height: 14px; }
+            #dti-mall-app .dti-mg-showtabs button.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
+            .dti-mg-showtabs button.on svg { color: var(--accent-text, var(--accent)); }
+            .dti-mg-showsub { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .dti-mg-spacer { flex: 1; }
+            #dti-mall-app .dti-mg-arrow {
+                width: 32px; height: 32px; flex: none; padding: 0; display: grid; place-items: center; cursor: pointer; border-radius: 50%;
+                border: 1px solid var(--border); background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm);
+            }
+            .dti-mg-arrow svg { width: 14px; height: 14px; }
+            #dti-mall-app .dti-mg-arrow:disabled { opacity: .35; cursor: default; box-shadow: none; }
+            #dti-mall-app .dti-mg-arrow:not(:disabled):hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-mg-strip {
+                display: grid; grid-auto-flow: column; grid-auto-columns: 186px; gap: 12px; overflow-x: auto; scroll-snap-type: x proximity;
+                scrollbar-width: none; padding: 3px 3px 12px; margin: -3px -3px 0;
+            }
+            .dti-mg-strip::-webkit-scrollbar { display: none; }
+            #dti-mall-app .dti-mg-fcard {
+                position: relative; display: flex; flex-direction: column; gap: 3px; padding: 0 0 12px; text-align: left; scroll-snap-align: start; cursor: pointer;
+                border-radius: 17px; overflow: hidden; border: 1px solid var(--border); background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm);
+                transition: transform .16s, box-shadow .16s, border-color .16s;
+            }
+            #dti-mall-app .dti-mg-fcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+            .dti-mg-fpic {
+                display: grid; place-items: center; height: 186px; margin-bottom: 7px; overflow: hidden;
+                background: radial-gradient(circle at 50% 64%, color-mix(in srgb, var(--accent) 15%, var(--surface)) 0%, var(--surface-2) 72%);
+            }
+            .dti-mg-fpic img { width: 100%; height: 100%; object-fit: contain; transition: transform .25s ease; }
+            .dti-mg-fpic img.small { width: 80px; height: 80px; border-radius: 12px; background: #fff; box-shadow: var(--shadow-sm); }
+            #dti-mall-app .dti-mg-fcard:hover .dti-mg-fpic img:not(.small) { transform: scale(1.07); }
+            .dti-mg-fname { padding: 0 12px; min-height: 2.6em; font-size: 12.5px; font-weight: 700; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+            .dti-mg-fprice { padding: 0 12px; font-size: 12px; font-weight: 800; color: var(--accent-text, var(--accent)); }
+            .dti-mg-fprice s { font-weight: 500; color: var(--text-muted); }
+            .dti-mg-fcard > .dti-mg-badge { position: absolute; top: 9px; left: 9px; }
+            .dti-mg-fcd {
+                position: absolute; top: 9px; right: 9px; display: inline-flex; align-items: center; gap: 4px; height: 21px; padding: 0 8px; border-radius: 99px;
+                font-size: 10.5px; font-weight: 800; background: color-mix(in srgb, var(--surface) 90%, transparent); color: var(--text-muted); box-shadow: var(--shadow-sm);
+            }
+            .dti-mg-fcd svg { width: 11px; height: 11px; }
+            .dti-mg-fcd em { font-style: normal; }
+            [data-urgency="week"] > .dti-mg-fcd { color: #b45309; }
+            :is([data-urgency="soon"], [data-urgency="day"]) > .dti-mg-fcd { background: #ef4444; color: #fff; }
+            #dti-mall-app.in-modal .dti-mg-strip { grid-auto-columns: 158px; }
+            #dti-mall-app.in-modal .dti-mg-fpic { height: 158px; }
+
+            /* Toolbar */
+            .dti-mg-bar {
+                position: sticky; top: 72px; z-index: 6; margin: 16px 0 14px; padding: 10px; display: flex; flex-direction: column; gap: 9px;
+                border-radius: 16px; border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 90%, transparent);
+                -webkit-backdrop-filter: blur(14px) saturate(1.4); backdrop-filter: blur(14px) saturate(1.4); box-shadow: var(--shadow-md);
+            }
+            #dti-mall-app.in-modal .dti-mg-bar { top: 0; }
+            .dti-mg-barrow { display: flex; align-items: center; gap: 10px; }
+            .dti-mg-search { position: relative; display: flex; flex: 0 1 340px; min-width: 190px; }
+            .dti-mg-search > svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-muted); pointer-events: none; }
+            #dti-mall-app .dti-mg-search input {
+                width: 100% !important; height: 38px !important; margin: 0 !important; padding: 0 34px 0 36px !important; border-radius: 11px !important;
+                border: 1px solid var(--border) !important; background: var(--surface-2) !important; color: var(--text) !important; box-shadow: none !important;
+                font-family: inherit !important; font-size: 13px !important; outline: none !important;
+            }
+            #dti-mall-app .dti-mg-search input:focus { border-color: var(--accent) !important; background: var(--surface) !important; box-shadow: 0 0 0 3px var(--accent-glow) !important; }
+            .dti-mg-search kbd {
+                position: absolute; right: 9px; top: 50%; transform: translateY(-50%); min-width: 20px; height: 20px; padding: 0 5px; display: grid; place-items: center;
+                border-radius: 6px; border: 1px solid var(--border); background: var(--surface); font-family: inherit; font-size: 11px; font-weight: 700; color: var(--text-muted); pointer-events: none;
+            }
+            .dti-mg-search:focus-within kbd, .dti-mg-search:has(input:not(:placeholder-shown)) kbd { display: none; }
+            .dti-mg-count { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
+            .dti-mg-count > span { overflow: hidden; text-overflow: ellipsis; }
+            .dti-mg-count b { font-weight: 800; color: var(--text); }
+            #dti-mall-app .dti-mg-clear {
+                flex: none; height: 26px; padding: 0 10px 0 8px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; border-radius: 99px;
+                border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); font-size: 11.5px; font-weight: 700;
+            }
+            .dti-mg-clear svg { width: 9px; height: 9px; }
+            #dti-mall-app .dti-mg-clear:hover { color: var(--danger); border-color: var(--danger); }
+            #dti-mall-app .dti-mg-owned {
+                flex: none; height: 36px; padding: 0 12px; cursor: pointer; border-radius: 10px; white-space: nowrap;
+                border: 1.5px solid var(--border); background: var(--surface); color: var(--text-muted); font-size: 12.5px; font-weight: 700;
+            }
+            #dti-mall-app .dti-mg-owned:hover { border-color: var(--text-sub); }
+            #dti-mall-app .dti-mg-owned.on { background: color-mix(in srgb, var(--success) 12%, var(--surface)); border-color: color-mix(in srgb, var(--success) 55%, transparent); color: var(--success); }
+            .dti-mg-sortwrap { display: flex; align-items: center; gap: 7px; flex: none; font-size: 12px; font-weight: 700; color: var(--text-muted); }
+            .dti-mg-sortsel .dti-csel-trigger { height: 36px; padding: 0 11px; min-width: 170px; font-size: 12.5px; font-weight: 600; }
+            .dti-mg-sortsel .dti-csel-opt { font-size: 13px; }
+            .dti-mg-kinds { display: flex; flex-wrap: wrap; gap: 5px; }
+            #dti-mall-app .dti-mg-kinds button {
+                height: 30px; padding: 0 5px 0 10px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border-radius: 99px;
+                border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; font-weight: 600; box-shadow: none;
+                transition: border-color .12s, background .12s, color .12s;
+            }
+            #dti-mall-app .dti-mg-kinds button:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+            .dti-mg-kinds button i { min-width: 20px; height: 20px; padding: 0 5px; display: inline-grid; place-items: center; border-radius: 99px; font-style: normal; font-size: 10.5px; font-weight: 800; background: var(--surface-2); color: var(--text-muted); }
+            #dti-mall-app .dti-mg-kinds button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg, #fff); }
+            .dti-mg-kinds button.on i { background: rgba(255,255,255,.22); color: inherit; }
+
+            /* Grid */
+            .dti-mg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 12px; }
+            #dti-mall-app.in-modal .dti-mg-grid { grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 10px; }
+            .dti-mg-day { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 10px; margin: 10px 2px -2px; }
+            .dti-mg-day:first-child { margin-top: 0; }
+            .dti-mg-day b { font-size: 15px; font-weight: 800; letter-spacing: -.2px; color: var(--text); }
+            .dti-mg-day span { font-size: 11.5px; font-weight: 600; color: var(--text-muted); }
+            .dti-mg-day::after { content: ''; flex: 1; align-self: center; height: 1px; background: var(--border); }
+            #dti-mall-app a.dti-mg-tile {
+                position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; padding: 10px 10px 11px; overflow: hidden;
+                border-radius: 15px; border: 1px solid var(--border); background: var(--surface); color: var(--text) !important; text-decoration: none !important;
+                box-shadow: var(--shadow-sm); transition: transform .14s, box-shadow .14s, border-color .14s;
+            }
+            #dti-mall-app a.dti-mg-tile:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+            #dti-mall-app a.dti-mg-tile.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow), var(--shadow-md); }
+            .dti-mg-pic { width: 100%; height: 100px; display: grid; place-items: center; border-radius: 11px; background: #fff; margin-bottom: 3px; }
+            html[data-mode="dark"] .dti-mg-pic { box-shadow: inset 0 0 0 1px rgba(255,255,255,.04); }
+            .dti-mg-pic img { width: 80px; height: 80px; object-fit: contain; transition: transform .2s; }
+            #dti-mall-app a.dti-mg-tile:hover .dti-mg-pic img { transform: scale(1.06); }
+            .dti-mg-name { width: 100%; min-height: 2.6em; text-align: center; font-size: 11.5px; font-weight: 600; line-height: 1.3; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+            .dti-mg-price { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px; font-size: 12px; }
+            .dti-mg-price b { font-weight: 800; color: var(--text); }
+            .dti-mg-price b small { font-size: 10px; font-weight: 600; color: var(--text-muted); }
+            .dti-mg-price s { font-size: 11px; color: var(--text-muted); }
+            .dti-mg-price i { font-style: normal; padding: 1px 5px; border-radius: 99px; font-size: 10px; font-weight: 800; background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+            .dti-mg-val {
+                display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 99px; font-size: 10px; font-weight: 700; white-space: nowrap;
+                background: color-mix(in srgb, #f59e0b 13%, var(--surface)); color: #b45309; border: 1px solid color-mix(in srgb, #f59e0b 30%, transparent);
+            }
+            html[data-mode="dark"] .dti-mg-val { color: #fbbf24; }
+            .dti-mg-cd {
+                align-self: stretch; display: flex; align-items: center; justify-content: center; gap: 4px; margin: 4px -10px -11px; padding: 5px 6px;
+                font-size: 10.5px; font-weight: 800; color: var(--text-muted); background: var(--surface-2); border-top: 1px solid var(--border);
+            }
+            .dti-mg-cd svg { width: 11px; height: 11px; }
+            .dti-mg-cd em { font-style: normal; }
+            .dti-mg-tile[data-urgency="week"] .dti-mg-cd { color: #b45309; background: color-mix(in srgb, #f59e0b 10%, var(--surface)); }
+            .dti-mg-tile[data-urgency="soon"] { background: color-mix(in srgb, #f59e0b 7%, var(--surface)); border-color: color-mix(in srgb, #f59e0b 40%, var(--border)); }
+            .dti-mg-tile[data-urgency="soon"] .dti-mg-cd { color: #fff; background: #f59e0b; border-top-color: transparent; }
+            .dti-mg-tile[data-urgency="day"] { background: color-mix(in srgb, #ef4444 8%, var(--surface)); border-color: color-mix(in srgb, #ef4444 45%, var(--border)); }
+            .dti-mg-tile[data-urgency="day"] .dti-mg-cd { color: #fff; background: #ef4444; border-top-color: transparent; }
+            html[data-mode="dark"] .dti-mg-tile[data-urgency="week"] .dti-mg-cd, html[data-mode="dark"] [data-urgency="week"] > .dti-mg-fcd { color: #fbbf24; }
+            .dti-mg-tile > .dti-mg-badge { position: absolute; top: 6px; right: 6px; z-index: 2; transition: opacity .12s; }
+            #dti-mall-app a.dti-mg-tile:hover > .dti-mg-badge { opacity: 0; }
+            .dti-mg-tile > .dti-mine { top: 6px; left: 6px; }
+            .dti-mg-tile .dti-note-btn { top: 6px; right: 6px; }
+            .dti-mg-tile .dti-list-btn { top: 6px; left: 6px; }
+            .dti-mg-tile:hover :is(.dti-note-btn, .dti-list-btn) { opacity: 1; pointer-events: auto; }
+            .dti-mg-more { height: 40px; }
+            .dti-mg-more.done { height: 0; }
+            .dti-mg-empty { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 56px 20px; text-align: center; font-size: 13px; color: var(--text-muted); }
+            .dti-mg-empty > span { width: 52px; height: 52px; display: grid; place-items: center; margin-bottom: 4px; border-radius: 16px; background: var(--surface-2); color: var(--text-muted); }
+            .dti-mg-empty > span svg { width: 26px; height: 26px; }
+            .dti-mg-empty b { font-size: 15px; color: var(--text); }
+
+            /* Badges: one color per kind (the same as the NC Mall card on Home) */
+            .dti-mg-badge {
+                --k: var(--accent); display: inline-flex; align-items: center; height: 19px; padding: 0 7px; border-radius: 99px; white-space: nowrap;
+                font-size: 9.5px; font-weight: 800; letter-spacing: .2px; line-height: 1;
+                background: color-mix(in srgb, var(--k) 16%, var(--surface)); color: color-mix(in srgb, var(--k) 78%, var(--text)); border: 1px solid color-mix(in srgb, var(--k) 42%, transparent);
+            }
+            .dti-mg-badge.k-trinket { --k: #f59e0b; }
+            .dti-mg-badge.k-sticker { --k: #14b8a6; }
+            .dti-mg-badge.k-event { --k: #0ea5e9; }
+            .dti-mg-badge.k-collectible { --k: #8b5cf6; }
+            .dti-mg-badge.k-dyeworks { --k: #d946ef; }
+            .dti-mg-badge.k-sale { --k: var(--success); }
+            .dti-mg-badge.k-new { --k: #f43f5e; }
+
+            /* The detail panel */
+            .dti-mg-shade {
+                position: fixed; inset: 0; z-index: 9990; background: rgba(10,10,16,.38); opacity: 0; transition: opacity .22s;
+                -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+            }
+            .dti-mg-shade.open { opacity: 1; }
+            .dti-mg-drawer {
+                position: fixed; top: 0; right: 0; bottom: 0; z-index: 9991; width: min(460px, 100vw); display: flex; flex-direction: column;
+                background: var(--surface); border-left: 1px solid var(--border); box-shadow: -24px 0 60px rgba(0,0,0,.22);
+                transform: translateX(104%); transition: transform .24s cubic-bezier(.2,.8,.2,1);
+            }
+            .dti-mg-drawer.open { transform: none; }
+            #dti-mall-app.in-modal :is(.dti-mg-shade, .dti-mg-drawer) { position: absolute; }
+            #dti-mall-app.in-modal .dti-mg-drawer { width: min(440px, 100%); }
+            .dti-mg-dhead { display: flex; align-items: center; gap: 6px; flex: none; padding: 12px 12px 12px 18px; border-bottom: 1px solid var(--border); }
+            .dti-mg-dkind { font-size: 10.5px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .dti-mg-dpos { margin-right: 2px; font-size: 11.5px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+            #dti-mall-app :is(.dti-mg-dnav, .dti-mg-dx) {
+                width: 30px; height: 30px; flex: none; padding: 0; display: grid; place-items: center; cursor: pointer; border-radius: 9px;
+                border: 1px solid var(--border); background: var(--surface); color: var(--text); box-shadow: none;
+            }
+            :is(.dti-mg-dnav, .dti-mg-dx) svg { width: 12px; height: 12px; }
+            #dti-mall-app .dti-mg-dnav:disabled { opacity: .35; cursor: default; }
+            #dti-mall-app :is(.dti-mg-dnav:not(:disabled), .dti-mg-dx):hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            #dti-mall-app .dti-mg-dx { margin-left: 4px; }
+            .dti-mg-dbody { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 18px 20px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+            .dti-mg-dpic {
+                height: 290px; display: grid; place-items: center; overflow: hidden; border-radius: 18px; border: 1px solid var(--border);
+                background: radial-gradient(circle at 50% 62%, color-mix(in srgb, var(--accent) 16%, var(--surface)) 0%, var(--surface-2) 74%);
+            }
+            .dti-mg-dpic.flat { height: 170px; }
+            .dti-mg-dpic img { width: 100%; height: 100%; object-fit: contain; animation: dti-mg-rise .3s ease-out; }
+            .dti-mg-dpic img.small { width: 110px; height: 110px; border-radius: 16px; background: #fff; box-shadow: var(--shadow-md); image-rendering: auto; }
+            @keyframes dti-mg-rise { from { opacity: 0; transform: translateY(8px) scale(.97); } }
+            #dti-mall-app .dti-mg-dbody h2 {
+                margin: 14px 0 6px; padding: 0; border: 0; background: none; text-shadow: none; text-align: left;
+                font-family: inherit; font-size: 20px; font-weight: 800; letter-spacing: -.3px; line-height: 1.25; color: var(--text);
+            }
+            .dti-mg-dlabels { display: flex; flex-wrap: wrap; gap: 5px; }
+            .dti-mg-dlabels:empty { display: none; }
+            .dti-mg-dprice { margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); }
+            .dti-mg-dnum { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+            .dti-mg-dnum b { font-size: 24px; font-weight: 800; letter-spacing: -.5px; color: var(--text); }
+            .dti-mg-dnum s { font-size: 13px; color: var(--text-muted); }
+            .dti-mg-dnum small { font-size: 11.5px; font-weight: 700; color: var(--success); }
+            .dti-mg-dbund { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+            .dti-mg-dbund span { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 99px; background: var(--surface); border: 1px solid var(--border); font-size: 11px; color: var(--text-muted); }
+            .dti-mg-dbund b { color: var(--text); font-weight: 800; }
+            .dti-mg-ddates { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 11.5px; font-weight: 600; color: var(--text-muted); }
+            .dti-mg-ddates > span { display: inline-flex; align-items: center; gap: 5px; }
+            .dti-mg-ddates svg { width: 13px; height: 13px; }
+            .dti-mg-ddates em { font-style: normal; }
+            .dti-mg-dleave[data-urgency="week"] { color: #b45309; }
+            .dti-mg-dleave:is([data-urgency="soon"], [data-urgency="day"]) { color: #ef4444; font-weight: 800; }
+            html[data-mode="dark"] .dti-mg-dleave[data-urgency="week"] { color: #fbbf24; }
+            .dti-mg-dval {
+                display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 14px; border-radius: 14px;
+                background: color-mix(in srgb, #f59e0b 10%, var(--surface)); border: 1px solid color-mix(in srgb, #f59e0b 32%, transparent);
+            }
+            .dti-mg-dvlabel { font-size: 9.5px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; color: #b45309; }
+            .dti-mg-dval b { font-size: 16px; font-weight: 800; color: var(--text); }
+            .dti-mg-dval em { font-size: 12px; font-style: normal; font-weight: 600; color: var(--text); }
+            .dti-mg-dval small { margin-left: auto; font-size: 10.5px; color: var(--text-muted); }
+            html[data-mode="dark"] .dti-mg-dvlabel { color: #fbbf24; }
+            .dti-mg-ddesc { margin: 12px 0 0; font-size: 12px; line-height: 1.55; font-style: italic; color: var(--text-muted); }
+            .dti-mg-psum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; color: var(--text-muted); }
+            .dti-mg-psum b { color: var(--text); }
+            .dti-mg-psum b.le { color: #db2777; }
+            .dti-mg-psum > span { opacity: .5; }
+            .dti-mg-pool { display: flex; flex-direction: column; gap: 4px; }
+            #dti-mall-app a.dti-mg-prow {
+                display: grid; grid-template-columns: 40px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 6px 10px 6px 6px; border-radius: 12px;
+                border: 1px solid var(--border); background: var(--surface); color: var(--text) !important; text-decoration: none !important; transition: border-color .12s, background .12s;
+            }
+            #dti-mall-app a.dti-mg-prow:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); background: var(--surface-2); }
+            #dti-mall-app a.dti-mg-prow.le { background: color-mix(in srgb, #ec4899 6%, var(--surface)); border-color: color-mix(in srgb, #ec4899 30%, var(--border)); }
+            .dti-mg-prow img { width: 40px; height: 40px; border-radius: 8px; background: #fff; object-fit: contain; }
+            .dti-mg-pmain { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+            .dti-mg-pname { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; font-weight: 600; line-height: 1.25; }
+            .dti-mg-pname i { flex: none; padding: 1px 6px; border-radius: 99px; font-style: normal; font-size: 9px; font-weight: 800; letter-spacing: .3px; }
+            .dti-mg-pname i.le { background: #ec4899; color: #fff; }
+            .dti-mg-pname i.bonus { background: color-mix(in srgb, var(--success) 16%, transparent); color: var(--success); }
+            .dti-mg-pbar { display: block; height: 4px; border-radius: 99px; background: var(--surface-3, var(--surface-2)); overflow: hidden; }
+            .dti-mg-pbar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 50%, #ec4899)); }
+            .dti-mg-prow.le .dti-mg-pbar i { background: #ec4899; }
+            .dti-mg-prate { min-width: 34px; text-align: right; font-size: 11.5px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+            .dti-mg-pval { min-width: 64px; text-align: right; font-size: 11px; font-weight: 700; color: #b45309; white-space: nowrap; }
+            html[data-mode="dark"] .dti-mg-pval { color: #fbbf24; }
+            .dti-mg-pnote { margin-top: 7px; font-size: 10.5px; color: var(--text-sub); }
+            .dti-mg-dtbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+            #dti-mall-app .dti-mg-dtbtns button {
+                display: flex; align-items: baseline; justify-content: center; gap: 6px; height: 42px; cursor: pointer; border-radius: 12px;
+                border: 1px solid var(--border); background: var(--surface-2); color: var(--text-muted); font-size: 12px; font-weight: 600;
+            }
+            .dti-mg-dtbtns b { font-size: 17px; font-weight: 800; color: var(--text); }
+            #dti-mall-app .dti-mg-dtbtns button:hover { border-color: var(--accent); }
+            .dti-mg-dacts { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; flex: none; padding: 12px 14px; border-top: 1px solid var(--border); background: var(--surface); }
+            #dti-mall-app .dti-mg-dbtn {
+                height: 34px; padding: 0 12px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; border-radius: 10px; white-space: nowrap;
+                border: 1px solid var(--border); background: var(--surface-2); color: var(--text) !important; font-size: 12px; font-weight: 700; text-decoration: none !important;
+            }
+            .dti-mg-dbtn svg { width: 10px; height: 10px; }
+            #dti-mall-app .dti-mg-dbtn:hover { border-color: var(--accent); }
+            #dti-mall-app .dti-mg-dbtn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg, #fff) !important; }
+            #dti-mall-app .dti-mg-dbtn.primary:hover { filter: brightness(1.08); }
+            #dti-mall-app .dti-mg-dbtn.primary.done { background: color-mix(in srgb, var(--success) 14%, var(--surface)); border-color: color-mix(in srgb, var(--success) 50%, transparent); color: var(--success) !important; }
+            #dti-mall-app .dti-list-btn.dti-mg-dlist { width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); }
+            #dti-mall-app .dti-list-btn.dti-mg-dlist svg { width: 14px; height: 14px; }
+            #dti-mall-app .dti-list-btn.dti-mg-dlist:is(:hover, .open) { background: var(--accent); border-color: var(--accent); color: var(--accent-fg, #fff); }
+
+            @media (max-width: 1100px) {
+                .dti-mg-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+                .dti-mg-barrow { flex-wrap: wrap; }
+                .dti-mg-count { order: 5; flex-basis: 100%; }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                #dti-mall-app *, .dti-mg-drawer { animation: none !important; transition: none !important; }
+            }
         `);
     }
 
@@ -4270,6 +5432,33 @@
             :is(.dti-lp, .dti-lps) .dti-lp-save:hover:not(:disabled) { filter: brightness(1.08); }
             :is(.dti-lp, .dti-lps) .dti-lp-save:disabled { opacity: .4; cursor: default; }
             .dti-lp-row.focus { box-shadow: inset 0 0 0 1.5px var(--accent); }
+            /* ✓ / ♥ marks on item tiles: what you own (how many) and what's on your wishlist; out of the way on hover */
+            .dti-mine {
+                position: absolute; top: 5px; left: 5px; z-index: 2; pointer-events: none; display: inline-flex; align-items: center; gap: 2px;
+                height: 16px; padding: 0 5px; box-sizing: border-box; border-radius: 99px; line-height: 1; transition: opacity .12s;
+                font-family: 'Poppins', system-ui, sans-serif; font-size: 9px; font-weight: 800;
+                background: color-mix(in srgb, var(--success) 16%, var(--surface)); color: var(--success);
+                border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
+            }
+            .dti-mine i { font-style: normal; color: #db2777; font-size: 9.5px; }
+            .dti-mine.want:not(.own) { background: color-mix(in srgb, #ec4899 14%, var(--surface)); border-color: color-mix(in srgb, #ec4899 40%, transparent); }
+            html[data-mode="dark"] .dti-mine i { color: #f472b6; }
+            :hover > .dti-mine { opacity: 0; }
+            .dti-item-card > .dti-mine { top: 4px; left: 4px; }
+            label > input + .item-container > .dti-mine { top: 3px; left: 3px; }
+            .dti-caps-total { font-size: 12px; font-weight: 700; color: var(--bdg-ncval-fg, var(--accent-text, var(--accent))); white-space: nowrap; }
+            .dti-caps-total:empty { display: none; }
+            #dti-center-caps { margin-left: 8px; }
+            .dti-grid-group-caps { margin-left: 2px; font-size: 11.5px; }
+            #dti-bulk-caps { margin-left: 2px; }
+            .dti-more-new { margin-left: 6px; padding: 0 6px; border-radius: 99px; font-style: normal; font-size: 9.5px; font-weight: 800; line-height: 1.6; vertical-align: 1px; background: var(--accent); color: var(--accent-fg, #fff); }
+            .dti-more-dot { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; vertical-align: 1px; background: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+            .dti-mall-tag {
+                align-self: center; margin-top: 2px; padding: 1px 7px; border-radius: 99px; white-space: nowrap;
+                font-size: 9.5px; font-weight: 800; line-height: 1.6;
+                background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent-text, var(--accent));
+            }
+            .dti-mall-tag.soon { background: color-mix(in srgb, var(--danger) 14%, var(--surface)); color: var(--danger); }
             .dti-lp-msg { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 22px 12px; text-align: center; font-size: 12.5px; color: var(--text-muted); }
             .dti-lp-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: dti-lp-spin .7s linear infinite; }
             @keyframes dti-lp-spin { to { transform: rotate(360deg); } }
@@ -4426,6 +5615,21 @@
                 font-size: 10px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-muted);
             }
             .dti-item-note-label svg { color: var(--accent-text, var(--accent)); }
+            .dti-item-strip { display: flex; align-items: flex-start; gap: 14px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+            .dti-item-strip .dti-item-note-label svg { width: 13px; height: 13px; }
+            .dti-item-chips { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+            .dti-item-chip {
+                display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 10px 0 4px; box-sizing: border-box; cursor: pointer;
+                border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text) !important; text-decoration: none !important;
+                font-family: inherit; font-size: 12px; font-weight: 700; transition: border-color .12s, background .12s;
+            }
+            .dti-item-chip:hover { border-color: var(--accent); background: var(--surface-2); }
+            .dti-item-chip.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); color: var(--accent-text, var(--accent)) !important; }
+            .dti-item-chip img { width: 30px; height: 30px; object-fit: contain; border-radius: 7px; background: #fff; }
+            .dti-item-chip.nf { padding: 0 6px 0 11px; }
+            .dti-item-chip i { font-style: normal; padding: 1px 7px; border-radius: 99px; font-size: 10px; font-weight: 800; }
+            .dti-item-chip i.has { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+            .dti-item-chip i.wants { background: color-mix(in srgb, #ec4899 14%, transparent); color: #db2777; }
             .dti-item-note .dti-ne { flex: 1; flex-direction: row; align-items: flex-start; flex-wrap: wrap; gap: 8px 10px; }
             .dti-item-note .dti-ne-text { flex: 1 1 320px; min-height: 38px; }
             .dti-item-note .dti-ne-foot { flex: 0 0 auto; height: 38px; }
@@ -4471,6 +5675,12 @@
                 font-family: inherit; font-size: 13.5px; font-weight: 700; transition: filter .13s;
             }
             .dti-nx-new:hover { filter: brightness(1.08); }
+            .dti-nx-newtrade {
+                height: 34px; margin-top: -4px; border-radius: 10px; cursor: pointer;
+                border: 1.5px solid color-mix(in srgb, var(--accent) 35%, transparent); background: var(--accent-glow); color: var(--accent-text, var(--accent));
+                font-family: inherit; font-size: 13px; font-weight: 700; transition: background .13s, border-color .13s;
+            }
+            .dti-nx-newtrade:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
             .dti-nx-filters { display: flex; flex-direction: column; gap: 2px; }
             .dti-nx-filters button, .dti-nx-tag {
                 display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px;
@@ -4824,6 +6034,244 @@
         popup.style.left = left + 'px'; popup.style.top = top + 'px';
     }
 
+    // ── What you own and want, from your lists saved in this browser (Neofriends' copy of your Items page:
+    // refreshed whenever My Items opens, else fetched when older than 6 hours) ── item id → { own: copies, want: copies }
+    let _mineMap = null, _mineP = null;
+    function _mineFrom(me) {
+        if (!me?.lists) return null;
+        const m = new Map();
+        me.lists.forEach(l => l.items.forEach(([id, q]) => {
+            const e = m.get(+id) || { own: 0, want: 0 };
+            if (l.owned) e.own += q || 1; else e.want += q || 1;
+            m.set(+id, e);
+        }));
+        return _mineMap = m;
+    }
+    function mineLoad(force) {
+        if (_mineP && !force) return _mineP;
+        return _mineP = nfMine(force).then(_mineFrom).catch(() => null);
+    }
+    const mineOf = id => _mineMap?.get(+id) || null;
+    // A list save changed how many of an item you have: keep the marks right without a refetch
+    function mineSet(id, own, want) {
+        if (!_mineMap) return;
+        _mineMap.set(+id, { own, want });
+        document.querySelectorAll(`[data-dti-item="${+id}"]`).forEach(paintMineMark);
+    }
+    // Item tiles everywhere: a small mark in the top-left corner — ✓ (how many you own) and/or ♥ (on your wishlist)
+    function paintMineMark(tile) {
+        const id = tile.dataset.dtiItem;
+        let mark = tile.querySelector(':scope > .dti-mine');
+        const e = id && mineOf(id);
+        if (!e || (!e.own && !e.want)) { mark?.remove(); return; }
+        if (!mark) { mark = document.createElement('span'); mark.className = 'dti-mine'; tile.appendChild(mark); }
+        mark.classList.toggle('own', !!e.own);
+        mark.classList.toggle('want', !!e.want);
+        mark.title = [e.own ? `You own ${e.own}` : '', e.want ? 'On your wishlist' : ''].filter(Boolean).join(' · ');
+        mark.innerHTML = (e.own ? `\u2713${e.own > 1 ? e.own : ''}` : '') + (e.want ? '<i>\u2665</i>' : '');
+    }
+
+    // ── The NC Mall right now (DTI Remix's feed): shared by Home's NC Mall card and the wishlist checks ──
+    let _mallP = null, _mallAt = 0, _mallT = 0;
+    function mallFeed(force) {   // force: skip both caches (the NC Mall Guide's refresh button)
+        if (_mallP && !force && Date.now() - _mallAt < 30 * 60e3) return _mallP;
+        _mallAt = Date.now();
+        return _mallP = (async () => {
+            if (!force) try {
+                const c = JSON.parse(localStorage.getItem('dti_nm_cache') || 'null');
+                if (c?.t && Date.now() - c.t < 30 * 60e3 && Array.isArray(c.items)) { _mallT = c.t; return c.items; }
+            } catch (_) {}
+            try {
+                const d = await fetch('https://dtr-itemdb.dti-remix.workers.dev/mall-status', force ? { cache: 'no-store' } : {}).then(r => r.json());
+                if (Array.isArray(d?.items)) {
+                    _mallT = Date.now();
+                    try { localStorage.setItem('dti_nm_cache', JSON.stringify({ t: _mallT, items: d.items })); } catch (_) {}
+                    return d.items;
+                }
+            } catch (_) {}
+            _mallP = null;
+            return null;
+        })();
+    }
+    const mallFeedAt = () => _mallT;   // when the feed in use was loaded
+    const mallBuyable = r => (!r.saleBegin || Date.parse(r.saleBegin) <= Date.now()) && (!r.saleEnd || Date.parse(r.saleEnd) > Date.now());
+
+    // ── Who among your Neofriends has / wants an item (from their saved lists) ── item id → [{ f, owned, qty, lists }]
+    let _nfIdx = null;
+    function nfIndex() {
+        if (_nfIdx) return _nfIdx;
+        if (!window.__dtiNfIdxWired && typeof GM_addValueChangeListener === 'function') {   // (once: the JS context outlives page visits)
+            window.__dtiNfIdxWired = true;
+            [NF.KEY, 'dti_nf_ping'].forEach(k => GM_addValueChangeListener(k, () => { _nfIdx = null; }));
+        }
+        return _nfIdx = (async () => {
+            const map = new Map();
+            for (const f of NF.list()) {
+                const snap = await NFDB.get(f.id);
+                (snap?.lists || []).forEach(l => l.items.forEach(([id, q]) => {
+                    let arr = map.get(+id);
+                    if (!arr) map.set(+id, arr = []);
+                    let e = arr.find(x => x.f.id === f.id && x.owned === l.owned);
+                    if (!e) arr.push(e = { f, owned: l.owned, qty: 0, lists: [] });
+                    e.qty += q || 1;
+                    e.lists.push({ name: l.name, id: l.id });
+                }));
+            }
+            return map;
+        })();
+    }
+
+    // ── NC values added up: "≈ 412–530 caps" (copies counted; items without a known value are left out) ──
+    // A value that's a cap amount — "4", "1-2", "4-6*", "3 caps", "10+" — as [min, max]; notes ("Permanent Buyable",
+    // "Dyeworks thru Oct 9", "Free the Faeries 2026 … Do a value check!") are not amounts
+    function capNums(val) {
+        const m = String(val || '').replace(/,/g, '').match(/^\s*(\d+(?:\.\d+)?)\s*(?:-\s*(\d+(?:\.\d+)?))?\s*\+?\s*\*?\s*(?:caps?)?\s*$/i);
+        return m ? [parseFloat(m[1]), parseFloat(m[2] || m[1])] : null;
+    }
+    function ncCapRange(name) {
+        return new Promise(res => lookupNcValue(name, val => res(capNums(val))));
+    }
+    async function ncCapTotal(entries) {   // [{ name, qty }]
+        const t = { min: 0, max: 0, valued: 0, unknown: 0 };
+        const vals = await Promise.all(entries.map(e => ncCapRange(e.name)));
+        vals.forEach((v, i) => {
+            const q = entries[i].qty || 1;
+            if (v) { t.min += v[0] * q; t.max += v[1] * q; t.valued += q; } else t.unknown += q;
+        });
+        return t;
+    }
+    const _capN = n => (Math.round(n * 10) / 10).toLocaleString('en-US');
+    const capTotalText = t => t?.valued ? `\u2248 ${_capN(t.min)}${t.max !== t.min ? '\u2013' + _capN(t.max) : ''} caps` : '';
+    const capTotalTitle = t => t ? `Estimated from NC value lists (Lebron, then Valisar) \u2014 ${t.valued} valued${t.unknown ? `, ${t.unknown} with no value yet` : ''}` : '';
+
+    // Trinkets: the NC Mall says which kind in the item's description ("This NC item is a Super Deluxe Trinket.")
+    const trinketKind = desc => /super deluxe trinket/i.test(desc || '') ? 'Super Deluxe Trinket' : /deluxe trinket/i.test(desc || '') ? 'Deluxe Trinket' : '';
+    // NC Collectibles: a new item each month in a collection, plus a bonus item for collecting the whole set. The
+    // description says which ("This is the 1st NC Collectible item from the Sophies Swamp Secrets Collection - Y28.")
+    function collectibleInfo(desc) {
+        const d = String(desc || '');
+        if (!/\bNC Collectible\b/i.test(d)) return null;
+        const m = d.match(/the (\d+)(?:st|nd|rd|th) NC Collectible item from the (.+?) Collection(?:\s*-\s*(Y\d+))?/i);
+        return { n: m ? +m[1] : 0, set: (m?.[2] || d.match(/from the (.+?) Collection/i)?.[1] || '').trim(), year: m?.[3] || '', bonus: !m && /\bbonus\b/i.test(d) };
+    }
+    const collectibleText = c => c.bonus
+        ? `NC Collectible bonus item${c.set ? ` \u2014 ${c.set} Collection` : ''}`
+        : `NC Collectible${c.n ? ` #${c.n}` : ''}${c.set ? ` of the ${c.set} Collection${c.year ? ` (${c.year})` : ''}` : ''} \u2014 collect the whole set for a bonus item`;
+    // Items for a site event (Free the Faeries slingshots, Grave Danger petpet gear) — the description says so
+    const isEventItem = desc => /\bevent\b|grave danger/i.test(desc || '');
+    // Gift Box Mystery Capsules ("GBC"): capsules that give an NC item plus Basic Gift Boxes
+    const isGbcName = name => /\bgift box\b.*\bcapsule\b/i.test(name || '');
+    // An NC Mall item, read: its kind (event · sticker · trinket · collectible · capsule · wearable · styling · cookie · home ·
+    // other), what it costs right now, and when it arrived / leaves
+    function mallInfo(r) {
+        const d = r.description || '', n = r.name || '';
+        const trinket = trinketKind(d).replace(/ Trinket$/, '');
+        const openable = r.canOpen === 'true' || r.canOpen === true || (r.canOpen !== 'false' && /\bcapsule\b/i.test(n));
+        const collectible = collectibleInfo(d);
+        const wearable = r.isWearable === true || (r.isWearable == null && !openable);
+        const cookie = /fortune cookie/i.test(n);   // (NC Fortune Cookies open too — they aren't capsules)
+        const sale = r.discountPrice > 0 && r.discountPrice < r.price
+            && (!r.discountBegin || Date.parse(r.discountBegin) <= Date.now()) && (!r.discountEnd || Date.parse(r.discountEnd) >= Date.now());
+        const kind = isEventItem(d) ? 'event' : /\bsticker pack\b/i.test(n) || /neosignature/i.test(d) ? 'sticker' : trinket ? 'trinket' : collectible ? 'collectible'
+            : cookie ? 'cookie' : openable ? 'capsule' : wearable ? 'wearable' : /styling studio|hue brew/i.test(n) ? 'styling'
+            : /\b(bed|sofa|desk|lamp|rug|stove|fence|lights|bench)\b/i.test(n) || /neohome/i.test(d) ? 'home' : 'other';
+        return {
+            kind, trinket, collectible, openable, wearable, sale, gbc: kind === 'capsule' && isGbcName(n),
+            price: sale ? r.discountPrice : r.price, pct: sale && r.price ? Math.round((1 - r.discountPrice / r.price) * 100) : 0,
+            added: Date.parse(r.saleBegin || r.addedAt) || 0, ends: Date.parse(r.saleEnd) || 0,
+        };
+    }
+
+    // ── Backup & restore: everything DTI Enhance keeps in this browser (Tampermonkey storage — notes, tokens,
+    // Neofriends, theme, settings — plus Neofriends' saved lists and the token release dates) in one file ──
+    const BACKUP_SKIP = /^(dti_user_id|dti_user_slug|dti_user_name|dti_tok_capture|dti_nf_ping|dti_nf_autocheck_lock)$/;   // who's logged in, and passing signals
+    async function dtiBackupData() {
+        const gm = {};
+        (typeof GM_listValues === 'function' ? GM_listValues() : []).forEach(k => { if (!BACKUP_SKIP.test(k)) gm[k] = GM_getValue(k); });
+        const idb = {};
+        for (const f of NF.list()) { const snap = await NFDB.get(f.id); if (snap) idb[f.id] = snap; }
+        const ls = {};
+        ['dti_tok_dates_v1'].forEach(k => { try { const v = localStorage.getItem(k); if (v) ls[k] = v; } catch (_) {} });
+        return { app: 'DTI Enhance', kind: 'backup', v: 1, exported: new Date().toISOString(), gm, idb, ls };
+    }
+    async function dtiSaveBackup() {
+        const data = await dtiBackupData();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+        a.download = `dti-enhance-backup-${noteToday()}.json`;
+        a.click();   // (not added to the page: a click there would count as "outside" and close the ⚙ panel)
+        setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        GM_setValue('dti_last_backup', Date.now());
+        return data;
+    }
+    // A backup file → what's in it (for the confirm line), or an error
+    async function dtiReadBackup(file) {
+        let d = null;
+        try { d = JSON.parse(await file.text()); } catch (_) {}
+        if (!d || d.kind !== 'backup' || !/^DTI Enhance/.test(d.app || '') || !d.gm || typeof d.gm !== 'object') return { error: 'That isn\u2019t a DTI Enhance backup file.' };
+        const val = k => { let v = d.gm[k]; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) {} } return v; };   // (some are stored as JSON text)
+        const notes = Object.keys(val('dti_notes')?.notes || {}).length;
+        const friends = Object.keys(val('dti_neofriends')?.friends || {}).length;
+        const n = Object.keys(d.gm).length;
+        return { data: d, summary: `${notes} note${notes === 1 ? '' : 's'}, ${friends} Neofriend${friends === 1 ? '' : 's'}, ${n} saved setting${n === 1 ? '' : 's'}` };
+    }
+    async function dtiRestoreBackup(d) {
+        Object.entries(d.gm).forEach(([k, v]) => { if (!BACKUP_SKIP.test(k)) GM_setValue(k, v); });
+        for (const [id, snap] of Object.entries(d.idb || {})) { try { await NFDB.put(id, snap); } catch (_) {} }
+        Object.entries(d.ls || {}).forEach(([k, v]) => { try { localStorage.setItem(k, v); } catch (_) {} });
+    }
+
+    // Your wanted lists (from your saved lists) for a "which wishlist" picker: [{ key, name }] — key is DTI's form key
+    // (a list id, or 'false' for "Not in a list")
+    async function myWantedLists() {
+        const me = await nfMine();
+        const lists = (me?.lists || []).filter(l => !l.owned && !l.unlisted).map(l => ({ key: String(l.id), name: l.name }));
+        return [...lists, { key: 'false', name: 'Not in a list' }];
+    }
+    // Put one item on a wishlist list (sets that list's quantity to 1). itemPath = "<id>-<Name-Slug>" from its DTI link.
+    async function wishlistAdd(itemPath, key) {
+        const slug = GM_getValue('dti_user_slug', '');
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
+        if (!slug || !csrf) return false;
+        try {
+            const r = await fetch(`/user/${slug}/items/${itemPath}/closet_hangers/update_quantities`, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': csrf },
+                body: `_method=put&quantity%5B${encodeURIComponent(key)}%5D=1`,
+            });
+            return r.ok;
+        } catch (_) { return false; }
+    }
+
+    // Newest Items' own NC / NP badge switch (off by default): on, every tile there shows NC or NP whatever the badge
+    // settings say — telling the types apart matters most when looking at what's new. One setting for Home's card,
+    // its popup and the page.
+    const niBadgesOn = () => !!GM_getValue('dti_ni_badges', false);
+    const isPbDesc = desc => /paint ?brush/i.test(desc || '');   // Paint Brush clothes ("…part of a deluxe paint brush set!")
+    function niBadgesApply() {
+        const on = niBadgesOn();
+        document.documentElement.classList.toggle('dti-ni-types', on);
+        document.querySelectorAll('.dti-ni-typesbtn').forEach(b => { b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
+    }
+    // Home's NC Mall card: its Cap / Sale / Event… badges (on by default)
+    const nmBadgesOn = () => GM_getValue('dti_nm_badges', true) !== false;
+    function nmBadgesApply() {
+        const on = nmBadgesOn();
+        document.documentElement.classList.toggle('dti-nm-nobadges', !on);
+        document.querySelectorAll('.dti-nm-badgesbtn').forEach(b => {
+            b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on));
+            b.title = on ? 'Hide the badges on these items' : 'Show badges on these items (Cap, Sale, Event\u2026)';
+        });
+    }
+    function niBadgesBtn(cls, label = '') {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'dti-ni-typesbtn ' + cls;
+        b.title = 'Show NC / NP badges on these items';
+        b.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8.6V3.2c0-.4.3-.7.7-.7h5.4l5 5c.4.4.4 1 0 1.4l-4.6 4.6c-.4.4-1 .4-1.4 0z"/><circle cx="5.6" cy="5.6" r="1"/></svg>' + (label ? `<span>${label}</span>` : '');
+        b.addEventListener('click', e => { e.stopPropagation(); GM_setValue('dti_ni_badges', !niBadgesOn()); niBadgesApply(); });
+        return b;
+    }
+
     // ItemDB's address for an item: its name as a slug (DTI item ids aren't ItemDB's)
     const itemdbHref = name => 'https://itemdb.com.br/item/' + String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
@@ -4885,6 +6333,26 @@
             host.innerHTML = `<div class="dti-ip-section">Dyeworks<span class="dti-ip-dye-n">${e.v.length} color${e.v.length === 1 ? '' : 's'}</span></div>
                 <div class="dti-ip-dye-grid">${tiles.map(([c, vid, img]) => `<a class="dti-ip-dye${String(vid) === String(id) ? ' on' : ''}${c === 'Original' ? ' orig' : ''}" href="/items/${vid}" target="_blank"
                     title="${noteEsc(c === 'Original' ? base : `Dyeworks ${c}: ${base}`)}"><span class="dti-ip-dye-pic">${img ? `<img src="${noteEsc(img)}" alt="" loading="lazy">` : ''}</span><span class="dti-ip-dye-name">${noteEsc(c)}</span></a>`).join('')}</div>`;
+            onChange?.();
+        });
+    }
+
+    // Item info popups: which of your Neofriends have this item or want it (from their saved lists) — a click
+    // opens that list in the popup
+    function nfFillSection(host, id, onChange) {
+        if (!host || !NF.list().length) return;
+        nfIndex().then(map => {
+            const hits = (map.get(+id) || []).slice().sort((a, b) => b.owned - a.owned || NF.label(a.f).localeCompare(NF.label(b.f)));
+            if (!hits.length || !host.isConnected) return;
+            host.innerHTML = `<div class="dti-ip-section">Neofriends</div><div class="dti-ip-nf">${hits.slice(0, 8).map(h => `<button type="button" class="dti-ip-nfrow" data-f="${noteEsc(h.f.id)}" data-l="${noteEsc(h.lists[0]?.id || '')}" title="Open ${noteEsc(NF.label(h.f))}\u2019s list">
+                <span class="dti-ip-nfname">${noteEsc(NF.label(h.f))}</span><span class="dti-ip-nfwhat ${h.owned ? 'has' : 'wants'}">${h.owned ? (h.qty > 1 ? `has ${h.qty}` : 'has it') : 'wants it'}</span>
+                <span class="dti-ip-nflist">${noteEsc(h.lists.map(l => l.name).join(', '))}</span></button>`).join('')}${hits.length > 8 ? `<div class="dti-ip-nfmore">+${hits.length - 8} more</div>` : ''}</div>`;
+            host.onclick = e => {
+                const b = e.target.closest('.dti-ip-nfrow'), f = b && NF.get(b.dataset.f);
+                if (!f) return;
+                document.getElementById('dti-item-info-popup')?.remove();
+                nfOpenItems(f, b.dataset.l);
+            };
             onChange?.();
         });
     }
@@ -4976,7 +6444,8 @@
                 ? `<div class="dti-ip-section">Wears On</div><div class="dti-ip-zones">${zones.map(z => `<span class="dti-ip-zone">${z}</span>`).join('')}</div>`
                 : '';
 
-            const isCapsuleItem = mall?.canOpen === 'true' || mall?.canOpen === true;
+            const isCapsuleItem = mall?.canOpen === 'true' || mall?.canOpen === true || !!pool?.items?.length;
+            const _inside = trinketKind(mall?.description || desc) ? 'Comes With' : 'Inside This Capsule';
             let poolHtml = '';
             if (isCapsuleItem && pool && pool.found && pool.items && pool.items.length) {
                 const _guaranteed = pool.items.filter(x => x.rate != null && x.rate >= 100);
@@ -4984,7 +6453,7 @@
                 const _bonusCount  = _guaranteed.length > 0 ? pool.items.length - _guaranteed.length : 0;
                 const shown = _poolDisplay.slice(0, 14);
                 const extra = _poolDisplay.length - shown.length;
-                poolHtml = `<div class="dti-ip-section">Inside This Capsule${_bonusCount > 0 ? ` <span style="font-size:9px;font-weight:600;color:var(--text-muted);opacity:.7;">+${_bonusCount} possible bonus</span>` : ''}</div>
+                poolHtml = `<div class="dti-ip-section">${_inside}${_bonusCount > 0 ? ` <span style="font-size:9px;font-weight:600;color:var(--text-muted);opacity:.7;">+${_bonusCount} possible bonus</span>` : ''}</div>
                     <div class="dti-ip-pool-grid">
                         ${shown.map(x => `<a class="dti-ip-pool-item${x.isLE ? ' le' : ''}" href="/items/0#pool-${x.iid}" data-turbo="false" data-pin="${(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" data-pii="${(x.image||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" onclick="try{localStorage.setItem('dti_pi_${x.iid}',JSON.stringify({name:this.dataset.pin,image:this.dataset.pii,iid:${x.iid}}))}catch(e){}">
                             ${x.image ? `<img src="${x.image}" alt="" loading="lazy">` : ''}
@@ -5004,6 +6473,7 @@
                     </div>
                 </div>
                 ${desc ? `<div class="dti-ip-desc">${desc}</div>` : ''}
+                ${collectibleInfo(desc) ? `<div class="dti-ip-collect">${noteEsc(collectibleText(collectibleInfo(desc)))}</div>` : ''}
                 <hr class="dti-ip-divider">
                 ${firstSeen ? `<div class="dti-ip-row"><span class="dti-ip-label">First seen</span><span class="dti-ip-val">${firstSeen}</span></div>` : ''}
                 ${isNc && !isCapsuleItem ? `<div class="dti-ip-row dti-ip-cap-row"><span class="dti-ip-label">Cap Value</span><span class="dti-ip-val">${capVal ? capVal + ' caps' : '? caps'}</span></div>` : ''}
@@ -5011,6 +6481,7 @@
                 ${poolHtml}
                 ${srcHtml}
                 ${isNc && !isCapsuleItem ? '<div class="dti-ip-dye-host"></div>' : ''}
+                <div class="dti-ip-nf-host"></div>
                 ${isCapsuleItem ? '' : zonesHtml}
                 <hr class="dti-ip-divider">
                 <div class="dti-ip-row">
@@ -5036,6 +6507,7 @@
             });
             positionInfoPopup(popup, anchor);
             dyeFillSection(popup.querySelector('.dti-ip-dye-host'), id, name, () => positionInfoPopup(popup, anchor));
+            nfFillSection(popup.querySelector('.dti-ip-nf-host'), id, () => positionInfoPopup(popup, anchor));
 
             if (isNc && !capVal && !isCapsuleItem) {
                 lookupNcValue(name, val => {
@@ -5282,6 +6754,9 @@ html:has(#dti-page-modal, #dti-trades-modal) { overflow: hidden; }
 /* The outfit editor in a popup */
 #dti-page-modal.dti-pm-outfit .dti-pm-box { max-width: 1200px; height: 90vh; max-height: none; }
 #dti-page-modal.dti-pm-settings .dti-pm-box { max-width: 1000px; height: 88vh; max-height: none; }
+#dti-page-modal.dti-pm-shop .dti-pm-box { max-width: 900px; height: 86vh; max-height: none; }
+#dti-page-modal.dti-pm-customs .dti-pm-box { max-width: 1240px; height: 90vh; max-height: none; }
+#dti-page-modal.dti-pm-tf .dti-pm-box { max-width: 860px; height: 86vh; max-height: none; }
 .dti-pm-frame { position: relative; padding: 0; overflow: hidden; display: flex; }
 .dti-pm-frame > .dti-pm-loading { position: absolute; inset: 0; }
 .dti-pm-frame > iframe { position: relative; z-index: 1; flex: 1; width: 100%; height: 100%; border: none; opacity: 0; transition: opacity .2s ease; }
@@ -5390,6 +6865,11 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
 }
 .dti-ip-type-badge.nc { background: var(--accent-glow); color: var(--accent-text, var(--accent)); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
 .dti-ip-type-badge.np { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+.dti-ip-collect {
+    margin: 6px 0 2px; padding: 6px 10px; border-radius: 9px; font-size: 11.5px; font-weight: 700; line-height: 1.45;
+    background: color-mix(in srgb, #8b5cf6 12%, var(--surface)); color: #6d28d9;
+}
+html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 .dti-ip-desc {
     margin: 10px 0 0; font-size: 11px; line-height: 1.5; font-style: italic; color: var(--text-muted);
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
@@ -5467,6 +6947,18 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
 .dti-ip-dye-name { width: 100%; text-align: center; font-size: 9.5px; font-weight: 700; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dti-ip-dye.orig .dti-ip-dye-name { color: var(--text); }
 .dti-ip-dye.on .dti-ip-dye-name { color: var(--accent-text, var(--accent)); }
+.dti-ip-nf { display: flex; flex-direction: column; gap: 3px; }
+.dti-ip-nfrow {
+    width: 100%; display: flex; align-items: baseline; gap: 6px; padding: 6px 8px; cursor: pointer; text-align: left; min-width: 0;
+    border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text); font-family: inherit; transition: border-color .12s, background .12s;
+}
+.dti-ip-nfrow:hover { border-color: var(--accent); background: var(--surface-2); }
+.dti-ip-nfname { flex-shrink: 0; font-size: 12px; font-weight: 700; }
+.dti-ip-nfwhat { flex-shrink: 0; padding: 0 6px; border-radius: 99px; font-size: 9.5px; font-weight: 800; line-height: 1.6; }
+.dti-ip-nfwhat.has { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+.dti-ip-nfwhat.wants { background: color-mix(in srgb, #ec4899 14%, transparent); color: #db2777; }
+.dti-ip-nflist { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; color: var(--text-muted); }
+.dti-ip-nfmore { padding: 2px 8px; font-size: 10.5px; color: var(--text-muted); }
 .dti-ip-pool-more { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); font-size: 10.5px; font-weight: 800; color: var(--text-muted); }
 
 /* Narrow windows: popups use the whole screen */
@@ -5565,6 +7057,9 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
         });
         content.appendChild(fr);
         return modal;
+    }
+    function _openCustomsModal() {
+        _openFramedPageModal('Customs', '/your-outfits', { icon: NOTE_ITEM, cls: 'dti-pm-customs', css: '#dti-haul-wrap { display: none !important; }', loading: 'Opening your Customs\u2026' });
     }
     function _openSettingsModal() {
         _openFramedPageModal('Settings', '/users/edit', { icon: SETTINGS_ICO, cls: 'dti-pm-settings', css: '#dti-haul-wrap { display: none !important; }', loading: 'Opening Settings…' });
@@ -5802,6 +7297,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
         const name = thumb?.alt?.replace(/^Thumbnail for\s*/i, '') || raw.split('/').pop().replace(/-/g, ' ');
         const id = raw.match(/\/items\/(\d+)/)?.[1] || '';
         const card = document.createElement('a'); card.className = 'dti-pm-item-card';
+        if (!a.querySelector('img[alt="NC"]') && isPbDesc(thumb?.getAttribute('title'))) card.classList.add('dti-pb');
         card.href = raw.startsWith('http') ? raw : BASE + raw;
         card.target = '_blank'; card.rel = 'noopener noreferrer'; card.title = name;
         Object.assign(card.dataset, { id, name, img: imgSrc });
@@ -5836,6 +7332,8 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             </div></div>`, { icon: NEW_ITEMS_ICO, cls: 'dti-pm-latest' });
         const content = modal.querySelector('#dti-pm-content'), label = modal.querySelector('.dti-pm-week-label');
         const [prevB, nextB] = modal.querySelectorAll('.dti-pm-wk-btn');
+        modal.querySelector('.dti-pm-week').appendChild(niBadgesBtn('dti-pm-wk-btn dti-pm-wk-types', 'NC / NP'));
+        niBadgesApply();
         const go = { prev: '', next: '' };
         _wirePmItemButtons(modal);
         modal.querySelector('.dti-pm-week').addEventListener('click', e => { const b = e.target.closest('.dti-pm-wk-btn'); if (b && go[b.dataset.go]) load(go[b.dataset.go]); });
@@ -6003,21 +7501,23 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
         const isNotesPage = _path === '/terms' && location.hash.startsWith('#notes');
         const isTokensPage = _path === '/terms' && location.hash.startsWith('#tokens');
         const isNfPage = _path === '/terms' && location.hash.startsWith('#neofriends');
+        const isMallPage = _path === '/terms' && location.hash.startsWith('#mall');
         if (!body.classList.contains('outfits-new')) document.head.querySelector('meta[data-dti-nocache]')?.remove();   // only Home skips Turbo's cache
         // Notes, My Tokens and Neofriends all live on /terms (#notes / #tokens / #neofriends): going from one to another only changes the hash
         if (!window.__dtiHashApps) {
             window.__dtiHashApps = true;
             window.addEventListener('hashchange', () => {
                 if (location.pathname !== '/terms') return;
-                const want = location.hash.startsWith('#tokens') ? 'tokens' : location.hash.startsWith('#notes') ? 'notes' : location.hash.startsWith('#neofriends') ? 'neofriends' : '';
+                const want = location.hash.startsWith('#tokens') ? 'tokens' : location.hash.startsWith('#notes') ? 'notes' : location.hash.startsWith('#neofriends') ? 'neofriends' : location.hash.startsWith('#mall') ? 'mall' : '';
                 const have = document.getElementById('dti-tokens-app') ? 'tokens' : document.querySelector('#dti-notes-app:not(.in-modal)') ? 'notes'
-                    : document.querySelector('#dti-nf-app:not(.in-modal)') ? 'neofriends' : '';
+                    : document.querySelector('#dti-nf-app:not(.in-modal)') ? 'neofriends' : document.querySelector('#dti-mall-app:not(.in-modal)') ? 'mall' : '';
                 if (want !== have) location.reload();
             });
         }
         if      (isNotesPage)                                      initNotesPage();
         else if (isTokensPage)                                     initTokensPage();
         else if (isNfPage)                                         initNeofriendsPage();
+        else if (isMallPage)                                       initMallPage();
         else if (body.classList.contains('outfits-new'))           initHomePage();
         else if (body.classList.contains('closet_hangers-index'))  initClosetPage();
         else if (body.classList.contains('outfits-index'))         initOutfitsPage();
@@ -6038,7 +7538,11 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
 
         // Notes: pencils on item tiles everywhere, and the notes strip on item pages
         if (!isNotesPage && !isTokensPage) watchNoteTiles();
-        if (/^\/items\/\d+/.test(_path) && !isNotesPage) { mountItemNoteStrip(); setTimeout(mountItemNoteStrip, 800); }
+        mineLoad().then(() => document.querySelectorAll('[data-dti-item]').forEach(paintMineMark));   // ✓ / ♥ marks on item tiles
+        niBadgesApply();
+        nmBadgesApply();
+        nfAutoCheck();
+        if (/^\/items\/\d+/.test(_path) && !isNotesPage) { mountItemNoteStrip(); setTimeout(mountItemNoteStrip, 800); mountItemExtras(); setTimeout(mountItemExtras, 800); }
 
         _buildContribLocaleRow();
         window.__dtiDropCover?.();
@@ -6561,6 +8065,51 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             html[data-dti-theme="neon"] :is(.btn-primary, .dti-nx-new) { box-shadow: 0 0 18px rgba(255,46,151,.38) !important; }
 
             /* ── Badge visibility toggles ──────────────────────────────────── */
+            /* Newest Items' NC / NP switch: both badges, whatever the settings above say */
+            html.dti-ni-types:root #dti-newest-items-grid .object:has(.nc-icon) a::after,   /* (:root outranks the hide-NC rule below) */
+            html.dti-ni-types:root body.items-latest .item-list li.object:has(.nc-icon) > a::after { display: block !important; }
+            html.dti-ni-types #dti-newest-items-grid .object:not(:has(.nc-icon)) a::after,
+            html.dti-ni-types body.items-latest .item-list li.object:not(:has(.nc-icon)) > a::after,
+            html.dti-ni-types .dti-pm-latest .dti-pm-item-card:not(:has(.dti-pm-nc-badge))::after {   /* NP (PB below) */
+                content: 'NP'; display: block; position: absolute; top: 5px; right: 5px; z-index: 1; pointer-events: none;
+                background: color-mix(in srgb, #10b981 16%, var(--surface)); color: #047857; border: 1px solid color-mix(in srgb, #10b981 45%, transparent);
+                font-size: 8px; font-weight: 800; padding: 1px 5px; border-radius: 99px; line-height: 1.5; transition: opacity .14s;
+            }
+            html.dti-ni-types body.items-latest .item-list li.object:not(:has(.nc-icon)) > a::after { top: 7px; right: 7px; font-size: 8.5px; padding: 1px 6px; }
+            html.dti-ni-types .dti-pm-latest .dti-pm-item-card:not(:has(.dti-pm-nc-badge))::after { top: 6px; right: 6px; font-size: 8.5px; padding: 1px 6px; }
+            /* Newest Items' badges keep their own colors — gold NC, green NP, paint-brush PB — so the types are easy to tell
+               apart in any theme (the theme's badge colors can make NC and NP identical) */
+            html.dti-ni-types:root #dti-newest-items-grid .object:has(.nc-icon) a::after,
+            html.dti-ni-types:root body.items-latest .item-list li.object:has(.nc-icon) > a::after,
+            html.dti-ni-types:root .dti-pm-latest .dti-pm-nc-badge {
+                background: color-mix(in srgb, #f59e0b 20%, var(--surface)) !important; color: #b45309 !important;
+                border: 1px solid color-mix(in srgb, #f59e0b 50%, transparent) !important;
+            }
+            html.dti-ni-types[data-mode="dark"]:root :is(#dti-newest-items-grid .object:has(.nc-icon) a, body.items-latest .item-list li.object:has(.nc-icon) > a)::after,
+            html.dti-ni-types[data-mode="dark"]:root .dti-pm-latest .dti-pm-nc-badge { color: #fbbf24 !important; }
+            html.dti-ni-types[data-mode="dark"] :is(#dti-newest-items-grid .object:not(:has(.nc-icon)):not(.dti-pb) a, body.items-latest .item-list li.object:not(:has(.nc-icon)):not(.dti-pb) > a, .dti-pm-latest .dti-pm-item-card:not(:has(.dti-pm-nc-badge)):not(.dti-pb))::after { color: #6ee7b7; }
+            html.dti-ni-types #dti-newest-items-grid .object.dti-pb a::after,
+            html.dti-ni-types body.items-latest .item-list li.object.dti-pb > a::after,
+            html.dti-ni-types .dti-pm-latest .dti-pm-item-card.dti-pb::after {
+                content: 'PB'; color: #a21caf; border-color: color-mix(in srgb, #c084fc 45%, transparent);
+                background: linear-gradient(90deg, color-mix(in srgb, #f472b6 24%, var(--surface)), color-mix(in srgb, #a78bfa 26%, var(--surface)));
+            }
+            html.dti-ni-types[data-mode="dark"] :is(#dti-newest-items-grid .object.dti-pb a, body.items-latest .item-list li.object.dti-pb > a, .dti-pm-latest .dti-pm-item-card.dti-pb)::after { color: #f0abfc; }
+            html.dti-ni-types #dti-newest-items-grid .object:hover a::after,
+            html.dti-ni-types body.items-latest .item-list li.object:hover > a::after,
+            html.dti-ni-types .dti-pm-latest .dti-pm-item-card:hover::after { opacity: 0 !important; }
+            html.dti-hide-nc:not(.dti-ni-types) .dti-pm-latest .dti-pm-nc-badge { display: none; }   /* (off: the popup follows the settings too) */
+            html.dti-ni-types .dti-pm-latest .dti-pm-nc-badge { display: block !important; }
+            .dti-pm-wk-btn.dti-ni-typesbtn svg { width: 12px; height: 12px; }
+            .dti-pm-wk-btn.dti-ni-typesbtn.active { border-color: var(--accent); background: var(--accent); color: var(--accent-fg, #fff); }
+            .dti-lt-typesbtn {
+                height: 28px; padding: 0 11px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border-radius: 99px;
+                border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
+                font-family: inherit; font-size: 12px; font-weight: 700; transition: border-color .12s, color .12s, background .12s;
+            }
+            .dti-lt-typesbtn svg { width: 12px; height: 12px; }
+            .dti-lt-typesbtn:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-lt-typesbtn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-fg, #fff); }
             html.dti-hide-nc .dti-type-badge.nc,
             html.dti-hide-nc #dti-newest-items-grid .object:has(.nc-icon) a::after { display: none !important; }
             html.dti-hide-np .dti-type-badge.np { display: none !important; }
@@ -6674,6 +8223,27 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             /* Themes: preset cards with a tiny page preview (page · bar · two cards · a button) */
             .dti-preset-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
             .dti-tp-hint { margin: -2px 0 12px; font-size: 12px; line-height: 1.45; color: var(--text-muted); }
+            .dti-bk-row { display: flex; gap: 8px; }
+            .dti-bk-row button {
+                flex: 1; height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer;
+                border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text);
+                font-family: inherit; font-size: 12.5px; font-weight: 700; transition: border-color .12s, color .12s, filter .12s;
+            }
+            .dti-bk-row button svg { width: 14px; height: 14px; }
+            .dti-bk-row .dti-bk-save { border: none; background: var(--accent); color: var(--accent-fg, #fff); }
+            .dti-bk-row .dti-bk-save:hover { filter: brightness(1.08); }
+            .dti-bk-row .dti-bk-load:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-bk-row button:disabled { opacity: .5; cursor: default; }
+            .dti-bk-status { margin-top: 9px; font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+            .dti-bk-status.err { color: var(--danger); font-weight: 600; }
+            .dti-bk-status.ask { padding: 9px 10px; border-radius: 10px; background: var(--surface-2); color: var(--text); }
+            .dti-bk-status.ask b { font-weight: 800; }
+            .dti-bk-ask { display: flex; gap: 6px; margin-top: 8px; }
+            .dti-bk-ask button {
+                height: 28px; padding: 0 12px; cursor: pointer; border-radius: 8px; border: 1px solid var(--border); background: var(--surface);
+                color: var(--text); font-family: inherit; font-size: 12px; font-weight: 700;
+            }
+            .dti-bk-ask .dti-bk-yes { border-color: var(--accent); background: var(--accent); color: var(--accent-fg, #fff); }
             .dti-preset {
                 position: relative; display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 5px 5px 6px; cursor: pointer;
                 border: 1.5px solid var(--border); border-radius: 12px; background: var(--surface); font-family: inherit;
@@ -7371,7 +8941,16 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
         // NEVER use a[href*="/users/"] — that also matches the Settings link
         if (oldBar) {
             const heyMatch = (oldBar.textContent || '').match(/Hey,\s*([^!\s]+)!/);
-            if (heyMatch?.[1]) _cachedUsername = heyMatch[1];
+            if (heyMatch?.[1]) {
+                _cachedUsername = heyMatch[1];
+                if (GM_getValue('dti_user_name', '') !== _cachedUsername) GM_setValue('dti_user_name', _cachedUsername);   // for pages without the bar
+            } else if (oldBar.querySelector('a[href*="sign_in"]')) {   // logged out
+                _cachedUsername = '';
+                if (GM_getValue('dti_user_name', '')) GM_setValue('dti_user_name', '');
+            }
+        } else if (!_cachedUsername) {
+            // DTI's 404 pages are static (no user bar at all): the name seen on the last page that had it
+            _cachedUsername = GM_getValue('dti_user_name', '');
         }
         const username = _cachedUsername;
 
@@ -7446,6 +9025,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
         ];
         const MORE_LINKS = [
             { href: '/items', label: 'Browse Items', desc: 'Search every item on DTI', popup: true, icon: NAV_ICON_SEARCH },
+            { href: '/terms#mall', label: 'NC Mall Guide', desc: 'What\u2019s new, leaving and inside, with values', notes: true, popup: true, icon: MALL_ICO.replace('<svg ', '<svg width="12" height="12" aria-hidden="true" ') },
             { href: '/rainbow-pool', label: 'Pet Colors', desc: 'Every color of every pet', popup: true, icon: NAV_ICON_PALETTE },
             { href: '/rainbow-pool/styles', label: 'NC Styles', desc: 'Styles for each pet', popup: true, icon: NAV_ICON_SPARKLE },
             { href: '/terms#tokens', label: 'My Tokens', desc: 'Style tokens & essences you own and want', notes: true, popup: true,
@@ -7460,6 +9040,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             if (href === '/terms#notes') return p === '/terms' && location.hash.startsWith('#notes');
             if (href === '/terms#tokens') return p === '/terms' && location.hash.startsWith('#tokens');
             if (href === '/terms#neofriends') return p === '/terms' && location.hash.startsWith('#neofriends');
+            if (href === '/terms#mall') return p === '/terms' && location.hash.startsWith('#mall');
             if (href.includes('/closet') && p.includes('/closet')) return true;
             if (p === href) return true;
             if (href !== '/' && p.startsWith(href + '/')) {
@@ -7483,6 +9064,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
         const moreBtn = document.createElement('button'); moreBtn.className = 'dti-nav-more-btn';
         const moreAnyActive = MORE_LINKS.some(l => isActiveHref(l.href));
         moreBtn.innerHTML = `More <span class="dti-more-arrow">▾</span>`;
+        if (NF.list().some(NF.hasNew)) moreBtn.insertAdjacentHTML('afterbegin', '<i class="dti-more-dot" title="Something new from your Neofriends"></i>');
         const moreMenu = document.createElement('div'); moreMenu.className = 'dti-nav-more-menu';
         moreMenu.innerHTML = '<div class="dti-more-col dti-more-col-dti"><div class="dti-more-section-label">DTI</div></div>'
             + '<div class="dti-more-col dti-more-col-np"><div class="dti-more-section-label">Neopets</div></div>';
@@ -7491,7 +9073,8 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             const a = document.createElement('a');
             a.className = 'dti-nav-link dti-more-ico-link' + (isActiveHref(l.href) ? ' active' : '');
             a.href = l.href;
-            a.innerHTML = `<span class="dti-more-ico">${l.icon}</span><span class="dti-more-txt"><b>${l.label}</b><small>${l.desc}</small></span>`;
+            const nfNew = l.href === '/terms#neofriends' ? NF.list().filter(NF.hasNew).length : 0;
+            a.innerHTML = `<span class="dti-more-ico">${l.icon}</span><span class="dti-more-txt"><b>${l.label}${nfNew ? `<em class="dti-more-new" title="Neofriends with new items">${nfNew} new</em>` : ''}</b><small>${l.desc}</small></span>`;
             if (l.notes) {
                 // Full load: Notes / My Tokens are hash routes that only build on a fresh page
                 a.dataset.turbo = 'false';
@@ -7553,6 +9136,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             else if (ph === '/terms#notes') _openNotesModal();
             else if (ph === '/terms#tokens') _openTokensModal();
             else if (ph === '/terms#neofriends') _openNeofriendsModal();
+            else if (ph === '/terms#mall') _openMallModal();
             else if (ph === '/users/edit') _openSettingsModal();
             else _openRainbowPoolModal(ph, pl);
         });
@@ -7626,6 +9210,16 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             const logoutA = document.createElement('a');
             logoutA.href = '/users/sign_out'; logoutA.className = 'dti-logout-btn';
             logoutA.textContent = 'Log out'; right.appendChild(logoutA);
+            // No logout form on this page (a 404): borrow DTI's real one from Home — it carries the token sign-out needs
+            logoutA.addEventListener('click', async e => {
+                e.preventDefault();
+                try {
+                    const doc = new DOMParser().parseFromString(await fetch('/', { credentials: 'include' }).then(r => r.text()), 'text/html');
+                    const f = doc.querySelector('#userbar form.button_to');
+                    if (f) { const form = document.importNode(f, true); form.style.display = 'none'; document.body.appendChild(form); form.submit(); return; }
+                } catch (_) {}
+                location.href = '/';
+            });
         } else {
             const loginA = document.createElement('a');
             loginA.href = '/users/sign_in'; loginA.className = 'dti-login-btn';
@@ -7800,12 +9394,13 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
 
         const badgeRow = document.createElement('div');
         const allRow = document.createElement('div'); allRow.className = 'dti-bdg-all';
-        allRow.innerHTML = '<span>All badges</span><button type="button" data-mode="theme" title="Reset NC, NP and Qty badges to your theme">◐ Theme</button><button type="button" data-mode="solid" title="Solid theme color on NC, NP and Qty badges">● Solid</button>';
+        allRow.innerHTML = '<span>All badges</span><button type="button" data-mode="theme" title="Reset Qty, NC and NP badges to your theme">◐ Theme</button><button type="button" data-mode="solid" title="Solid theme color on Qty, NC and NP badges">● Solid</button>';
         allRow.querySelectorAll('button').forEach(b => b.addEventListener('click', () => setAllBadges(b.dataset.mode)));
         badgeRow.appendChild(allRow);
+        // Qty first: the one most people keep on
+        badgeRow.appendChild(makeBadgeCard('qty', 'Qty badge', '2',  showQtyBadge, on => applyBadgeSettings({ showQty: on })));
         badgeRow.appendChild(makeBadgeCard('nc',  'NC badge',  'NC', showNCBadge,  on => applyBadgeSettings({ showNC: on })));
         badgeRow.appendChild(makeBadgeCard('np',  'NP badge',  'NP', showNPBadge,  on => applyBadgeSettings({ showNP: on })));
-        badgeRow.appendChild(makeBadgeCard('qty', 'Qty badge', '2',  showQtyBadge, on => applyBadgeSettings({ showQty: on })));
 
         // ── NC Item Values: same card + size, and an explicit data refresh ──────
         const ncValRow = document.createElement('div');
@@ -7931,6 +9526,39 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
         panel.appendChild(makeSection('NC item values', TP_ICO.caps,      ncValBody,   'dti_sec_ncval',   false));
         panel.appendChild(makeSection('Zoom',           TP_ICO.zoom,      zoomBody,    'dti_sec_zoom',    false));
         panel.appendChild(makeSection('Neopets',        TP_ICO.link,      linkifyBody, 'dti_sec_linkify', false));
+        // Backup: one file with everything kept in this browser — save it now and then, restore it here or anywhere
+        const backupBody = document.createElement('div'); backupBody.className = 'dti-tp-section-body';
+        backupBody.innerHTML = `<p class="dti-tp-hint">Your notes, tokens, Neofriends, theme and settings live only in this browser. Save a backup file now and then \u2014 restore it here or on another computer.</p>
+            <div class="dti-bk-row"><button type="button" class="dti-bk-save">${'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4.8 7 8 10.2 11.2 7M2.5 11.3v1.4c0 .7.5 1.3 1.2 1.3h8.6c.7 0 1.2-.6 1.2-1.3v-1.4"/></svg>'}Save backup</button>
+                <button type="button" class="dti-bk-load">${'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10.2V2.2M4.8 5.4 8 2.2l3.2 3.2M2.5 11.3v1.4c0 .7.5 1.3 1.2 1.3h8.6c.7 0 1.2-.6 1.2-1.3v-1.4"/></svg>'}Restore\u2026</button>
+                <input type="file" accept=".json,application/json" hidden></div>
+            <div class="dti-bk-status"></div>`;
+        const bkStatus = backupBody.querySelector('.dti-bk-status'), bkFile = backupBody.querySelector('input[type=file]');
+        const bkLast = () => { const t = GM_getValue('dti_last_backup', 0); bkStatus.className = 'dti-bk-status'; bkStatus.textContent = t ? `Last backup: ${noteDate(t)}` : 'No backup saved yet.'; };
+        bkLast();
+        backupBody.querySelector('.dti-bk-save').addEventListener('click', async e => {
+            const b = e.currentTarget; b.disabled = true;
+            try { await dtiSaveBackup(); bkLast(); bkStatus.textContent += ' \u2713'; } catch (_) { bkStatus.className = 'dti-bk-status err'; bkStatus.textContent = 'Couldn\u2019t save the backup.'; }
+            b.disabled = false;
+        });
+        backupBody.querySelector('.dti-bk-load').addEventListener('click', () => { bkFile.value = ''; bkFile.click(); });
+        bkFile.addEventListener('change', async () => {
+            const f = bkFile.files?.[0];
+            if (!f) return;
+            const r = await dtiReadBackup(f);
+            if (r.error) { bkStatus.className = 'dti-bk-status err'; bkStatus.textContent = r.error; return; }
+            // Confirm in place: what's in the file, and that it replaces what's here
+            bkStatus.className = 'dti-bk-status ask';
+            bkStatus.innerHTML = `<span>Restore the backup from <b>${noteEsc(noteDate(Date.parse(r.data.exported) || Date.now()))}</b> (${noteEsc(r.summary)})? It replaces what\u2019s in this browser.</span>
+                <span class="dti-bk-ask"><button type="button" class="dti-bk-yes">Restore</button><button type="button" class="dti-bk-no">Cancel</button></span>`;
+            bkStatus.querySelector('.dti-bk-no').addEventListener('click', bkLast);
+            bkStatus.querySelector('.dti-bk-yes').addEventListener('click', async ev => {
+                ev.currentTarget.disabled = true;
+                try { await dtiRestoreBackup(r.data); bkStatus.className = 'dti-bk-status'; bkStatus.textContent = 'Restored \u2014 reloading\u2026'; setTimeout(() => location.reload(), 500); }
+                catch (_) { bkStatus.className = 'dti-bk-status err'; bkStatus.textContent = 'Couldn\u2019t restore that file.'; }
+            });
+        });
+        panel.appendChild(makeSection('Backup', '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M3 4.5v7.3c0 .7.5 1.2 1.2 1.2h7.6c.7 0 1.2-.5 1.2-1.2V4.5M3 4.5 4.3 2.6c.2-.3.6-.6 1-.6h5.4c.4 0 .8.3 1 .6L13 4.5M6.3 7.3h3.4"/></svg>', backupBody, 'dti_sec_backup', false));
 
         document.body.appendChild(panel);
         panel.addEventListener('click', e => e.stopPropagation());
@@ -7993,6 +9621,16 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 font-weight: 600 !important; padding: 2px 4px !important; cursor: pointer !important;
             }
             #dti-contrib-locale-row #locale-form input[type="submit"] { display: none !important; }
+            #item-contributors.dti-folded > :is(ul, footer) { display: none !important; }
+            #item-contributors > footer { font-size: 12px !important; font-weight: 600 !important; color: var(--text-muted) !important; }
+            .dti-contrib-toggle {
+                display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; cursor: pointer; border-radius: 99px;
+                border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+                font-family: inherit; font-size: 11.5px; font-weight: 700; transition: border-color .12s, color .12s;
+            }
+            .dti-contrib-toggle:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-contrib-toggle i { font-style: normal; font-size: 10px; color: var(--text-muted); }
+            #item-contributors:not(.dti-folded) > .dti-contrib-toggle { order: 99; }   /* open: "Hide" goes to the end */
         `);
     }
 
@@ -8102,6 +9740,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             }
             .dti-seg.full { display: flex; width: 100%; }
             .dti-seg.full > button { flex: 1 1 0; min-width: 0; height: 26px; }
+            .dti-nm-tabs.dti-seg.full > button { flex: 1 1 auto; padding: 0 8px; }   /* four tabs: each as wide as its label needs */
             .dti-seg-n, .dti-nm-tab-count {   /* count inside a tab */
                 min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 99px;
                 display: inline-grid; place-items: center; font-size: 9.5px; font-weight: 800; line-height: 1;
@@ -8438,12 +10077,39 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 font-size: 8px; font-weight: 800; letter-spacing: .3px; line-height: 1.5;
             }
             .dti-nm-tile a[data-nm-badge]::after { display: block; }
+            html.dti-nm-nobadges .dti-nm-tile a[data-nm-badge]::after { display: none; }   /* the card's badge switch */
+            html.dti-nm-nobadges #dti-nm-grid li.dti-nm-tile:has(> a[data-nm-badge]) .dti-note-btn { top: 5px; }
             .dti-nm-tile[data-nm-type=capsule] a::after { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); color: var(--accent-text, var(--accent)); }
             .dti-nm-tile[data-nm-type=sale] a::after { background: color-mix(in srgb, var(--success) 16%, var(--surface)); color: var(--success); }
             .dti-nm-tile[data-nm-type=leaving] a::after { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); color: var(--danger); }
+            .dti-nm-tile[data-nm-type=collectible] a::after { background: color-mix(in srgb, #8b5cf6 16%, var(--surface)); color: #6d28d9; }
+            html[data-mode="dark"] .dti-nm-tile[data-nm-type=collectible] a::after { color: #c4b5fd; }
+            .dti-nm-tile[data-nm-type=event] a::after { background: color-mix(in srgb, #0ea5e9 16%, var(--surface)); color: #0369a1; }
+            html[data-mode="dark"] .dti-nm-tile[data-nm-type=event] a::after { color: #7dd3fc; }
+            .dti-nm-tile[data-nm-type=sticker] a::after { background: color-mix(in srgb, #14b8a6 16%, var(--surface)); color: #0f766e; }
+            html[data-mode="dark"] .dti-nm-tile[data-nm-type=sticker] a::after { color: #5eead4; }
+            .dti-nm-tile[data-nm-type=trinket] a::after { background: color-mix(in srgb, #f59e0b 18%, var(--surface)); color: #b45309; }
+            html[data-mode="dark"] .dti-nm-tile[data-nm-type=trinket] a::after { color: #fbbf24; }
             .dti-nm-tile[data-nm-type=dyeworks] a::after { background: color-mix(in srgb, #d946ef 16%, var(--surface)); color: #c026d3; }
             html[data-mode="dark"] .dti-nm-tile[data-nm-type=dyeworks] a::after { color: #e879f9; }
-            .dti-nm-cd { width: 100%; margin-top: 1px; text-align: center; white-space: nowrap; font-size: 11px; font-weight: 700; color: var(--danger); }
+            .dti-nm-cd { width: 100%; margin-top: 1px; text-align: center; white-space: nowrap; font-size: 11px; font-weight: 700; color: var(--text-muted); }
+            /* Leaving soon: amber within a week, red within 3 days; the last day tints the whole tile */
+            .dti-nm-tile[data-urgency="week"] .dti-nm-cd { color: #d97706; }
+            html[data-mode="dark"] .dti-nm-tile[data-urgency="week"] .dti-nm-cd { color: #fbbf24; }
+            .dti-nm-tile:is([data-urgency="soon"], [data-urgency="day"]) .dti-nm-cd { color: var(--danger); }
+            .dti-nm-tile[data-urgency="soon"] > a {
+                background: color-mix(in srgb, #f59e0b 8%, var(--surface-2));
+                border-color: color-mix(in srgb, #f59e0b 38%, var(--border));
+            }
+            .dti-nm-tile[data-urgency="day"] > a {
+                background: color-mix(in srgb, var(--danger) 13%, var(--surface-2));
+                border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+                box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 25%, transparent);
+            }
+            .dti-nm-tile[data-urgency="day"] .dti-nm-cd::before {
+                content: ''; display: inline-block; width: 6px; height: 6px; margin: 0 5px 2px 0; border-radius: 50%; vertical-align: middle;
+                background: var(--danger); animation: dti-nm-pulse 1.4s ease infinite;
+            }
             /* Date dividers span the grid */
             .dti-nm-daterow {
                 grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 6px 2px 0;
@@ -8505,6 +10171,10 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             body.outfits-new #main > p.error { display: none !important; }
             /* ── Your Customs ────────────────────────────────────────────────── */
             #dti-right-large-card { flex: 1; }
+            .dti-uo-header .dti-hc-actions > [hidden] { display: none !important; }   /* A–Z / shuffle wait for the customs */
+            .dti-uo-header { gap: 6px; }   /* four buttons in the narrow column: a little tighter so "Customs" fits */
+            .dti-uo-header .dti-hc-actions { gap: 4px; }
+            .dti-uo-header .dti-uo-sort-btn { padding: 0 7px; }
             .dti-uo-grid {   /* two columns in the sidebar, more when the card is full width */
                 flex: 1; min-height: 0; overflow-y: auto; align-content: start;
                 display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; padding: 12px;
@@ -9038,12 +10708,15 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             uoHdr.className = 'dti-hc-head dti-uo-header';
             uoHdr.innerHTML = `
                 <span class="dti-hc-ico">${NOTE_ITEM}</span>
-                <span class="dti-hc-title">Your Customs</span>
+                <span class="dti-hc-title">Customs</span>
                 <span class="dti-hc-count dti-uo-count" hidden></span>
-                <div class="dti-hc-actions" hidden>
-                    <button class="dti-hc-pill dti-uo-sort-btn active" type="button">A–Z</button>
-                    <button class="dti-icon-btn dti-uo-rand-btn" type="button" title="Shuffle">${HOME_ICO.shuffle}</button>
+                <div class="dti-hc-actions">
+                    <button class="dti-hc-pill dti-uo-sort-btn active" type="button" hidden>A–Z</button>
+                    <button class="dti-icon-btn dti-uo-rand-btn" type="button" title="Shuffle" hidden>${HOME_ICO.shuffle}</button>
+                    <button class="dti-icon-btn dti-uo-pop" type="button" title="Open in a popup">${POPUP_ICO}</button>
+                    <a class="dti-icon-btn" href="/your-outfits" title="Full page view">${HOME_ICO.ext}</a>
                 </div>`;
+            uoHdr.querySelector('.dti-uo-pop').addEventListener('click', _openCustomsModal);
             cardRLarge.appendChild(uoHdr);
 
             // Load user's customs into the card
@@ -9132,7 +10805,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                     };
                     sortBtn.addEventListener('click', () => { uoSort = uoSort === 'az' ? 'za' : 'az'; _applyUoSort(uoSort); showSort(); });
                     randBtn.addEventListener('click', () => { uoSort = 'rand'; _applyUoSort('rand'); showSort(); });
-                    uoHdr.querySelector('.dti-hc-actions').hidden = false;
+                    sortBtn.hidden = randBtn.hidden = false;
                     showSort();
                 } catch (_) {
                     statusEl.textContent = 'Sign in to see your customs.';
@@ -9181,6 +10854,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
 
             weekNav.appendChild(prevBtn); weekNav.appendChild(weekLabel); weekNav.appendChild(nextBtn);
             hdrActions.appendChild(weekNav);
+            hdrActions.appendChild(niBadgesBtn('dti-icon-btn'));
             // Popup and full page (both open the week shown here)
             const popBtn = document.createElement('button');
             popBtn.type = 'button'; popBtn.className = 'dti-icon-btn'; popBtn.title = 'Open in a popup';
@@ -9215,7 +10889,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
 
                     const itemId = href.match(/\/items\/(\d+)/)?.[1] || '';
                     const li = document.createElement('li');
-                    li.className = 'object' + (isNc ? ' nc-object' : '');
+                    li.className = 'object' + (isNc ? ' nc-object' : !isNc && isPbDesc(img?.getAttribute('title')) ? ' dti-pb' : '');
                     if (isNc) {
                         const ncSpan = document.createElement('span');
                         ncSpan.className = 'nc-icon'; li.appendChild(ncSpan);
@@ -9392,7 +11066,8 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                                 </div>
                                 ${mall._bundlePrices ? `<div class="dti-ip-mall-note">Bundles: ${mall._bundlePrices.join(' · ')} NC</div>` : ''}
                                 ${retriesStr ? `<div class="dti-ip-mall-retires"><svg width="9" height="11" viewBox="0 0 9 11" fill="none" style="color:var(--accent-text, var(--accent));vertical-align:middle;margin-right:3px;flex-shrink:0;" aria-hidden="true"><path d="M1 1h7M1 10h7M2 1v2l2.5 2.5L2 8v2M7 1v2L4.5 5.5 7 8v2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>Retires in ${retriesStr}</div>` : ''}
-                                ${mall.canOpen === 'true' || mall.canOpen === true ? '<div class="dti-ip-mall-note">Mystery Capsule — opens to a random item</div>' : ''}
+                                ${isEventItem(mall.description) ? '<div class="dti-ip-mall-note">Event item \u2014 for a Neopets site event (not wearable)</div>' : mall.canOpen === 'true' || mall.canOpen === true ? `<div class="dti-ip-mall-note">${trinketKind(mall.description || desc) ? trinketKind(mall.description || desc) + ' \u2014 comes with the items below' : 'Mystery Capsule \u2014 opens to a random item'}</div>` : ''}
+                                ${/neosignature/i.test(mall.description || '') ? '<div class="dti-ip-mall-note">Sticker pack \u2014 stickers for your Neosignature (not wearable)</div>' : ''}
                                 <a class="dti-ip-mall-link" href="https://www.neopets.com/ncmall/index.phtml">Open in NC Mall →</a>
                             </div>`;
                     }
@@ -9421,7 +11096,8 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                         ? `<div class="dti-ip-section">Wears On</div><div class="dti-ip-zones">${zones.map(z => `<span class="dti-ip-zone">${z}</span>`).join('')}</div>`
                         : '';
 
-                    const isCapsuleItem = mall?.canOpen === 'true' || mall?.canOpen === true;
+                    const isCapsuleItem = mall?.canOpen === 'true' || mall?.canOpen === true || !!pool?.items?.length;
+                    const _inside = trinketKind(mall?.description || desc) ? 'Comes With' : 'Inside This Capsule';
                     let poolHtml = '';
                     if (isCapsuleItem && pool && pool.found && pool.items && pool.items.length) {
                         const _guaranteed = pool.items.filter(x => x.rate != null && x.rate >= 100);
@@ -9429,7 +11105,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                         const _bonusCount  = _guaranteed.length > 0 ? pool.items.length - _guaranteed.length : 0;
                         const shown = _poolDisplay.slice(0, 14);
                         const extra = _poolDisplay.length - shown.length;
-                        poolHtml = `<div class="dti-ip-section">Inside This Capsule${_bonusCount > 0 ? ` <span style="font-size:9px;font-weight:600;color:var(--text-muted);opacity:.7;">+${_bonusCount} possible bonus</span>` : ''}</div>
+                        poolHtml = `<div class="dti-ip-section">${_inside}${_bonusCount > 0 ? ` <span style="font-size:9px;font-weight:600;color:var(--text-muted);opacity:.7;">+${_bonusCount} possible bonus</span>` : ''}</div>
                             <div class="dti-ip-pool-grid">
                                 ${shown.map(x => `<a class="dti-ip-pool-item${x.isLE ? ' le' : ''}" href="/items/0#pool-${x.iid}" data-turbo="false" data-pin="${(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" data-pii="${(x.image||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" onclick="try{localStorage.setItem('dti_pi_${x.iid}',JSON.stringify({name:this.dataset.pin,image:this.dataset.pii,iid:${x.iid}}))}catch(e){}">
                                     ${x.image ? `<img src="${x.image}" alt="" loading="lazy">` : ''}
@@ -9449,6 +11125,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                             </div>
                         </div>
                         ${desc ? `<div class="dti-ip-desc">${desc}</div>` : ''}
+                        ${collectibleInfo(desc || mall?.description) ? `<div class="dti-ip-collect">${noteEsc(collectibleText(collectibleInfo(desc || mall?.description)))}</div>` : ''}
                         <hr class="dti-ip-divider">
                         ${firstSeen ? `<div class="dti-ip-row"><span class="dti-ip-label">First seen</span><span class="dti-ip-val">${firstSeen}</span></div>` : ''}
                         ${isNc && !isCapsuleItem ? `<div class="dti-ip-row dti-ip-cap-row"><span class="dti-ip-label">Cap Value</span><span class="dti-ip-val">${capVal ? capVal + ' caps' : '? caps'}</span></div>` : ''}
@@ -9456,6 +11133,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                         ${poolHtml}
                         ${srcHtml}
                         ${isNc && !isCapsuleItem ? '<div class="dti-ip-dye-host"></div>' : ''}
+                        <div class="dti-ip-nf-host"></div>
                         ${isCapsuleItem ? '' : zonesHtml}
                         <hr class="dti-ip-divider">
                         <div class="dti-ip-row">
@@ -9482,6 +11160,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                     });
                     _pos(btn);
                     dyeFillSection(popup.querySelector('.dti-ip-dye-host'), id, name, () => _pos(btn));
+                    nfFillSection(popup.querySelector('.dti-ip-nf-host'), id, () => _pos(btn));
 
                     if (isNc && !capVal && !isCapsuleItem) {
                         lookupNcValue(name, val => {
@@ -9514,20 +11193,27 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                     <span class="dti-hc-ico">${HOME_ICO.bag}</span>
                     <span class="dti-hc-title">NC Mall</span>
                     <div class="dti-hc-actions">
+                        <button type="button" class="dti-icon-btn dti-nm-badgesbtn">${MG_ICO.tag}</button>
+                        <button type="button" class="dti-icon-btn dti-nm-guidepop" title="Open the NC Mall Guide in a popup">${POPUP_ICO}</button>
+                        <a class="dti-icon-btn" href="/terms#mall" data-turbo="false" title="Open the NC Mall Guide">${HOME_ICO.ext}</a>
                         <a class="dti-hc-link" href="https://www.neopets.com/ncmall/index.phtml" target="_blank" rel="noopener">Shop the Mall ${HOME_ICO.ext}</a>
                     </div>
                 </div>
                 <div class="dti-hc-tools">
                     <div class="dti-nm-tabs dti-seg full">
                         <button class="dti-nm-tab active" type="button" data-nm-tab="new">New</button>
-                        <button class="dti-nm-tab" type="button" data-nm-tab="leaving">Leaving Soon</button>
+                        <button class="dti-nm-tab" type="button" data-nm-tab="leaving" title="Leaving the NC Mall soon">Leaving</button>
                         <button class="dti-nm-tab" type="button" data-nm-tab="sale">On Sale</button>
+                        <button class="dti-nm-tab" type="button" data-nm-tab="wish" title="Your wishlist items in the NC Mall now">♥ Wishlist</button>
                     </div>
                 </div>
                 <ul id="dti-nm-grid">${_nmSkelHTML}</ul>
             `;
 
             const nmGrid2 = cardNcMall.querySelector('#dti-nm-grid');
+            cardNcMall.querySelector('.dti-nm-badgesbtn').addEventListener('click', () => { GM_setValue('dti_nm_badges', !nmBadgesOn()); nmBadgesApply(); });
+            cardNcMall.querySelector('.dti-nm-guidepop').addEventListener('click', () => _openMallModal());
+            nmBadgesApply();
             const nmTabs  = cardNcMall.querySelectorAll('.dti-nm-tab');
 
             // Persistent click delegation for info popup
@@ -9554,6 +11240,11 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 } catch(_) { return ''; }
             };
 
+            // How soon it leaves: day (under 24h) · soon (under 3 days) · week (under 7) · '' (later)
+            function nmUrgency(end) {
+                const ms = Date.parse(end) - Date.now();
+                return ms < 864e5 ? 'day' : ms < 3 * 864e5 ? 'soon' : ms < 7 * 864e5 ? 'week' : '';
+            }
             function nmCd(end) {
                 const ms = Math.max(0, Date.parse(end) - Date.now());
                 if (!ms) return '<span>leaving now</span>';
@@ -9573,6 +11264,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                     const key = (r.slug || r.name || '')
                         .toLowerCase()
                         .replace(/-?\d+[-\s]*x?[-\s]*bundles?$/, '')
+                        .replace(/-?\d+[-\s]*packs?$/, '')   // "… 3-Pack" (slingshots, keys, widgets)
                         .replace(/-bundles?$/, '')
                         .replace(/[-\s]\d+[-\s]*b\.?$/, '')
                         .replace(/[-\s]+$/, '').trim();
@@ -9593,6 +11285,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                     new:     nmGroupBundles(all.filter(r => (Date.parse(r.saleBegin || r.addedAt) || 0) >= Date.now() - BACK_MS)).length,
                     leaving: nmGroupBundles(all.filter(r => r.saleEnd && Date.parse(r.saleEnd) <= Date.now() + SOON_MS)).length,
                     sale:    nmGroupBundles(all.filter(nmIsOnSale)).length,
+                    wish:    _mineMap ? all.filter(r => mineOf(r.item_id)?.want && mallBuyable(r)).length : 0,
                 };
                 nmTabs.forEach(tab => {
                     const k = tab.dataset.nmTab;
@@ -9614,6 +11307,9 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 } else if (mode === 'sale') {
                     rows = rows.filter(nmIsOnSale)
                                .sort((a, b) => nmDiscountPct(b) - nmDiscountPct(a));
+                } else if (mode === 'wish') {   // your wishlist, soonest to leave first
+                    rows = rows.filter(r => mineOf(r.item_id)?.want && mallBuyable(r))
+                               .sort((a, b) => (Date.parse(a.saleEnd) || Infinity) - (Date.parse(b.saleEnd) || Infinity) || a.name.localeCompare(b.name));
                 } else {
                     rows = rows.filter(r => (Date.parse(r.saleBegin || r.addedAt) || 0) >= Date.now() - BACK_MS)
                                .sort((a, b) => (Date.parse(b.saleBegin || b.addedAt) || 0) - (Date.parse(a.saleBegin || a.addedAt) || 0));
@@ -9623,6 +11319,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                     nmGrid2.innerHTML = `<li class="dti-nm-empty">${
                         mode === 'sale' ? 'No active sales right now.' :
                         mode === 'leaving' ? 'Nothing retiring soon.' :
+                        mode === 'wish' ? (_mineMap ? 'Nothing on your wishlist is in the NC Mall right now.' : 'Open My Items once (logged in) so your wishlist is known.') :
                         'Nothing new in the last 31 days.'}</li>`;
                     return;
                 }
@@ -9630,18 +11327,27 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
 
                 function _nmBuildTile(r, mode) {
                     const isSale = nmIsOnSale(r);
-                    const isCap  = r.canOpen === 'true' || r.canOpen === true;
+                    // Trinkets (Deluxe / Super Deluxe) get their own badge: a Super Deluxe one opens like a capsule but isn't one
+                    const trinket = trinketKind(r.description).replace(/ Trinket$/, '');
+                    const openable = r.canOpen === 'true' || r.canOpen === true || (r.canOpen !== 'false' && /\bcapsule\b/i.test(r.name || ''));
+                    const event = isEventItem(r.description);
+                    const collectible = collectibleInfo(r.description);
+                    const isCap  = !trinket && !event && openable && !/fortune cookie/i.test(r.name || '');   // (NC Fortune Cookies open too)
+                    const sticker = /\bsticker pack\b/i.test(r.name || '') || /neosignature/i.test(r.description || '');   // Neosignature stickers
                     const li = document.createElement('li');
                     li.className = 'dti-nm-tile';
-                    li.dataset.nmType = mode === 'leaving' ? 'leaving' : isSale ? 'sale' : isCap ? 'capsule' : '';
+                    li.dataset.nmType = mode === 'leaving' ? 'leaving' : isSale ? 'sale' : isCap ? 'capsule' : trinket ? 'trinket' : sticker ? 'sticker' : event ? 'event' : collectible ? 'collectible' : '';
                     // DTI only keeps wearables: capsules and other non-wearables get no "Add to your lists"
-                    if (r.isWearable === false || (r.isWearable == null && isCap)) li.dataset.nmWear = '0';
+                    if (r.isWearable === false || (r.isWearable == null && openable)) li.dataset.nmWear = '0';
                     const a = document.createElement('a');
                     a.href = r.item_id ? `/items/${r.item_id}` : 'https://www.neopets.com/ncmall/index.phtml';
                     a.dataset.turbo = 'false';
-                    if (isCap)                   a.dataset.nmBadge = 'Cap';
+                    if (isCap)                   a.dataset.nmBadge = isGbcName(r.name) ? 'GBC' : 'Cap';   // Gift Box Mystery Capsule
                     else if (isSale)             a.dataset.nmBadge = 'Sale';
-                    else if (mode === 'leaving') a.dataset.nmBadge = '⚠';
+                    else if (trinket)            a.dataset.nmBadge = trinket;
+                    else if (sticker)            a.dataset.nmBadge = 'Stickers';
+                    else if (event)              a.dataset.nmBadge = 'Event';
+                    else if (collectible)        a.dataset.nmBadge = collectible.bonus ? 'Bonus' : `Collectible${collectible.n ? ' #' + collectible.n : ''}`;
                     // Dyeworks: dyeable wearables get a badge (looked up on DTI once, then remembered)
                     if (!a.dataset.nmBadge && r.isWearable !== false) {
                         const markDye = e => { if (e?.v?.length && !a.dataset.nmBadge) { a.dataset.nmBadge = 'Dyeworks'; li.dataset.nmType = 'dyeworks'; } };
@@ -9671,10 +11377,12 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                         bl.textContent = r._bundlePrices.map(p => p + ' NC').join(' · ');
                         a.appendChild(bl);
                     }
-                    if (mode === 'leaving' && r.saleEnd) {
+                    if ((mode === 'leaving' || mode === 'wish') && r.saleEnd) {
                         const cd = document.createElement('span');
-                        cd.className = 'dti-nm-cd'; cd.dataset.nmCd = r.saleEnd;
+                        cd.className = 'dti-nm-cd';
+                        cd.dataset.nmCd = r.saleEnd;
                         cd.innerHTML = nmCd(r.saleEnd);
+                        li.dataset.urgency = nmUrgency(r.saleEnd);
                         a.appendChild(cd);
                     }
                     if (r.item_id) {
@@ -9730,12 +11438,16 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 nmGrid2.innerHTML = '';
                 nmGrid2.appendChild(frag);
 
-                if (mode === 'leaving') {
+                if (mode === 'leaving' || mode === 'wish') {
                     const cdEls = nmGrid2.querySelectorAll('[data-nm-cd]');
                     if (cdEls.length) {
                         _nmCdInterval = setInterval(() => {
                             if (!document.contains(nmGrid2)) { clearInterval(_nmCdInterval); _nmCdInterval = null; return; }
-                            cdEls.forEach(el => { el.innerHTML = nmCd(el.dataset.nmCd); });
+                            cdEls.forEach(el => {
+                                el.innerHTML = nmCd(el.dataset.nmCd);
+                                const li = el.closest('.dti-nm-tile');
+                                if (li) li.dataset.urgency = nmUrgency(el.dataset.nmCd);
+                            });
                         }, 1000);
                     }
                 }
@@ -9776,6 +11488,8 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             }));
 
             nmLoad();
+            // Your wishlist becomes known (or fresher) after the mall data: count it on the Wishlist tab
+            mineLoad().then(() => { if (_nmData && cardNcMall.isConnected) { nmUpdateTabCounts(_nmData); if (_nmMode === 'wish') nmRender(_nmData, 'wish'); } });
             belowRow.appendChild(cardNcMall);
 
             homeGrid.appendChild(belowRow);
@@ -10359,7 +12073,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             .dti-qty-step:hover:not(:disabled) { background: var(--accent); color: var(--accent-fg, #fff); }
             .dti-qty-step:disabled { opacity: .35; cursor: default; }
             /* ── Right sidebar ───────────────────────────────────────────────── */
-            #dti-closet-right { padding: 14px 20px 14px 14px; overflow-y: auto; background: rgba(0,0,0,0.03); grid-column: 5;
+            #dti-closet-right { padding: 14px 20px 136px 14px; overflow-y: auto;   /* (room at the end: the floating Try-On Haul button never covers the last section) */ background: rgba(0,0,0,0.03); grid-column: 5;
                 scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
             #dti-closet-right::-webkit-scrollbar { width: 5px; }
             #dti-closet-right::-webkit-scrollbar-track { background: transparent; }
@@ -11085,6 +12799,38 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
         } catch (_) {}
 
 
+        sections.wanted.forEach(l => l.items.forEach(i => { i.inWanted = true; }));
+        if (isOwnPage) {
+            let listsChanged = false;
+            window.__dtiClosetDirty = () => { listsChanged = true; };
+            window.__dtiClosetFlush = () => {
+                if (!listsChanged || !document.getElementById('dti-closet-wrap')) return;
+                listsChanged = false;
+                try {
+                    sessionStorage.setItem('dti_closet_restore', JSON.stringify({ path: location.pathname, at: Date.now(),
+                        center: document.getElementById('dti-closet-center')?.scrollTop || 0, left: document.getElementById('dti-closet-left')?.scrollTop || 0 }));
+                } catch (_) {}
+                location.reload();
+            };
+        } else { window.__dtiClosetDirty = window.__dtiClosetFlush = null; }   // (someone else's page: nothing to refresh)
+        // Wishlist items buyable in the NC Mall right now get a tag on their cards (own page)
+        let _wantMall = null;
+        function addMallTag(card) {
+            const r = _wantMall?.get(+card.dataset.wantId);
+            if (!r || card.querySelector('.dti-mall-tag')) return;
+            const left = r.saleEnd ? Math.ceil((Date.parse(r.saleEnd) - Date.now()) / 864e5) : 0;
+            const price = r.discountPrice > 0 && r.discountPrice < r.price && (!r.discountEnd || Date.parse(r.discountEnd) > Date.now()) ? r.discountPrice : r.price;
+            const tag = document.createElement('span');
+            tag.className = 'dti-mall-tag' + (left && left <= 15 ? ' soon' : '');
+            tag.textContent = `NC Mall · ${price} NC${left && left <= 15 ? ` · ${left}d left` : ''}`;
+            tag.title = `On your wishlist and in the NC Mall now${r.saleEnd ? ` (until ${new Date(r.saleEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})` : ''}`;
+            card.querySelector('.dti-item-name')?.after(tag);
+        }
+        if (isOwnPage && sections.wanted.some(l => l.items.length)) mallFeed().then(items => {
+            if (!items) return;
+            _wantMall = new Map(items.filter(mallBuyable).map(r => [+r.item_id, r]));
+            document.querySelectorAll('.dti-item-card[data-want-id]').forEach(addMallTag);
+        });
         const allOwned = sections.owned.flatMap(l => l.items);
         const allWanted = sections.wanted.flatMap(l => l.items);
         const ncOwnedCount = allOwned.filter(i => i.nc).length;
@@ -11760,11 +13506,13 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 <span id="dti-center-title">Select a list</span>
                 ${isOwnPage ? `<button id="dti-center-add" class="dti-list-add" type="button" hidden>${PLUS_ICO}Add item</button>` : ''}
                 <span id="dti-center-count"></span>
+                <span id="dti-center-caps" class="dti-caps-total"></span>
                 <button class="dti-select-toggle-btn" id="dti-select-toggle" title="Select multiple items" style="display:none">Select</button>
             </div>
             <div id="dti-list-description" hidden></div>
             <div class="dti-bulk-bar" id="dti-bulk-bar">
                 <span id="dti-bulk-count">0 selected</span>
+                <span id="dti-bulk-caps" class="dti-caps-total"></span>
                 <button class="dti-select-toggle-btn" id="dti-select-all" title="Select all visible items">Select All</button>
                 <button class="dti-select-toggle-btn active" id="dti-select-cancel">✕ Cancel</button>
                 <select id="dti-bulk-move-sel" disabled title="Move selected items to list">
@@ -11881,6 +13629,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                         <button id="dti-nf-popup" type="button" title="Open Neofriends in a popup">${POPUP_ICO}Manage</button>
                         <a href="/terms#neofriends" data-turbo="false" title="Open the Neofriends page">Full page ↗</a>
                     </div>
+                    <button type="button" id="dti-nf-finder" class="dti-nfs-finder" title="Who's offering the items on your wishlist">${NF_ICO.search}Find traders for your wishlist</button>
                 </div>
             </div>
             <div class="dti-panel-section" id="dti-tokens-section">
@@ -12486,6 +14235,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             const moveSelEl = document.getElementById('dti-bulk-move-sel');
             const partial = selectedEntries().filter(e => e.n < e.item.qty).length;
             if (countEl) countEl.textContent = `${n} selected${partial ? ` · ${partial} partial` : ''}`;
+            fillCaps(document.getElementById('dti-bulk-caps'), [...selectedItemMap].map(([key, item]) => ({ name: item.name, nc: item.nc, qty: selCount(key, item) })));
             const hasDeleteable = [...selectedItemMap.values()].some(i => i.hangerId);
             if (delBtn) delBtn.disabled = !hasDeleteable;
             if (moveBtn) moveBtn.disabled = n === 0 || !moveSelEl?.value;
@@ -12756,6 +14506,8 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 <span class="dti-item-name">${item.name}</span>
                 <span class="dti-nc-val-slot"></span>
             `;
+            if (!isOwnPage && itemId) { card.dataset.dtiItem = itemId; paintMineMark(card); }
+            if (isOwnPage && item.inWanted && itemId) { card.dataset.wantId = itemId; if (_wantMall) addMallTag(card); }
             return card;
         }
         // Cards are built once per item and reused — re-rendering thousands of cards on every
@@ -12843,6 +14595,18 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             if (gridPending.length) setTimeout(() => pumpGrid(gen), 0);
         }
 
+        // "≈ 412–530 caps" for a set of items (NC items only; copies counted). Late answers for an older render are dropped.
+        function fillCaps(el, items) {
+            if (!el) return;
+            const nc = showNcValues ? items.filter(i => i.nc) : [];
+            const tok = el._capTok = (el._capTok || 0) + 1;
+            if (!nc.length) { el.textContent = ''; el.title = ''; return; }
+            ncCapTotal(nc.map(i => ({ name: i.name, qty: i.qty || 1 }))).then(t => {
+                if (el._capTok !== tok) return;
+                el.textContent = capTotalText(t);
+                el.title = capTotalTitle(t);
+            });
+        }
         function renderGrid() {
             const grid = document.getElementById('dti-item-grid');
             const ph   = document.getElementById('dti-closet-placeholder');
@@ -12864,11 +14628,13 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 grid.hidden = true; ph.hidden = false;
                 const sp = ph.querySelector('span'); if (sp) sp.textContent = 'Click a list to browse its items';
                 if (cnt) cnt.textContent = '';
+                fillCaps(document.getElementById('dti-center-caps'), []);
                 return;
             }
 
             const multi = activeLists.length > 1;
             let totalVisible = 0;
+            const allShown = [];
 
             // Order by left sidebar DOM order so user drag-reordering is reflected
             const cardEls = [...document.querySelectorAll('#dti-closet-left .dti-list-card')];
@@ -12889,6 +14655,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             let prevSection = null;
             ordered.forEach(al => {
                 const items = filterAndSort(al.lst.items);
+                allShown.push(...items);
 
                 // Section divider on any section boundary
                 if (multi && prevSection !== null && al.section !== prevSection) {
@@ -12908,8 +14675,9 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                     const hdr = document.createElement('div'); hdr.className = 'dti-grid-group-header';
                     hdr.id = groupId;
                     const addBtn = isOwnPage ? `<button class="dti-list-add" type="button" data-section="${al.section}" data-list-id="${al.lst.listId || ''}" title="Add an item to this list">${PLUS_ICO}Add</button>` : '';
-                    hdr.innerHTML = `<span class="dti-grid-group-name">${al.lst.listName}</span><span class="dti-grid-group-count">${items.length} item${items.length !== 1 ? 's' : ''}</span>${addBtn}<button class="dti-group-collapse-btn" title="Collapse/expand list"><svg class="dti-group-collapse-icon${collapsed ? ' collapsed' : ''}" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,5 7,10 12,5"/></svg></button>`;
+                    hdr.innerHTML = `<span class="dti-grid-group-name">${al.lst.listName}</span><span class="dti-grid-group-count">${items.length} item${items.length !== 1 ? 's' : ''}</span><span class="dti-grid-group-caps dti-caps-total"></span>${addBtn}<button class="dti-group-collapse-btn" title="Collapse/expand list"><svg class="dti-group-collapse-icon${collapsed ? ' collapsed' : ''}" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,5 7,10 12,5"/></svg></button>`;
                     gridFrag.appendChild(hdr);
+                    fillCaps(hdr.querySelector('.dti-grid-group-caps'), items);
                     if (al.lst.description && !collapsed) {
                         const desc = document.createElement('div'); desc.className = 'dti-grid-group-desc';
                         desc.innerHTML = al.lst.description; gridFrag.appendChild(desc);
@@ -12940,6 +14708,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             if (gridPending.length) setTimeout(() => pumpGrid(gen), 0);
 
             if (cnt) cnt.textContent = `${totalVisible} item${totalVisible !== 1 ? 's' : ''}`;
+            fillCaps(document.getElementById('dti-center-caps'), allShown);
             const empty = totalVisible === 0 && !multi;
             ph.hidden = !empty; grid.hidden = empty;
             if (empty) {
@@ -12947,6 +14716,18 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 if (descEl) { descEl.innerHTML = ''; descEl.hidden = true; }
             }
         }
+
+        // Back from a refresh after list changes: the same place in both columns
+        try {
+            const back = JSON.parse(sessionStorage.getItem('dti_closet_restore') || 'null');
+            sessionStorage.removeItem('dti_closet_restore');
+            if (back && back.path === location.pathname && Date.now() - back.at < 60e3) setTimeout(() => {
+                flushGrid?.();
+                const c = document.getElementById('dti-closet-center'), l = document.getElementById('dti-closet-left');
+                if (c) c.scrollTop = back.center;
+                if (l) l.scrollTop = back.left;
+            }, 250);
+        } catch (_) {}
 
         // Restore previously active lists — must run after activeLists/renderGrid/all panels are in DOM.
         // A link to one list (#closet-list-<id>: Neofriends, DTI's own list links) opens just that one instead.
@@ -13608,6 +15389,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             paintNfSide();
             nfSide.querySelector('.dti-nfs-list').addEventListener('click', e => { const r = e.target.closest('.dti-nfs-row'); if (r) _openNeofriendsModal(r.dataset.id); });
             document.getElementById('dti-nf-popup')?.addEventListener('click', () => _openNeofriendsModal());
+            document.getElementById('dti-nf-finder')?.addEventListener('click', () => _openTradeFinder());
             if (typeof GM_addValueChangeListener === 'function') [NF.KEY, 'dti_nf_ping'].forEach(k => GM_addValueChangeListener(k, () => { if (nfSide.isConnected) paintNfSide(); }));
         }
         // My Tokens at a glance (kept up to date when another tab changes them)
@@ -13707,6 +15489,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                     try {
                         const r = await fetch(`/user/${usernameSlug}/items/${slug}/closet_hangers/update_quantities`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': csrf }, body });
                         const flash = r.ok ? 'var(--success)' : 'var(--danger)';
+                        if (r.ok) window.__dtiClosetDirty?.();
                         card.style.boxShadow = `0 0 0 3px ${flash}`; setTimeout(() => { card.style.boxShadow = ''; }, 1400);
                     } catch { card.style.boxShadow = '0 0 0 3px var(--danger)'; setTimeout(() => { card.style.boxShadow = ''; }, 1400); }
                 };
@@ -13718,7 +15501,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             const _cleanupQap = () => _qapDropCleanup.forEach(fn => fn());
 
             // Close
-            panel.querySelector('.dti-qap-close').addEventListener('click', () => { _cleanupQap(); panel.remove(); });
+            panel.querySelector('.dti-qap-close').addEventListener('click', () => { _cleanupQap(); panel.remove(); window.__dtiClosetFlush?.(); });
 
             // Drag
             const hdr = panel.querySelector('#dti-qap-hdr');
@@ -13831,7 +15614,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 _searchT = setTimeout(() => doSearch(q, 1), 280);
             });
 
-            inp.addEventListener('keydown', e => { if (e.key === 'Escape') { _cleanupQap(); panel.remove(); } });
+            inp.addEventListener('keydown', e => { if (e.key === 'Escape') { _cleanupQap(); panel.remove(); window.__dtiClosetFlush?.(); } });
 
             setTimeout(() => inp.focus(), 50);
         }
@@ -14492,6 +16275,19 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                     }).catch(() => {});
                 });
                 acts.appendChild(copy);
+                const shop = document.createElement('button');
+                shop.type = 'button'; shop.className = 'dti-oc-shop'; shop.title = 'Shopping list \u2014 what you still need for this outfit';
+                shop.innerHTML = BAG_ICO;
+                shop.addEventListener('click', async e => {
+                    e.preventDefault(); e.stopPropagation();
+                    const name = li.querySelector('.outfit-name')?.textContent?.trim() || '';
+                    let worn = [];
+                    try { worn = (await fetch(`/outfits/${id}.json`, { credentials: 'include' }).then(r => r.json()))?.item_ids?.worn || []; } catch (_) {}
+                    if (!worn.length) { shop.title = 'This outfit isn\u2019t wearing any items'; return; }
+                    _openFramedPageModal(`Shopping list${name ? ' \u2014 ' + name : ''}`, `/items/sources/${worn.join(',')}?for=${encodeURIComponent(name)}`,
+                        { icon: BAG_ICO, cls: 'dti-pm-shop', css: '#dti-haul-wrap { display: none !important; }', loading: 'Opening the shopping list\u2026' });
+                });
+                acts.appendChild(shop);
             }
             const del = footer?.querySelector('form.button_to');
             const delBtn = del?.querySelector('.outfit-delete-button');
@@ -16618,7 +18414,9 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 const IX_CAL = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 6.5h12M5.5 1.8v2.4M10.5 1.8v2.4"/></svg>';
                 const groups = [...document.querySelectorAll('body.items-latest .day-group')];
                 const tiles = groups.flatMap(g => [...g.querySelectorAll('li.object')]);
-                const nc = tiles.filter(t => t.querySelector('.nc-icon')).length;
+                tiles.forEach(t => { if (!t.querySelector('.nc-icon') && isPbDesc(t.querySelector('img')?.getAttribute('title'))) t.classList.add('dti-pb'); });
+                const kindOf = t => t.querySelector('.nc-icon') ? 'nc' : t.classList.contains('dti-pb') ? 'pb' : 'np';
+                const nc = tiles.filter(t => kindOf(t) === 'nc').length, pb = tiles.filter(t => kindOf(t) === 'pb').length;
                 const current = !ltNav.querySelector('.next-week');
                 const head = document.createElement('div'); head.className = 'dti-ix-head';
                 head.innerHTML = `<span class="dti-ix-ico">${IX_NEW}</span><div><h2 class="dti-ix-title">Newest Items</h2>
@@ -16630,9 +18428,11 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 if (next) next.innerHTML = `Next week${POP_ICO.next}`;
                 const bar = document.createElement('div'); bar.className = 'dti-lt-bar';
                 bar.innerHTML = `<label class="dti-lt-search">${NAV_ICON_SEARCH}<input type="search" placeholder="Filter ${current ? 'this' : 'that'} week\u2019s items\u2026" autocomplete="off" spellcheck="false"></label>
-                    <div class="dti-ix-chips"><span class="dti-ix-chips-label">Show</span>${[['all', 'All', tiles.length], ['nc', 'NC', nc], ['np', 'NP', tiles.length - nc]]
+                    <div class="dti-ix-chips"><span class="dti-ix-chips-label">Show</span>${[['all', 'All', tiles.length], ['nc', 'NC', nc], ['np', 'NP', tiles.length - nc - pb], ...(pb ? [['pb', 'PB', pb]] : [])]
                         .map(([f, l, n]) => `<button type="button" class="dti-ix-chip${f === 'all' ? ' on' : ''}" data-f="${f}">${l}<i>${n}</i></button>`).join('')}</div>`;
                 head.after(bar);
+                bar.appendChild(niBadgesBtn('dti-lt-typesbtn', 'NC / NP badges'));
+                niBadgesApply();
                 const empty = document.createElement('div'); empty.className = 'dti-lt-empty';
                 empty.textContent = tiles.length ? 'No items match.' : 'Nothing new yet this week.';
                 empty.hidden = !!tiles.length;
@@ -16651,7 +18451,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                     groups.forEach(g => {
                         let n = 0;
                         g.querySelectorAll('li.object').forEach(t => {
-                            const ok = (show === 'all' || (show === 'nc') === !!t.querySelector('.nc-icon'))
+                            const ok = (show === 'all' || show === kindOf(t))
                                 && (!q || (t.querySelector('.name')?.textContent || '').toLowerCase().includes(q));
                             t.hidden = !ok;
                             if (ok) n++;
@@ -16679,6 +18479,162 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
         }
         window.__dtiItemsRenderHandler = upgradeItemsDOM;
         document.addEventListener('turbo:render', window.__dtiItemsRenderHandler);
+        if (document.body.classList.contains('items-sources')) upgradeSourcesPage();
+    }
+
+    // DTI's shopping list for an outfit (the editor's bag button, and Customs' 🛍): DTI groups the items by where they
+    // come from. On top: what you already have, what's on your wishlist, what's missing and its value — and one
+    // button that puts everything missing on a wishlist.
+    function upgradeSourcesPage() {
+        const c = document.getElementById('container');
+        if (!c || c.dataset.dtiSl) return;
+        c.dataset.dtiSl = '1';
+        injectSourcesCSS();
+        const forName = new URLSearchParams(location.search).get('for') || '';
+        const items = [...c.querySelectorAll('table.item-list tbody tr')].map(tr => {
+            const a = tr.querySelector('a.item-name, td.name-cell a');
+            const href = a?.getAttribute('href') || '';
+            return { tr, id: href.match(/\/items\/(\d+)/)?.[1], path: href.match(/\/items\/([^/?#]+)/)?.[1], name: (a?.textContent || '').trim(), img: tr.querySelector('img')?.src || '', cap: null };
+        }).filter(i => i.id);
+        // DTI's groups (h2 + description + table) → cards
+        [...c.querySelectorAll(':scope > h2')].forEach(h2 => {
+            const card = document.createElement('section');
+            card.className = 'dti-sl-group';
+            h2.before(card);
+            const parts = [h2];
+            for (let n = h2.nextElementSibling; n && n.tagName !== 'H2' && n.id !== 'footer' && !n.classList.contains('dti-sl-group'); n = n.nextElementSibling) parts.push(n);
+            parts.forEach(p => card.appendChild(p));
+            const n = card.querySelectorAll('tbody tr').length;
+            h2.insertAdjacentHTML('beforeend', `<i class="dti-sl-n">${n}</i>`);
+        });
+        const title = c.querySelector(':scope > h1#title, :scope > h1');
+        const head = document.createElement('div');
+        head.className = 'dti-ix-head';
+        head.innerHTML = `<span class="dti-ix-ico">${BAG_ICO}</span><div><h2 class="dti-ix-title">Shopping list</h2>
+            <p class="dti-ix-sub">${forName ? `For <b>${noteEsc(forName)}</b> \u00b7 ` : ''}${items.length} item${items.length === 1 ? '' : 's'} in this outfit</p></div>`;
+        if (title) { title.nextElementSibling?.tagName === 'P' && title.nextElementSibling.remove(); title.replaceWith(head); } else c.prepend(head);
+        const sum = document.createElement('div');
+        sum.className = 'dti-sl-sum';
+        head.after(sum);
+        // each item: what you have / want, its value, and Add to your lists
+        items.forEach(it => {
+            const td = document.createElement('td');
+            td.className = 'dti-sl-meta';
+            it.tr.querySelector('td.name-cell')?.after(td);
+            it.meta = td;
+            it.tr.querySelector('td.actions-cell')?.insertAdjacentHTML('afterbegin', listBtnHtml({ id: it.id, name: it.name, img: it.img }, 'inline'));
+            lookupNcValue(it.name, val => {
+                it.cap = capNums(val);
+                if (it.cap) td.insertAdjacentHTML('beforeend', `<span class="dti-sl-cap" title="NC value">${noteEsc(String(val).replace(/\*$/, ''))} caps</span>`);
+                paintSum();
+            });
+        });
+        let wishKeys = null, adding = false, note = '';
+        const paintRows = () => items.forEach(it => {
+            const e = mineOf(it.id);
+            it.tr.classList.toggle('dti-sl-have', !!e?.own);
+            it.meta.querySelector('.dti-sl-mine')?.remove();
+            if (e?.own || e?.want) it.meta.insertAdjacentHTML('afterbegin', `<span class="dti-sl-mine ${e.own ? 'own' : 'want'}">${e.own ? `\u2713 You have ${e.own > 1 ? e.own : 'it'}` : '\u2665 On your wishlist'}</span>`);
+        });
+        const range = list => {
+            const t = { min: 0, max: 0, valued: 0, unknown: 0 };
+            list.forEach(it => { if (it.cap) { t.min += it.cap[0]; t.max += it.cap[1]; t.valued++; } else t.unknown++; });
+            return t;
+        };
+        function paintSum() {
+            if (!_mineMap) {
+                sum.innerHTML = '<div class="dti-sl-stats"><span>Open My Items once (logged in) and this list shows what you already have.</span></div>';
+                return;
+            }
+            const have = items.filter(it => mineOf(it.id)?.own), wanted = items.filter(it => !mineOf(it.id)?.own && mineOf(it.id)?.want);
+            const missing = items.filter(it => !mineOf(it.id)?.own), toAdd = missing.filter(it => !mineOf(it.id)?.want);
+            const mt = range(missing), ot = range(items);
+            const sel = sum.querySelector('select')?.value;
+            sum.innerHTML = `<div class="dti-sl-stats">
+                    <span class="ok"><b>${have.length}</b> of ${items.length} you have</span>
+                    <span class="wish"><b>${wanted.length}</b> on your wishlist</span>
+                    <span><b>${missing.length}</b> missing${mt.valued ? ` <em title="${noteEsc(capTotalTitle(mt))}">${capTotalText(mt)}</em>` : ''}</span>
+                    ${ot.valued ? `<span title="${noteEsc(capTotalTitle(ot))}">Whole outfit <em>${capTotalText(ot)}</em></span>` : ''}
+                </div>
+                <div class="dti-sl-act">
+                    <label>Wishlist <select ${wishKeys ? '' : 'disabled'}>${(wishKeys || [{ key: 'false', name: 'Not in a list' }]).map(w => `<option value="${noteEsc(w.key)}"${w.key === sel ? ' selected' : ''}>${noteEsc(w.name)}</option>`).join('')}</select></label>
+                    <button type="button" class="dti-sl-add"${toAdd.length && !adding ? '' : ' disabled'}>${adding ? 'Adding\u2026' : toAdd.length ? `\u2665 Add ${toAdd.length} missing to wishlist` : missing.length ? 'Everything missing is on your wishlist' : 'You have everything!'}</button>
+                    <span class="dti-sl-note">${noteEsc(note)}</span>
+                </div>`;
+            sum.querySelector('.dti-sl-add').onclick = async () => {
+                const key = sum.querySelector('select').value;
+                const todo = items.filter(it => !mineOf(it.id)?.own && !mineOf(it.id)?.want);
+                adding = true; note = ''; paintSum();
+                let done = 0, failed = 0;
+                for (const it of todo) {
+                    note = `Adding ${done + failed + 1} of ${todo.length}\u2026`; paintSum();
+                    if (await wishlistAdd(it.path, key)) { done++; mineSet(it.id, 0, (mineOf(it.id)?.want || 0) + 1); } else failed++;
+                    await new Promise(r => setTimeout(r, 350));
+                }
+                adding = false;
+                note = failed ? `Added ${done} \u2014 ${failed} couldn\u2019t be added (are you logged in?)` : `Added ${done} to your wishlist \u2713`;
+                paintRows(); paintSum();
+            };
+        }
+        paintSum();
+        mineLoad().then(() => { paintRows(); paintSum(); });
+        myWantedLists().then(w => { wishKeys = w; paintSum(); }).catch(() => {});
+    }
+    function injectSourcesCSS() {
+        if (window.__dtiSlCSS) return;
+        window.__dtiSlCSS = true;
+        GM_addStyle(`
+            body.items-sources #container { max-width: 920px !important; margin: 0 auto !important; padding: 0 24px 40px !important; }
+            body.items-sources h2.dti-ix-title { margin: 0 !important; font-size: 26px !important; font-weight: 800 !important; letter-spacing: -.5px !important; line-height: 1.15 !important; }
+            .dti-sl-sum { margin: 0 0 16px; padding: 14px 16px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 2px 10px rgba(0,0,0,.05); }
+            .dti-sl-stats { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--text-muted); }
+            .dti-sl-stats b { margin-right: 3px; font-size: 16px; font-weight: 800; color: var(--text); }
+            .dti-sl-stats .ok b { color: var(--success); }
+            .dti-sl-stats .wish b { color: #db2777; }
+            .dti-sl-stats em { font-style: normal; font-weight: 700; color: var(--bdg-ncval-fg, var(--accent-text, var(--accent))); }
+            .dti-sl-act { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+            .dti-sl-act label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--text-muted); }
+            body.items-sources .dti-sl-act select {
+                height: 34px !important; padding: 0 10px !important; border-radius: 9px !important; border: 1px solid var(--border) !important;
+                background: var(--surface-2) !important; color: var(--text) !important; font-family: inherit !important; font-size: 12.5px !important; font-weight: 600 !important;
+            }
+            body.items-sources .dti-sl-add {
+                height: 34px; padding: 0 14px; border: none; border-radius: 9px; cursor: pointer; background: var(--accent); color: var(--accent-fg, #fff);
+                font-family: inherit; font-size: 12.5px; font-weight: 700; transition: filter .12s, opacity .12s;
+            }
+            body.items-sources .dti-sl-add:hover:not(:disabled) { filter: brightness(1.08); }
+            body.items-sources .dti-sl-add:disabled { opacity: .5; cursor: default; }
+            .dti-sl-note { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+            .dti-sl-group { margin: 0 0 14px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); overflow: hidden; }
+            body.items-sources .dti-sl-group > h2 {
+                display: flex; align-items: center; gap: 8px; margin: 0 !important; padding: 12px 16px 4px !important;
+                font-size: 14.5px !important; font-weight: 800 !important; color: var(--text) !important;
+            }
+            .dti-sl-n { font-style: normal; min-width: 20px; height: 19px; padding: 0 6px; box-sizing: border-box; border-radius: 99px; display: inline-grid; place-items: center; background: var(--surface-2); color: var(--text-muted); font-size: 11px; font-weight: 800; }
+            body.items-sources .dti-sl-group > p { margin: 0 !important; padding: 0 16px 10px !important; font-size: 12px !important; line-height: 1.5 !important; color: var(--text-muted) !important; }
+            body.items-sources .dti-sl-group > p a { color: var(--accent-text, var(--accent)) !important; }
+            body.items-sources table.item-list { width: 100%; border-collapse: collapse; }
+            body.items-sources table.item-list thead { display: none; }
+            body.items-sources table.item-list tbody tr { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-top: 1px solid var(--border); transition: background .12s; }
+            body.items-sources table.item-list tbody tr:hover { background: var(--surface-2); }
+            body.items-sources table.item-list tbody tr.dti-sl-have { opacity: .72; }
+            body.items-sources table.item-list td { padding: 0 !important; border: none !important; background: none !important; }
+            body.items-sources td.thumbnail-cell img { width: 48px; height: 48px; display: block; object-fit: contain; border-radius: 10px; background: #fff; box-shadow: 0 0 0 1px var(--border); }
+            body.items-sources td.name-cell { flex: 1; min-width: 0; text-align: left !important; font-size: 11.5px; color: var(--text-muted); line-height: 1.45; }
+            body.items-sources td.name-cell a { display: inline !important; text-align: left !important; white-space: normal !important; font-size: 13px !important; font-weight: 700 !important; color: var(--text) !important; text-decoration: none !important; }   /* (Browse Items' .item-name centers names) */
+            body.items-sources td.name-cell a:hover { color: var(--accent-text, var(--accent)) !important; }
+            .dti-sl-meta { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+            .dti-sl-mine, .dti-sl-cap { padding: 1px 8px; border-radius: 99px; font-size: 10.5px; font-weight: 800; line-height: 1.6; white-space: nowrap; }
+            .dti-sl-mine.own { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+            .dti-sl-mine.want { background: color-mix(in srgb, #ec4899 14%, transparent); color: #db2777; }
+            .dti-sl-cap { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--bdg-ncval-fg, var(--accent-text, var(--accent))); }
+            body.items-sources td.actions-cell { display: flex; align-items: center; gap: 6px; }
+            body.items-sources td.actions-cell a.button {
+                display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border);
+                background: var(--surface); color: var(--text) !important; font-size: 11.5px; font-weight: 700; text-decoration: none !important; white-space: nowrap;
+            }
+            body.items-sources td.actions-cell a.button:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)) !important; }
+        `);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
