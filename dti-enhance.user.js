@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      1.0
+// @version      1.1
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -990,6 +990,7 @@
     const NAV_ICON_PALETTE = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8a6.2 6.2 0 1 0 0 12.4c1 0 1.4-.6 1.4-1.3 0-.8-.6-1.1-.6-1.8 0-.7.6-1.2 1.3-1.2h1.6a2.5 2.5 0 0 0 2.5-2.5C14.2 4.3 11.4 1.8 8 1.8z"/><circle cx="4.9" cy="7.4" r=".5" fill="currentColor"/><circle cx="7.2" cy="4.7" r=".5" fill="currentColor"/><circle cx="10.5" cy="5.3" r=".5" fill="currentColor"/></svg>';
     const NAV_ICON_SPARKLE = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 1.8l1.5 3.7 3.7 1.5-3.7 1.5L7 12.2 5.5 8.5 1.8 7l3.7-1.5z"/><path d="M12.6 10.6v3.6M10.8 12.4h3.6"/></svg>';
     // Open in a popup: two overlapping windows (drawn cut-out, so it works on any button background)
+    const SETTINGS_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.6v1.8M8 12.6v1.8M1.6 8h1.8M12.6 8h1.8M3.5 3.5l1.3 1.3M11.2 11.2l1.3 1.3M3.5 12.5l1.3-1.3M11.2 4.8l1.3-1.3"/></svg>';
     const NEW_ITEMS_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.6v2.6M8 11.8v2.6M1.6 8h2.6M11.8 8h2.6M3.5 3.5l1.8 1.8M10.7 10.7l1.8 1.8M3.5 12.5l1.8-1.8M10.7 5.3l1.8-1.8"/></svg>';
     const POPUP_ICO = '<svg viewBox="0 0 13 13" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 3.75H2A1.25 1.25 0 0 0 .75 5v4A1.25 1.25 0 0 0 2 10.25h4A1.25 1.25 0 0 0 7.25 9V8"/><rect x="5.75" y=".75" width="6.5" height="6.5" rx="1.25"/></svg>';
     const NOTE_PIN = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.8 1.8l4.4 4.4-2.1.7-2.6 2.6.3 3-1.3 1.3L5.3 10.7 2 14 1.9 14.1M5.3 10.7L2.1 7.5l1.3-1.3 3 .3 2.6-2.6z"/></svg>';
@@ -1183,12 +1184,8 @@
                 <div class="dti-lp-title"><span>Add to your lists</span><b title="${noteEsc(ref.name || '')}">${noteEsc(ref.name || 'Item')}</b></div>
                 <button type="button" class="dti-lp-x" title="Close (Esc)" aria-label="Close">${POP_ICO.close}</button>
             </div>
-            <div class="dti-lp-body"><div class="dti-lp-msg"><span class="dti-lp-spin"></span>Loading your lists…</div></div>
-            <div class="dti-lp-foot" hidden>
-                <a class="dti-lp-mine" target="_blank" title="Open Your Items">Your Items ↗</a>
-                <span class="dti-lp-status" aria-live="polite"></span>
-                <button type="button" class="dti-lp-save" disabled>Save</button>
-            </div>`;
+            <div class="dti-lp-body"></div>
+            <div class="dti-lp-foot" hidden></div>`;
         document.body.appendChild(pop);
         anchor.classList.add('open');
         const place = () => {
@@ -1213,19 +1210,29 @@
         } };
         pop.querySelector('.dti-lp-x').addEventListener('click', closeListPopover);
         place();
+        await mountListSteppers(id, pop.querySelector('.dti-lp-body'), pop.querySelector('.dti-lp-foot'),
+            { alive: () => _listPop?.pop === pop, onChange: place });
+    }
 
-        const body = pop.querySelector('.dti-lp-body'), foot = pop.querySelector('.dti-lp-foot');
-        const saveBtn = pop.querySelector('.dti-lp-save'), status = pop.querySelector('.dti-lp-status');
+    // Your lists with one item's quantity in each — rows with − / + and one Save. It reads the item page's own
+    // "Track this in Your Items" form and saves the same way that form does, sending only the lists you changed
+    // (DTI sets quantities). Used by the Add to your lists popover and My Items' Quick add.
+    //   wantFirst: wanted lists on top · focusKey: a list to point out ('quantity[<listId>|true|false]')
+    //   alive(): still wanted (stops a late load or save painting a closed / switched view) · onChange(): size changed
+    async function mountListSteppers(id, body, foot, { wantFirst = true, mine = true, focusKey = '', alive = () => body.isConnected, onChange } = {}) {
+        foot.hidden = true;
+        body.innerHTML = '<div class="dti-lp-msg"><span class="dti-lp-spin"></span>Loading your lists\u2026</div>';
+        onChange?.();
         let form = null, failed = false;
         try {
             const r = await fetch(`/items/${id}`, { credentials: 'include' });
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             form = new DOMParser().parseFromString(await r.text(), 'text/html').querySelector('form.user-lists-form');
         } catch (_) { failed = true; }
-        if (_listPop?.pop !== pop) return;   // closed while loading
+        if (!alive()) return;
         if (!form) {
             body.innerHTML = `<div class="dti-lp-msg">${failed ? 'Couldn\u2019t load your lists \u2014 try again.' : 'Log in to DTI to keep lists of your items.'}</div>`;
-            place();
+            onChange?.();
             return;
         }
         const groups = [...form.querySelectorAll('.closet-hangers-ownership-groups > div')].map(g => ({
@@ -1237,12 +1244,14 @@
                 const orig = Math.max(0, parseInt(inp.value, 10) || 0);
                 return { key: inp.name, orig, cur: orig, unlisted, label: unlisted ? 'Not in a list' : (li.querySelector('label')?.textContent.trim() || 'List') };
             }).filter(Boolean),
-        })).filter(g => g.rows.length).sort((a, b) => b.want - a.want);
+        })).filter(g => g.rows.length).sort((a, b) => wantFirst ? b.want - a.want : a.want - b.want);
         const rows = groups.flatMap(g => g.rows);
-        pop.querySelector('.dti-lp-mine').href = form.querySelector('h3 a')?.getAttribute('href') || '/users/current-user/closet';
+        foot.innerHTML = (mine ? `<a class="dti-lp-mine" target="_blank" title="Open Your Items" href="${noteEsc(form.querySelector('h3 a')?.getAttribute('href') || '/users/current-user/closet')}">Your Items \u2197</a>` : '')
+            + '<span class="dti-lp-status" aria-live="polite"></span><button type="button" class="dti-lp-save" disabled>Save</button>';
+        const saveBtn = foot.querySelector('.dti-lp-save'), status = foot.querySelector('.dti-lp-status');
         body.innerHTML = groups.map(g => `
             <div class="dti-lp-ghead">${g.want ? 'Items you want' : 'Items you own'}</div>
-            ${g.rows.map(r => `<div class="dti-lp-row${r.unlisted ? ' unlisted' : ''}">
+            ${g.rows.map(r => `<div class="dti-lp-row${r.unlisted ? ' unlisted' : ''}${r.key === focusKey ? ' focus' : ''}" data-key="${noteEsc(r.key)}">
                 <span class="dti-lp-name" title="${noteEsc(r.label)}">${noteEsc(r.label)}</span>
                 <span class="dti-lp-step"><button type="button" data-d="-1" aria-label="One less">\u2212</button><input type="number" min="0" max="999" inputmode="numeric" aria-label="How many in ${noteEsc(r.label)}"><button type="button" data-d="1" aria-label="One more">+</button></span>
             </div>`).join('')}`).join('');
@@ -1278,7 +1287,7 @@
                 ok = res.ok;
             } catch (_) {}
             saving = false;
-            if (_listPop?.pop !== pop) return;
+            if (!alive()) return;
             if (ok) changed.forEach(r => { r.orig = r.cur; });
             paint();
             status.textContent = ok ? 'Saved \u2713' : 'Couldn\u2019t save \u2014 try again';
@@ -1300,7 +1309,8 @@
         saveBtn.addEventListener('click', save);
         foot.hidden = false;
         paint();
-        place();
+        onChange?.();
+        body.querySelector('.dti-lp-row.focus')?.scrollIntoView({ block: 'nearest' });
     }
 
     // ── Shared note editor: textarea (+ title for general notes), autosave, pin, delete ──
@@ -3321,22 +3331,8 @@
     // works there too. A list id opens just that list (My Items reads #closet-list-<id>).
     const nfItemsHref = (f, listId) => `/user/${encodeURIComponent(f.slug || f.id)}/closet${listId ? '#closet-list-' + encodeURIComponent(listId) : ''}`;
     function nfOpenItems(f, listId) {
-        const href = nfItemsHref(f, listId);
-        const modal = _buildPageModal(`${NF.label(f)}’s items`, href, '', { icon: NF_SMILE, cls: 'dti-pm-closet', stack: !!document.getElementById('dti-page-modal') });
-        const content = modal.querySelector('#dti-pm-content');
-        content.classList.add('dti-pm-frame');
-        content.innerHTML = '<div class="dti-pm-loading">Opening their items…</div>';
-        const fr = document.createElement('iframe');
-        fr.src = href; fr.title = `${NF.label(f)}’s items`;
-        fr.addEventListener('load', () => {
-            try {
-                const s = fr.contentDocument.createElement('style');
-                s.textContent = '#main-nav, #footer { display: none !important; } html, body { padding-top: 0 !important; margin-top: 0 !important; } #dti-closet-wrap { height: 100vh !important; }';
-                fr.contentDocument.head.appendChild(s);
-            } catch (_) {}
-            setTimeout(() => { fr.style.opacity = '1'; }, 150);
-        });
-        content.appendChild(fr);
+        _openFramedPageModal(`${NF.label(f)}’s items`, nfItemsHref(f, listId),
+            { icon: NF_SMILE, cls: 'dti-pm-closet', css: '#dti-closet-wrap { height: 100vh !important; }', loading: 'Opening their items…' });
     }
 
     // ── The page (/terms#neofriends[/<id>] — a real DTI page, like Notes) and the popup ──
@@ -4245,34 +4241,35 @@
                 border: 1px solid var(--border); border-radius: 9px; background: var(--surface); transition: border-color .12s, box-shadow .12s;
             }
             .dti-lp-row.changed .dti-lp-step { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
-            .dti-lp .dti-lp-step button {
+            :is(.dti-lp, .dti-lps) .dti-lp-step button {
                 width: 28px; height: auto; min-width: 0; padding: 0; margin: 0; border: none; border-radius: 0; cursor: pointer;
                 background: transparent; color: var(--text-muted); font-family: inherit; font-size: 15px; font-weight: 600; line-height: 1;
                 transition: background .1s, color .1s;
             }
-            .dti-lp .dti-lp-step button:hover:not(:disabled) { background: var(--surface-2); color: var(--accent-text, var(--accent)); }
-            .dti-lp .dti-lp-step button:disabled { opacity: .35; cursor: default; }
-            .dti-lp .dti-lp-step input {
+            :is(.dti-lp, .dti-lps) .dti-lp-step button:hover:not(:disabled) { background: var(--surface-2); color: var(--accent-text, var(--accent)); }
+            :is(.dti-lp, .dti-lps) .dti-lp-step button:disabled { opacity: .35; cursor: default; }
+            :is(.dti-lp, .dti-lps) .dti-lp-step input {
                 width: 36px !important; height: auto !important; min-width: 0 !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important;
                 border: none !important; border-left: 1px solid var(--border) !important; border-right: 1px solid var(--border) !important; border-radius: 0 !important;
                 background: transparent !important; color: var(--text) !important; box-shadow: none !important; outline: none !important;
                 font-family: inherit !important; font-size: 13px !important; font-weight: 700 !important; text-align: center !important;
                 -moz-appearance: textfield; font-variant-numeric: tabular-nums;
             }
-            .dti-lp .dti-lp-step input::-webkit-inner-spin-button, .dti-lp .dti-lp-step input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+            :is(.dti-lp, .dti-lps) .dti-lp-step input::-webkit-inner-spin-button, :is(.dti-lp, .dti-lps) .dti-lp-step input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
             .dti-lp-foot { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px; border-top: 1px solid var(--border); }
             .dti-lp-foot[hidden] { display: none; }
             .dti-lp .dti-lp-mine { flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--text-muted) !important; text-decoration: none !important; }
             .dti-lp .dti-lp-mine:hover { color: var(--accent-text, var(--accent)) !important; }
             .dti-lp-status { flex: 1; min-width: 0; text-align: right; font-size: 12px; font-weight: 700; color: var(--success); }
             .dti-lp-status.err { color: var(--danger); }
-            .dti-lp .dti-lp-save {
+            :is(.dti-lp, .dti-lps) .dti-lp-save {
                 height: 32px; padding: 0 16px; flex-shrink: 0; border: none; border-radius: 9px; cursor: pointer;
                 background: var(--accent); color: var(--accent-fg, #fff); font-family: inherit; font-size: 13px; font-weight: 700;
                 transition: filter .12s, opacity .12s;
             }
-            .dti-lp .dti-lp-save:hover:not(:disabled) { filter: brightness(1.08); }
-            .dti-lp .dti-lp-save:disabled { opacity: .4; cursor: default; }
+            :is(.dti-lp, .dti-lps) .dti-lp-save:hover:not(:disabled) { filter: brightness(1.08); }
+            :is(.dti-lp, .dti-lps) .dti-lp-save:disabled { opacity: .4; cursor: default; }
+            .dti-lp-row.focus { box-shadow: inset 0 0 0 1.5px var(--accent); }
             .dti-lp-msg { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 22px 12px; text-align: center; font-size: 12.5px; color: var(--text-muted); }
             .dti-lp-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: dti-lp-spin .7s linear infinite; }
             @keyframes dti-lp-spin { to { transform: rotate(360deg); } }
@@ -4827,6 +4824,71 @@
         popup.style.left = left + 'px'; popup.style.top = top + 'px';
     }
 
+    // ItemDB's address for an item: its name as a slug (DTI item ids aren't ItemDB's)
+    const itemdbHref = name => 'https://itemdb.com.br/item/' + String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+    // ── Dyeworks: an item's dyed versions ("Dyeworks <Color>: <Item>"), found on DTI by name ──────────────
+    // One small search per item (the item and its colors), remembered (found: a week, none: 3 days), two at a time.
+    // Shows as a "Dyeworks" badge on NC Mall tiles and as the colors in item info popups.
+    const DYE_RE = /^Dyeworks ([^:]+):\s*(.+)$/i;
+    const dyeBase = name => (String(name || '').match(DYE_RE)?.[2] || String(name || '')).trim();
+    const DYE_LS = 'dti_dyeworks_v1';
+    let _dyeMap = null;
+    const dyeMap = () => _dyeMap || (_dyeMap = (() => { try { return JSON.parse(localStorage.getItem(DYE_LS) || '{}') || {}; } catch (_) { return {}; } })());
+    function dyeCached(name) {   // { at, o: [id, img] | null (the original), v: [[color, id, img]] } while fresh
+        const e = dyeMap()[dyeBase(name).toLowerCase()];
+        return e && Date.now() - e.at < (e.v.length ? 7 : 3) * 864e5 ? e : null;
+    }
+    const _dyeQ = [], _dyeWait = new Map();
+    let _dyeRunning = 0;
+    function dyeLookup(name) {
+        const base = dyeBase(name), key = base.toLowerCase();
+        const hit = dyeCached(base);
+        if (hit) return Promise.resolve(hit);
+        if (_dyeWait.has(key)) return _dyeWait.get(key);
+        const p = new Promise(res => { _dyeQ.push({ base, key, res }); _dyePump(); });
+        _dyeWait.set(key, p);
+        return p;
+    }
+    function _dyePump() {
+        while (_dyeRunning < 2 && _dyeQ.length) {
+            const { base, key, res } = _dyeQ.shift();
+            _dyeRunning++;
+            fetch('/items.json?per_page=50&q=' + encodeURIComponent('"' + base.replace(/"/g, '') + '"'), { credentials: 'same-origin' })
+                .then(r => r.ok ? r.json() : null)
+                .then(j => {
+                    if (!j) return null;
+                    const e = { at: Date.now(), o: null, v: [] };
+                    (j.items || []).forEach(it => {
+                        if (String(it.name).toLowerCase() === key) e.o = [it.id, it.thumbnail_url];
+                        const m = String(it.name).match(DYE_RE);
+                        if (m && m[2].trim().toLowerCase() === key) e.v.push([m[1].trim(), it.id, it.thumbnail_url]);
+                    });
+                    e.v.sort((a, b) => a[0].localeCompare(b[0]));
+                    const map = dyeMap();
+                    map[key] = e;
+                    Object.keys(map).forEach(k => { if (Date.now() - map[k].at > 14 * 864e5) delete map[k]; });   // keep it small
+                    try { localStorage.setItem(DYE_LS, JSON.stringify(map)); } catch (_) {}
+                    return e;
+                })
+                .catch(() => null)
+                .then(e => { _dyeRunning--; _dyeWait.delete(key); res(e); _dyePump(); });
+        }
+    }
+    // Item info popups: the original and every Dyeworks color (this one highlighted); nothing if there are none
+    function dyeFillSection(host, id, name, onChange) {
+        if (!host) return;
+        dyeLookup(name).then(e => {
+            if (!e || !e.v.length || !host.isConnected) return;
+            const base = dyeBase(name);
+            const tiles = (e.o ? [['Original', e.o[0], e.o[1]]] : []).concat(e.v);
+            host.innerHTML = `<div class="dti-ip-section">Dyeworks<span class="dti-ip-dye-n">${e.v.length} color${e.v.length === 1 ? '' : 's'}</span></div>
+                <div class="dti-ip-dye-grid">${tiles.map(([c, vid, img]) => `<a class="dti-ip-dye${String(vid) === String(id) ? ' on' : ''}${c === 'Original' ? ' orig' : ''}" href="/items/${vid}" target="_blank"
+                    title="${noteEsc(c === 'Original' ? base : `Dyeworks ${c}: ${base}`)}"><span class="dti-ip-dye-pic">${img ? `<img src="${noteEsc(img)}" alt="" loading="lazy">` : ''}</span><span class="dti-ip-dye-name">${noteEsc(c)}</span></a>`).join('')}</div>`;
+            onChange?.();
+        });
+    }
+
     function _showItemInfoPopup(id, name, img, anchor) {
         _injectPageModalCSS();
         document.getElementById('dti-item-info-popup')?.remove();
@@ -4948,6 +5010,7 @@
                 ${mallHtml}
                 ${poolHtml}
                 ${srcHtml}
+                ${isNc && !isCapsuleItem ? '<div class="dti-ip-dye-host"></div>' : ''}
                 ${isCapsuleItem ? '' : zonesHtml}
                 <hr class="dti-ip-divider">
                 <div class="dti-ip-row">
@@ -4959,7 +5022,7 @@
                 </div>
                 <div class="dti-ip-links">
                     <a class="dti-ip-link" href="/items/${id}" target="_blank">View on DTI →</a>
-                    <a class="dti-ip-idb-link" href="https://itemdb.com.br/item/${id}" target="_blank">itemdb ↗</a>
+                    <a class="dti-ip-idb-link" href="${itemdbHref(name)}" target="_blank" rel="noopener">itemdb ↗</a>
                 </div>
             `;
             popup.querySelector('.dti-ip-close').addEventListener('click', () => { popup.remove(); document.removeEventListener('mousedown', closeOnOut); document.removeEventListener('keydown', closeOnEsc); });
@@ -4972,6 +5035,7 @@
                 _openTradesModal(tbtn.dataset.itemId, tbtn.dataset.itemName, tbtn.dataset.tradeType, tbtn.dataset.itemImg, tbtn.dataset.itemCapval);
             });
             positionInfoPopup(popup, anchor);
+            dyeFillSection(popup.querySelector('.dti-ip-dye-host'), id, name, () => positionInfoPopup(popup, anchor));
 
             if (isNc && !capVal && !isCapsuleItem) {
                 lookupNcValue(name, val => {
@@ -5217,6 +5281,7 @@ html:has(#dti-page-modal, #dti-trades-modal) { overflow: hidden; }
 
 /* The outfit editor in a popup */
 #dti-page-modal.dti-pm-outfit .dti-pm-box { max-width: 1200px; height: 90vh; max-height: none; }
+#dti-page-modal.dti-pm-settings .dti-pm-box { max-width: 1000px; height: 88vh; max-height: none; }
 .dti-pm-frame { position: relative; padding: 0; overflow: hidden; display: flex; }
 .dti-pm-frame > .dti-pm-loading { position: absolute; inset: 0; }
 .dti-pm-frame > iframe { position: relative; z-index: 1; flex: 1; width: 100%; height: 100%; border: none; opacity: 0; transition: opacity .2s ease; }
@@ -5389,6 +5454,19 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
 .dti-ip-pool-item.le { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent); }
 .dti-ip-pool-item img { width: 100%; height: 100%; object-fit: contain; border-radius: 6px; }
 .dti-ip-pool-le { position: absolute; top: 2px; right: 2px; padding: 0 3px; border-radius: 4px; line-height: 1.4; font-size: 6.5px; font-weight: 900; background: var(--accent); color: var(--accent-fg, #fff); }
+.dti-ip-dye-n { margin-left: auto; font-size: 9.5px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--text-muted); }
+.dti-ip-dye-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(50px, 1fr)); gap: 6px; margin: 4px 0 2px; }
+.dti-ip-dye { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; text-decoration: none !important; }
+.dti-ip-dye-pic {
+    width: 100%; aspect-ratio: 1; display: grid; place-items: center; padding: 3px; box-sizing: border-box; border-radius: 9px;
+    background: #fff; border: 1px solid var(--border); transition: border-color .12s, transform .12s;
+}
+.dti-ip-dye:hover .dti-ip-dye-pic { border-color: var(--accent); transform: translateY(-1px); }
+.dti-ip-dye.on .dti-ip-dye-pic { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+.dti-ip-dye-pic img { width: 100%; height: 100%; object-fit: contain; border-radius: 6px; }
+.dti-ip-dye-name { width: 100%; text-align: center; font-size: 9.5px; font-weight: 700; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dti-ip-dye.orig .dti-ip-dye-name { color: var(--text); }
+.dti-ip-dye.on .dti-ip-dye-name { color: var(--accent-text, var(--accent)); }
 .dti-ip-pool-more { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); font-size: 10.5px; font-weight: 800; color: var(--text-muted); }
 
 /* Narrow windows: popups use the whole screen */
@@ -5466,6 +5544,30 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
         const icon = /\/styles/.test(href) ? NAV_ICON_SPARKLE : NAV_ICON_PALETTE;
         const modal = _buildPageModal(title, href, `<div class="dti-pm-filters" id="dti-pm-filters"></div>`, { icon });
         _loadRainbowPoolPage(href, title, modal);
+    }
+
+    // A real DTI page in a popup, framed with its own nav and footer hidden, so its forms and tools keep working
+    // (a Neofriend's items, Settings). Opens over a popup that's already up, which comes back on close.
+    function _openFramedPageModal(title, href, { icon, cls, css = '', loading = 'Loading…' } = {}) {
+        const modal = _buildPageModal(title, href, '', { icon, cls, stack: !!document.getElementById('dti-page-modal') });
+        const content = modal.querySelector('#dti-pm-content');
+        content.classList.add('dti-pm-frame');
+        content.innerHTML = `<div class="dti-pm-loading">${noteEsc(loading)}</div>`;
+        const fr = document.createElement('iframe');
+        fr.src = href; fr.title = title;
+        fr.addEventListener('load', () => {
+            try {
+                const st = fr.contentDocument.createElement('style');
+                st.textContent = '#main-nav, #footer { display: none !important; } html, body { padding-top: 0 !important; margin-top: 0 !important; } ' + css;
+                fr.contentDocument.head.appendChild(st);
+            } catch (_) {}
+            setTimeout(() => { fr.style.opacity = '1'; }, 150);
+        });
+        content.appendChild(fr);
+        return modal;
+    }
+    function _openSettingsModal() {
+        _openFramedPageModal('Settings', '/users/edit', { icon: SETTINGS_ICO, cls: 'dti-pm-settings', css: '#dti-haul-wrap { display: none !important; }', loading: 'Opening Settings…' });
     }
 
     // src overrides the outfit URL (e.g. /pets/load?name=…); without an id the title isn't renamable
@@ -7346,11 +7448,11 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             { href: '/items', label: 'Browse Items', desc: 'Search every item on DTI', popup: true, icon: NAV_ICON_SEARCH },
             { href: '/rainbow-pool', label: 'Pet Colors', desc: 'Every color of every pet', popup: true, icon: NAV_ICON_PALETTE },
             { href: '/rainbow-pool/styles', label: 'NC Styles', desc: 'Styles for each pet', popup: true, icon: NAV_ICON_SPARKLE },
-            { href: '/terms#tokens', label: 'My Tokens', desc: 'Style tokens & essences you own and want', notes: true,
+            { href: '/terms#tokens', label: 'My Tokens', desc: 'Style tokens & essences you own and want', notes: true, popup: true,
               icon: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="6.1"/><path d="M8 4.6l1 2.05 2.25.33-1.63 1.58.39 2.24L8 9.74l-2.01 1.06.39-2.24L4.75 6.98 7 6.65z" fill="currentColor" stroke="none"/></svg>' },
-            { href: '/terms#neofriends', label: 'Neofriends', desc: 'Traders and friends you follow', notes: true,
+            { href: '/terms#neofriends', label: 'Neofriends', desc: 'Traders and friends you follow', notes: true, popup: true,
               icon: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M5.5 9.4c.65.95 1.5 1.4 2.5 1.4s1.85-.45 2.5-1.4"/><circle cx="6" cy="6.5" r=".6" fill="currentColor" stroke="none"/><circle cx="10" cy="6.5" r=".6" fill="currentColor" stroke="none"/></svg>' },
-            { href: '/users/edit', label: 'Settings', desc: 'Account, email and password',
+            { href: '/users/edit', label: 'Settings', desc: 'Account, email and password', popup: true,
               icon: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.6v1.8M8 12.6v1.8M1.6 8h1.8M12.6 8h1.8M3.5 3.5l1.3 1.3M11.2 11.2l1.3 1.3M3.5 12.5l1.3-1.3M11.2 4.8l1.3-1.3"/></svg>' },
         ];
 
@@ -7397,7 +7499,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             }
             const row = document.createElement('div'); row.className = 'dti-more-popup-row';
             row.appendChild(a);
-            if (l.popup) {
+            if (l.popup && !(l.notes && isActiveHref(l.href))) {   // (no popup of the page you're already on)
                 const popBtn = document.createElement('button'); popBtn.type = 'button'; popBtn.className = 'dti-more-popup-btn';
                 popBtn.title = 'Open in a popup'; popBtn.dataset.popupHref = l.href; popBtn.dataset.popupLabel = l.label;
                 popBtn.innerHTML = POPUP_ICO;
@@ -7449,6 +7551,9 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             const ph = btn.dataset.popupHref; const pl = btn.dataset.popupLabel;
             if (ph === '/items') _openItemsSearchModal();
             else if (ph === '/terms#notes') _openNotesModal();
+            else if (ph === '/terms#tokens') _openTokensModal();
+            else if (ph === '/terms#neofriends') _openNeofriendsModal();
+            else if (ph === '/users/edit') _openSettingsModal();
             else _openRainbowPoolModal(ph, pl);
         });
 
@@ -7821,7 +7926,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
         linkifyBody.appendChild(linkifyRow);
 
         panel.appendChild(makeSection('Colors',          NAV_ICON_PALETTE, themeBody,  'dti_sec_theme'));
-        panel.appendChild(makeSection('Advanced themes', NAV_ICON_SPARKLE, presetBody, 'dti_sec_presets'));
+        panel.appendChild(makeSection('Advanced themes', NAV_ICON_SPARKLE, presetBody, 'dti_sec_presets', false));   // first install: only Colors is open
         panel.appendChild(makeSection('Item badges',    TP_ICO.badge,     badgeBody,   'dti_sec_badges',  false));
         panel.appendChild(makeSection('NC item values', TP_ICO.caps,      ncValBody,   'dti_sec_ncval',   false));
         panel.appendChild(makeSection('Zoom',           TP_ICO.zoom,      zoomBody,    'dti_sec_zoom',    false));
@@ -8266,16 +8371,18 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             }
             #dti-nm-grid { padding-top: 10px; }
             /* Item tiles: picture on a white plate (item GIFs have white backgrounds), name, then price / badges */
-            #dti-newest-items-grid .object, .dti-nm-tile { position: relative; min-width: 0; list-style: none !important; }
+            #dti-newest-items-grid .object, .dti-nm-tile { position: relative; min-width: 0; list-style: none !important; transition: transform .15s; }
             #dti-newest-items-grid .object a, .dti-nm-tile a {
                 position: relative; height: 100%; box-sizing: border-box; overflow: hidden;
                 display: flex; flex-direction: column; align-items: center; gap: 4px;
                 padding: 7px 5px 8px; border-radius: 12px; text-decoration: none !important;
                 background: var(--surface-2); border: 1px solid var(--border);
-                transition: border-color .15s, box-shadow .15s, transform .15s;
+                transition: border-color .15s, box-shadow .15s;
             }
-            #dti-newest-items-grid .object a:hover, .dti-nm-tile a:hover {
-                border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow: var(--shadow-md); transform: translateY(-2px);
+            /* The whole tile lifts and lights up, so pointing at its note / add-to-list buttons (beside the link) keeps it that way */
+            #dti-newest-items-grid .object:hover, .dti-nm-tile:hover { transform: translateY(-2px); }
+            #dti-newest-items-grid .object:hover > a, .dti-nm-tile:hover > a {
+                border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow: var(--shadow-md);
             }
             #dti-newest-items-grid .object a img:first-child, .dti-nm-tile a > img {
                 width: 62px; height: 62px; flex-shrink: 0; object-fit: contain; border-radius: 9px; background: #fff;
@@ -8295,10 +8402,10 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 position: absolute !important; opacity: 0 !important;
                 pointer-events: none !important; transition: opacity .14s !important;
             }
-            #dti-newest-items-grid .object a:hover .dti-ni-ibtn,
-            #dti-newest-items-grid .object a:hover .dti-ni-tryon,
-            #dti-newest-items-grid .object a:hover .dti-ni-capval,
-            .dti-nm-tile a:hover .dti-ni-ibtn {
+            #dti-newest-items-grid .object:hover .dti-ni-ibtn,
+            #dti-newest-items-grid .object:hover .dti-ni-tryon,
+            #dti-newest-items-grid .object:hover .dti-ni-capval,
+            .dti-nm-tile:hover .dti-ni-ibtn {
                 opacity: 1 !important; pointer-events: auto !important;
             }
             .dti-ni-ibtn, .dti-ni-tryon {
@@ -8334,6 +8441,8 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             .dti-nm-tile[data-nm-type=capsule] a::after { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); color: var(--accent-text, var(--accent)); }
             .dti-nm-tile[data-nm-type=sale] a::after { background: color-mix(in srgb, var(--success) 16%, var(--surface)); color: var(--success); }
             .dti-nm-tile[data-nm-type=leaving] a::after { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); color: var(--danger); }
+            .dti-nm-tile[data-nm-type=dyeworks] a::after { background: color-mix(in srgb, #d946ef 16%, var(--surface)); color: #c026d3; }
+            html[data-mode="dark"] .dti-nm-tile[data-nm-type=dyeworks] a::after { color: #e879f9; }
             .dti-nm-cd { width: 100%; margin-top: 1px; text-align: center; white-space: nowrap; font-size: 11px; font-weight: 700; color: var(--danger); }
             /* Date dividers span the grid */
             .dti-nm-daterow {
@@ -8674,7 +8783,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             autoBtn.innerHTML = active ? PAUSE_SVG : PLAY_SVG;
             if (save) GM_setValue('dti_auto_refresh', active);
         }
-        if (GM_getValue('dti_auto_refresh', false)) setAutoRefresh(true, false);   // restore
+        if (GM_getValue('dti_auto_refresh', true)) setAutoRefresh(true, false);   // on unless turned off
         autoBtn.addEventListener('click', () => setAutoRefresh(!_autoOn));
         // ↻ by hand restarts the countdown, so auto-rotate never follows right on its heels
         refreshBtn.addEventListener('click', async () => { await loadRandomEntry(); if (_autoOn) scheduleAuto(); });
@@ -9346,6 +9455,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                         ${mallHtml}
                         ${poolHtml}
                         ${srcHtml}
+                        ${isNc && !isCapsuleItem ? '<div class="dti-ip-dye-host"></div>' : ''}
                         ${isCapsuleItem ? '' : zonesHtml}
                         <hr class="dti-ip-divider">
                         <div class="dti-ip-row">
@@ -9357,7 +9467,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                         </div>
                         <div class="dti-ip-links">
                             <a class="dti-ip-link" href="/items/${id}" target="_blank">View on DTI →</a>
-                            <a class="dti-ip-idb-link" href="https://itemdb.com.br/item/${id}" target="_blank">itemdb ↗</a>
+                            <a class="dti-ip-idb-link" href="${itemdbHref(name)}" target="_blank" rel="noopener">itemdb ↗</a>
                         </div>
                     `;
 
@@ -9371,6 +9481,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                         _openTradesModal(tbtn.dataset.itemId, tbtn.dataset.itemName, tbtn.dataset.tradeType, tbtn.dataset.itemImg, tbtn.dataset.itemCapval);
                     });
                     _pos(btn);
+                    dyeFillSection(popup.querySelector('.dti-ip-dye-host'), id, name, () => _pos(btn));
 
                     if (isNc && !capVal && !isCapsuleItem) {
                         lookupNcValue(name, val => {
@@ -9531,6 +9642,12 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                     if (isCap)                   a.dataset.nmBadge = 'Cap';
                     else if (isSale)             a.dataset.nmBadge = 'Sale';
                     else if (mode === 'leaving') a.dataset.nmBadge = '⚠';
+                    // Dyeworks: dyeable wearables get a badge (looked up on DTI once, then remembered)
+                    if (!a.dataset.nmBadge && r.isWearable !== false) {
+                        const markDye = e => { if (e?.v?.length && !a.dataset.nmBadge) { a.dataset.nmBadge = 'Dyeworks'; li.dataset.nmType = 'dyeworks'; } };
+                        const hit = dyeCached(r.name);
+                        if (hit) markDye(hit); else dyeLookup(r.name).then(markDye);
+                    }
                     const img2 = document.createElement('img');
                     img2.src = r.image; img2.alt = r.name; img2.loading = 'lazy';
                     a.appendChild(img2);
@@ -10761,44 +10878,15 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             .dti-qap-pg-label { font-size: 11px; color: var(--text-muted); min-width: 70px; text-align: center; }
             /* add form — horizontal layout */
             .dti-qap-add-form { display: flex; flex-direction: column; gap: 10px; padding: 12px; margin: 0 -14px -14px; background: var(--surface-2); border-top: 1px solid var(--border); flex-shrink: 0; }
-            .dti-qap-form-row { display: flex; gap: 10px; align-items: flex-end; }
-            .dti-qap-field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
-            .dti-qap-field-qty { flex: 0 0 auto; }
-            .dti-qap-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .8px; }
-            .dti-qap-select {
-                width: 100%; padding: 8px 10px; border-radius: 9px; border: 1.5px solid var(--border);
-                background: var(--surface); color: var(--text); font-size: 12px; font-family: inherit;
-                outline: none; cursor: pointer; transition: border-color .15s;
-            }
-            .dti-qap-select:focus { border-color: var(--accent); }
-            .dti-qap-qty-row { display: flex; align-items: center; gap: 5px; }
-            .dti-qap-qty-btn {
-                width: 30px; height: 30px; border-radius: 8px; border: 1.5px solid var(--border);
-                background: var(--surface); color: var(--text); font-size: 16px; cursor: pointer;
-                display: flex; align-items: center; justify-content: center; line-height: 1;
-                transition: background .12s, border-color .12s, color .12s;
-            }
-            .dti-qap-qty-btn:hover { background: var(--accent-glow); border-color: var(--accent); color: var(--accent-text, var(--accent)); }
-            .dti-qap-qty-inp {
-                width: 44px; text-align: center; padding: 6px 4px; border-radius: 8px;
-                border: 1.5px solid var(--border); background: var(--surface); color: var(--text);
-                font-size: 13px; font-family: inherit; outline: none;
-            }
-            .dti-qap-qty-inp:focus { border-color: var(--accent); }
             .dti-qap-selected-preview {
                 display: flex; align-items: center; gap: 10px; padding: 0 0 10px;
                 border-bottom: 1px solid var(--border);
             }
             .dti-qap-selected-preview img { width: 44px; height: 44px; object-fit: contain; border-radius: 8px; background: var(--surface); flex-shrink: 0; border: 1px solid var(--border); }
             .dti-qap-selected-name { font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .dti-qap-add-btn {
-                width: 100%; padding: 10px; border-radius: 10px; border: none;
-                background: var(--accent); color: #fff; font-size: 13px; font-weight: 700;
-                cursor: pointer; transition: opacity .15s, transform .1s; font-family: inherit; letter-spacing: .3px;
-            }
-            .dti-qap-add-btn:hover { opacity: .88; transform: translateY(-1px); }
-            .dti-qap-add-btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
-            .dti-qap-status { font-size: 12px; text-align: center; min-height: 16px; font-weight: 600; }
+            .dti-qap .dti-lps { margin: 0 -12px -12px; background: var(--surface); border-top: 1px solid var(--border); }
+            .dti-qap .dti-lps .dti-lp-body { max-height: 260px; }
+            .dti-qap .dti-qap-selected-preview { padding-bottom: 0; border-bottom: none; }
 
             #dti-compare-btn {
                 background: var(--accent); border-color: var(--accent); color: #fff;
@@ -13556,24 +13644,16 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
         // ── Quick Add panel ───────────────────────────────────────────────────
         function openQap(preselectListId = null, preselectOwned = null) {
             // Unlisted (Owned) and Unlisted (Wanted) share the empty list id — the owned flag picks between them
-            const pickList = sel => {
-                if (!sel || preselectListId === null) return;
-                const opt = [...sel.options].find(o => o.value === String(preselectListId)
-                    && (preselectOwned === null || o.dataset.owned === String(preselectOwned)));
-                if (opt) opt.selected = true;
-            };
+            // Opened from a list's own Add button: that list's row is pointed out (DTI's form keys: quantity[<listId>],
+            // or quantity[true|false] for "Not in a list")
+            const focusKey = preselectListId === null ? '' : `quantity[${preselectListId || String(!!preselectOwned)}]`;
             const existing = document.getElementById('dti-quick-add-panel');
             if (existing) {
                 if (existing.style.display === 'none') existing.style.display = '';
-                // If a list was specified, switch to it
-                pickList(existing.querySelector('#dti-qap-list'));
+                existing._qapFocus?.(focusKey);
                 existing.querySelector('#dti-qap-inp')?.focus();
                 return;
             }
-            // Build list options from current section data
-            const listOptions = [];
-            sections.owned.forEach(lst => listOptions.push({ label: `Own: ${lst.listName}`, listId: lst.listId || '', owned: true }));
-            sections.wanted.forEach(lst => listOptions.push({ label: `Want: ${lst.listName}`, listId: lst.listId || '', owned: false }));
 
             _injectPageModalCSS();
             const panel = document.createElement('div');
@@ -13599,22 +13679,10 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                                 <span class="dti-type-badge" id="dti-qap-prev-badge" style="visibility:hidden"></span>
                             </div>
                         </div>
-                        <div class="dti-qap-form-row">
-                            <div class="dti-qap-field">
-                                <span class="dti-qap-label">Add to list</span>
-                                <select class="dti-qap-select" id="dti-qap-list">${listOptions.map(o => `<option value="${o.listId}" data-owned="${o.owned}">${o.label}</option>`).join('')}</select>
-                            </div>
-                            <div class="dti-qap-field dti-qap-field-qty">
-                                <span class="dti-qap-label">Qty</span>
-                                <div class="dti-qap-qty-row">
-                                    <button class="dti-qap-qty-btn" id="dti-qap-dec" type="button">−</button>
-                                    <input class="dti-qap-qty-inp" id="dti-qap-qty" type="number" min="1" max="99" value="1">
-                                    <button class="dti-qap-qty-btn" id="dti-qap-inc" type="button">+</button>
-                                </div>
-                            </div>
+                        <div class="dti-lps">
+                            <div class="dti-lp-body" id="dti-qap-lists"></div>
+                            <div class="dti-lp-foot" id="dti-qap-foot" hidden></div>
                         </div>
-                        <button class="dti-qap-add-btn" id="dti-qap-add" type="button">Add to List</button>
-                        <div class="dti-qap-status" id="dti-qap-status"></div>
                     </div>
                 </div>
             `;
@@ -13673,12 +13741,24 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             const inp = panel.querySelector('#dti-qap-inp');
             const resultsEl = panel.querySelector('#dti-qap-results');
             const form = panel.querySelector('#dti-qap-form');
-            const listSel = panel.querySelector('#dti-qap-list');
-            const qtyInp  = panel.querySelector('#dti-qap-qty');
-            const statusEl = panel.querySelector('#dti-qap-status');
-            const addBtn  = panel.querySelector('#dti-qap-add');
-            addBtn.disabled = true;
-            let selectedItem = null, _searchT = null, _curPage = 1, _totalPages = 1, _curQuery = '';
+            const listsEl = panel.querySelector('#dti-qap-lists'), listsFoot = panel.querySelector('#dti-qap-foot');
+            let selectedItem = null, _searchT = null, _curPage = 1, _totalPages = 1, _curQuery = '', _selToken = 0, _focusKey = focusKey;
+            const listsHint = () => {
+                listsFoot.hidden = true;
+                listsEl.innerHTML = '<div class="dti-lp-msg">Pick an item to set how many are in each of your lists.</div>';
+            };
+            // Your lists, with how many of the picked item are in each (− / +, then Save)
+            const loadLists = () => {
+                const t = ++_selToken;
+                mountListSteppers(selectedItem.id, listsEl, listsFoot,
+                    { wantFirst: false, mine: false, focusKey: _focusKey, alive: () => t === _selToken && panel.isConnected });
+            };
+            panel._qapFocus = key => {   // opened again from another list's Add button
+                _focusKey = key;
+                listsEl.querySelectorAll('.dti-lp-row').forEach(r => r.classList.toggle('focus', !!key && r.dataset.key === key));
+                listsEl.querySelector('.dti-lp-row.focus')?.scrollIntoView({ block: 'nearest' });
+            };
+            listsHint();
 
             function clearSelection() {
                 selectedItem = null;
@@ -13688,8 +13768,8 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                 panel.querySelector('#dti-qap-prev-name').textContent = 'Select an item above';
                 panel.querySelector('#dti-qap-prev-name').style.cssText = 'color:var(--text-muted);font-style:italic';
                 panel.querySelector('#dti-qap-prev-badge').style.visibility = 'hidden';
-                addBtn.disabled = true;
-                statusEl.textContent = '';
+                _selToken++;
+                listsHint();
             }
 
             async function doSearch(q, page) {
@@ -13723,7 +13803,7 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
                             badge.textContent = item.nc ? 'NC' : 'NP';
                             badge.className = `dti-type-badge ${item.nc ? 'nc' : 'np'}`;
                             badge.style.visibility = '';
-                            statusEl.textContent = ''; addBtn.textContent = 'Add to List'; addBtn.disabled = false;
+                            loadLists();
                         });
                         resultsEl.appendChild(row);
                     });
@@ -13752,38 +13832,6 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
             });
 
             inp.addEventListener('keydown', e => { if (e.key === 'Escape') { _cleanupQap(); panel.remove(); } });
-
-            // Qty controls
-            panel.querySelector('#dti-qap-dec').addEventListener('click', () => { qtyInp.value = Math.max(1, parseInt(qtyInp.value || 1) - 1); });
-            panel.querySelector('#dti-qap-inc').addEventListener('click', () => { qtyInp.value = Math.min(99, parseInt(qtyInp.value || 1) + 1); });
-
-            // Add
-            addBtn.addEventListener('click', async () => {
-                if (!selectedItem) return;
-                const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
-                if (!csrf) { statusEl.textContent = 'Session error — reload'; statusEl.style.color = 'var(--danger)'; return; }
-                const opt = listSel.options[listSel.selectedIndex];
-                const listId = opt.value;
-                const owned  = opt.dataset.owned === 'true';
-                const qty    = Math.max(1, parseInt(qtyInp.value || 1));
-                addBtn.disabled = true; addBtn.textContent = 'Adding…'; statusEl.textContent = '';
-                try {
-                    const slug = selectedItem.id + '-' + selectedItem.name.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '');
-                    const url  = `/user/${usernameSlug}/items/${slug}/closet_hangers/update_quantities`;
-                    const body = `_method=put&quantity%5B${encodeURIComponent(listId || owned)}%5D=${qty}`;
-                    const r = await fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': csrf }, body });
-                    if (!r.ok) throw new Error(r.status);
-                    statusEl.textContent = '✓ Added!'; statusEl.style.color = 'var(--success)';
-                    addBtn.textContent = 'Add to List'; addBtn.disabled = false;
-                    setTimeout(() => { statusEl.textContent = ''; }, 3000);
-                } catch {
-                    statusEl.textContent = 'Failed — try again'; statusEl.style.color = 'var(--danger)';
-                    addBtn.textContent = 'Add to List'; addBtn.disabled = false;
-                }
-            });
-
-            // Preselect list if specified
-            pickList(panel.querySelector('#dti-qap-list'));
 
             setTimeout(() => inp.focus(), 50);
         }
