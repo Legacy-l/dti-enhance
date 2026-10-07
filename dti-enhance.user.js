@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      1.9
+// @version      2.0
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -28,6 +28,7 @@
 // @connect      images.neopets.com
 // @connect      cdn.itemdb.com.br
 // @connect      itemdb.com.br
+// @connect      dtr-itemdb.dti-remix.workers.dev
 // @run-at       document-start
 // ==/UserScript==
 
@@ -144,6 +145,655 @@
         { key: 'closet', gm: 'dti_closet_items',    label: 'Closet',             href: 'https://www.neopets.com/closet.phtml',        icon: 'https://images.neopets.com/themes/h5/neopiantimes/images/closet-icon.svg', paged: true, match: () => location.pathname === '/closet.phtml' },
         { key: 'gal',    gm: 'dti_gallery_items',   label: 'My Gallery',         href: 'https://www.neopets.com/gallery/index.phtml', icon: 'https://images.neopets.com/themes/h5/basic/images/v3/gallery-icon.svg', match: () => location.pathname.startsWith('/gallery') },
     ];
+
+    // ── Shared by DTI and the DTI panel on Neopets ───────────────────────────────────────────────────────
+    // Notes (trade reports too) and My Tokens' data. On Neopets the script stops at the branch below, so anything both
+    // sides use has to be set up before it — functions alone would do, but these hold values.
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // NOTES — private notes on items, on users (traders), and general notes
+    // ══════════════════════════════════════════════════════════════════════════
+    // All notes live in one GM value: { v: 1, notes: { [key]: note } }
+    //   key   'item:<itemId>' | 'user:<userId>' | 'trade:<random>' | 'note:<random>'
+    //   note  { key, type: 'item'|'user'|'trade'|'general', title, text, pinned, created, updated, ref, trade }
+    //   ref   item → { id, name, img }   user → { id, name, slug }
+    //   trade { partner: { name, id?, slug? } | null, give: [item], get: [item], status, date: 'YYYY-MM-DD' }
+    //         item = { id, name, img, qty }   status = planned | pending | done | off
+    // Every write re-reads the stored copy first, so two tabs editing different notes never
+    // overwrite each other; other tabs pick changes up through GM_addValueChangeListener.
+    const NOTES_KEY = 'dti_notes';
+    const NOTE_KEY_RE = /^(item|user|trade|note):[\w-]{1,48}$/;
+    const TRADE_STATUS = [['planned', 'Planned'], ['pending', 'Pending'], ['done', 'Completed'], ['off', 'Fell through']];
+    const cleanTradeItems = a => (Array.isArray(a) ? a : []).filter(x => x && x.id).map(x => ({
+        id: String(x.id), name: String(x.name || ''), img: String(x.img || ''), qty: Math.max(1, parseInt(x.qty, 10) || 1) }));
+    const cleanTrade = t => ({
+        partner: t?.partner && t.partner.name ? { name: String(t.partner.name), id: String(t.partner.id || ''), slug: String(t.partner.slug || '') } : null,
+        give: cleanTradeItems(t?.give), get: cleanTradeItems(t?.get),
+        status: TRADE_STATUS.some(([v]) => v === t?.status) ? t.status : 'planned',
+        date: /^\d{4}-\d{2}-\d{2}$/.test(t?.date || '') ? t.date : '',
+        acct: typeof t?.acct === 'string' ? t.acct : '',   // (side accounts: whose trade it is)
+    });
+    const DTINotes = (() => {
+        let cache = null;
+        const subs = new Set();
+        const read = () => {
+            try { const s = JSON.parse(GM_getValue(NOTES_KEY, '') || 'null'); if (s && s.notes) return s; } catch (_) {}
+            return { v: 1, notes: {} };
+        };
+        const data = () => cache || (cache = read());
+        const typeOf = key => key.startsWith('item:') ? 'item' : key.startsWith('user:') ? 'user' : key.startsWith('trade:') ? 'trade' : 'general';
+        const emit = keys => subs.forEach(fn => { try { fn(keys); } catch (e) { console.error('[DTI notes]', e); } });
+        function write(mutate) {
+            const d = read();
+            const keys = mutate(d.notes);
+            cache = d;
+            GM_setValue(NOTES_KEY, JSON.stringify(d));
+            paintNoteMarks();
+            emit(keys);
+        }
+        return {
+            typeOf,
+            all: () => Object.values(data().notes),
+            get: key => data().notes[key] || null,
+            // patch: any of { text, title, pinned, ref, trade }. An item/user note with no text is removed —
+            // clearing the box is how you delete it. General notes and trades stay until deleted.
+            save(key, patch) {
+                if (!NOTE_KEY_RE.test(key)) return null;
+                let out = null;
+                write(notes => {
+                    const prev = notes[key], now = Date.now();
+                    const n = Object.assign({ key, type: typeOf(key), title: '', text: '', pinned: false, created: now, updated: now }, prev, patch);
+                    if (patch.ref) n.ref = Object.assign({}, prev?.ref, patch.ref);
+                    if (patch.trade) {
+                        n.trade = cleanTrade(patch.trade);
+                        // (kept when an edit doesn't say; a new one is the picked account's — All accounts: Main's)
+                        if (!n.trade.acct) n.trade.acct = prev?.trade?.acct || (acctMany() && acctActive() !== 'all' ? acctActive() : '');
+                    }
+                    const changed = f => f in patch && (f === 'trade' ? JSON.stringify(n.trade) !== JSON.stringify(prev[f]) : patch[f] !== prev[f]);
+                    if (!prev || ['text', 'title', 'pinned', 'trade'].some(changed)) n.updated = now;
+                    if ((n.type === 'item' || n.type === 'user') && !String(n.text || '').trim()) delete notes[key];
+                    else notes[key] = out = n;
+                    return [key];
+                });
+                return out;
+            },
+            remove(key) { let gone = null; write(notes => { gone = notes[key] || null; delete notes[key]; return [key]; }); return gone; },
+            restore(note) { write(notes => { notes[note.key] = note; return [note.key]; }); },
+            // Merge a backup: each note is added, or replaces ours when the backup copy is newer
+            importMany(list) {
+                const res = { added: 0, updated: 0, skipped: 0 };
+                write(notes => {
+                    const keys = [];
+                    (Array.isArray(list) ? list : []).forEach(n => {
+                        if (!n || typeof n.key !== 'string' || !NOTE_KEY_RE.test(n.key) || typeof (n.text ?? '') !== 'string') { res.skipped++; return; }
+                        const cur = notes[n.key];
+                        if (cur && (cur.updated || 0) >= (n.updated || 0)) { res.skipped++; return; }
+                        notes[n.key] = { key: n.key, type: typeOf(n.key), title: String(n.title || ''), text: String(n.text || ''), pinned: !!n.pinned,
+                            created: Number(n.created) || Date.now(), updated: Number(n.updated) || Date.now(), ref: n.ref && typeof n.ref === 'object' ? n.ref : {} };
+                        if (typeOf(n.key) === 'trade') notes[n.key].trade = cleanTrade(n.trade);
+                        cur ? res.updated++ : res.added++;
+                        keys.push(n.key);
+                    });
+                    return keys;
+                });
+                return res;
+            },
+            onChange(fn) { subs.add(fn); return () => subs.delete(fn); },
+            reload() { cache = read(); paintNoteMarks(); emit(null); },
+        };
+    })();
+    if (typeof GM_addValueChangeListener === 'function') {
+        GM_addValueChangeListener(NOTES_KEY, (k, o, n, remote) => { if (remote) DTINotes.reload(); });
+    }
+
+    const noteEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    // GBCs / BFGBCs are traded as a currency, not as specific capsules (Neopets keeps releasing new ones),
+    // so a trade side records them as generic entries with a fixed cap value.
+    const GBC_KINDS = {
+        gbc:   { name: 'GBC',   full: 'Gift Box Mystery Capsule — any',          caps: 1 },
+        bfgbc: { name: 'BFGBC', full: 'Black Friday GBC — any (double boxes)',   caps: 1.5 },
+    };
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // MY TOKENS — NC style tokens and essences you own and want. DTI doesn't track these, so they're kept in
+    // this browser only, for your own reference.
+    //   dti_tokens  (GM): { v: 1, mine: { [key]: { own, want, name, img, at } } } — what you set by hand
+    //   dti_tok_cap (GM): { inv|sdb|gal|sc: { at, items: [{ name, img, qty }] } } — the latest look at your Inventory, SDB,
+    //                     Gallery and Styling Chamber; importing a place again replaces its list
+    //   You own a token = what you set by hand + what the imports found.
+    //   key = the token's name in lower case (Neopets and DTI name tokens the same way; the picture settles the rest).
+    // ══════════════════════════════════════════════════════════════════════════
+    // An essence-like token (a character's look, for that character's species): Essence of …, All-Star Essence of …, Treasured …
+    const TOK_ESSENCE_RE = /^(?:(?:all-star )?essence of |treasured )/i;
+    // Tokens out on Neopets that DTI hasn't named yet (it only learns a token once someone shows it a pet wearing it):
+    // [name, picture, color id]. Brain Tree, Esophagor and Pant Devil (Oct 2026) are the first essences any species can
+    // wear; until DTI names them, each pet it sees one on is an unnamed "<New?>" style with a placeholder picture in that
+    // essence's color (Woodland 89 / Ghost 29 / Blue 8) — those are folded into the essence here (seen: DTI's own
+    // pictures of styles 100491, 100490, 100492). Each one drops out by itself once DTI has it under its name.
+    const TOK_EXTRA = [
+        ['Essence of Brain Tree', 'dd6c4dde.gif', 89],
+        ['Essence of Esophagor', 'e9a931b3.gif', 29],
+        ['Essence of Pant Devil', '8d77b711.gif', 8],
+    ];
+    const TOK_EXTRA_FROM = 100400;   // (placeholder styles from about then on)
+    function tokNorm(name) { return String(name || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+    function tokBase(img) { return String(img || '').split(/[?#]/)[0].split('/').pop().toLowerCase(); }
+    // The token's style worn on a pet (itemdb's preview, 600×600) — '' when there's no picture to go by
+    function tokBigSrc(img) {
+        if (/^https:\/\/images\.neopets\.com\/cp\//.test(img || '')) return img;   // (already the style on a pet, 600px)
+        const id = tokBase(img).replace(/\.(gif|png|jpe?g)$/i, '');
+        if (/^mall_bg_circle$/i.test(id)) return '';   // (DTI's placeholder)
+        return id ? `https://cdn.itemdb.com.br/preview/${encodeURIComponent(id)}.png` : '';
+    }
+    // Where the pet is in its big picture → [zoom, centre x, centre y] (fractions of the picture), so big tiles can show
+    // the pet filling its tile instead of a small pet in a lot of white. Measured once per picture — read through
+    // Tampermonkey, as itemdb's server doesn't let pages read its pictures — and remembered in this browser.
+    const TokCrop = (() => {
+        const LS = 'dti_tok_crop_v1';
+        const keyOf = url => String(url).split('/').pop().replace(/\.png$/i, '');
+        const queue = [], pending = new Map();
+        let map = null, active = 0, saveT = 0;
+        const load = () => { if (!map) { try { map = JSON.parse(localStorage.getItem(LS) || '{}') || {}; } catch (_) { map = {}; } } return map; };
+        const save = () => { if (!saveT) saveT = setTimeout(() => { saveT = 0; try { localStorage.setItem(LS, JSON.stringify(map)); } catch (_) {} }, 1500); };   // (while measuring, too)
+        // [z, cx, cy]; false = can't be read (kept); null = couldn't fetch it now (asked again another time)
+        function measure(url) {
+            return new Promise(res => GM_xmlhttpRequest({
+                method: 'GET', url, responseType: 'blob', timeout: 20000,
+                onload: async r => {
+                    if (r.status !== 200 || !r.response) return res(r.status === 404 ? false : null);
+                    try {
+                        const bmp = await createImageBitmap(r.response), N = 150;
+                        const c = document.createElement('canvas'); c.width = c.height = N;
+                        const g = c.getContext('2d', { willReadFrequently: true });
+                        g.drawImage(bmp, 0, 0, N, N); bmp.close?.();
+                        const d = g.getImageData(0, 0, N, N).data;
+                        let x0 = N, y0 = N, x1 = -1, y1 = -1;
+                        for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+                            const i = (y * N + x) * 4;
+                            if (d[i + 3] > 24 && !(d[i] > 242 && d[i + 1] > 242 && d[i + 2] > 242)) {   // (not see-through, not the white around it)
+                                if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+                            }
+                        }
+                        if (x1 < 0) return res(false);
+                        const span = Math.max(x1 - x0 + 1, y1 - y0 + 1) / N;
+                        const z = Math.max(1, Math.min(2.6, 0.87 / span));   // (the pet fills 87% of the tile; never shrunk, at most 2.6×)
+                        res([+z.toFixed(3), +((x0 + x1 + 1) / 2 / N).toFixed(3), +((y0 + y1 + 1) / 2 / N).toFixed(3)]);
+                    } catch (_) { res(false); }
+                },
+                onerror: () => res(null), ontimeout: () => res(null),
+            }));
+        }
+        const pump = () => {   // six at a time, the latest asked for first (what's on screen now, not what was scrolled past)
+            while (active < 6 && queue.length) {
+                const [url, done] = queue.pop();
+                active++;
+                measure(url).then(v => {
+                    if (v !== null) { load()[keyOf(url)] = v; save(); }
+                    pending.delete(url); active--; done(v || null); pump();
+                });
+            }
+        };
+        return {
+            get: url => load()[keyOf(url)],   // [z, cx, cy] | false | undefined (not measured yet)
+            of(url) {
+                const v = this.get(url);
+                if (v !== undefined) return Promise.resolve(v || null);
+                if (!pending.has(url)) pending.set(url, new Promise(done => { queue.push([url, done]); pump(); }));
+                else { const i = queue.findIndex(q => q[0] === url); if (i >= 0) queue.push(queue.splice(i, 1)[0]); }   // (wanted again: next)
+                return pending.get(url);
+            },
+        };
+    })();
+    const tokCropCss = c => `--z:${c[0]};--cx:${c[1]};--cy:${c[2]}`;
+    function tokImg(base) { return base ? (/^https?:/.test(base) ? base : `https://images.neopets.com/items/${base}`) : ''; }
+    const TOK_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="6.1"/><path d="M8 4.6l1 2.05 2.25.33-1.63 1.58.39 2.24L8 9.74l-2.01 1.06.39-2.24L4.75 6.98 7 6.65z" fill="currentColor" stroke="none"/></svg>';
+    const TOK_SORT_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v10M2.5 10.5 5 13l2.5-2.5M11 13V3M8.5 5.5 11 3l2.5 2.5"/></svg>';
+    const TOK_SOURCES = [   // (icons: the same Neopets ones as the import panel / the DTI button's Pages)
+        { key: 'inv', label: 'Inventory', href: 'https://www.neopets.com/inventory.phtml', icon: 'https://images.neopets.com/themes/h5/basic/images/v2/inventory-icon.png' },
+        { key: 'sdb', label: 'Safety Deposit Box', href: 'https://www.neopets.com/safetydeposit.phtml', icon: 'https://images.neopets.com/themes/h5/grey/images/safetydeposit-icon.png', mixed: true },
+        { key: 'gal', label: 'Gallery', href: 'https://www.neopets.com/gallery/index.phtml', icon: 'https://images.neopets.com/themes/h5/basic/images/v3/gallery-icon.svg', mixed: true },
+        { key: 'sc',  label: 'Styling Chamber', href: 'https://www.neopets.com/stylingchamber/', icon: 'https://images.neopets.com/themes/h5/newyears/images/chamber-icon.png' },
+    ];
+    // Side accounts: Main's hand-set numbers are `mine`, a side account's `acct[id]`; imports are kept per Neopets
+    // username (`inv@username`; `inv` alone = from before side accounts, Main's). read() / capsIn() give the account
+    // picked in the nav — All accounts: everyone's added up.
+    const DTITokens = {
+        raw() { const d = GM_getValue('dti_tokens', null); return d && typeof d.mine === 'object' ? d : { v: 1, mine: {} }; },
+        read(scope = acctActive()) {
+            const d = this.raw();
+            const of = id => (id === 'main' ? d.mine : d.acct?.[id]) || {};
+            if (scope !== 'all') return { v: 1, mine: of(scope) };
+            const sum = {};
+            acctAll().forEach(a => Object.entries(of(a.id)).forEach(([k, m]) => {
+                const t = sum[k] || (sum[k] = { own: 0, want: 0, gone: 0, goneAt: 0, name: '', img: '', at: 0 });
+                t.own += m.own || 0; t.want += m.want || 0; t.gone += m.gone || 0; t.goneAt = Math.max(t.goneAt, m.goneAt || 0);
+                t.name = t.name || m.name || ''; t.img = t.img || m.img || ''; t.at = Math.max(t.at, m.at || 0);
+            }));
+            return { v: 1, mine: sum };
+        },
+        caps() { const c = GM_getValue('dti_tok_cap', null); return c && typeof c === 'object' ? c : {}; },
+        capAcct(k, c) { const np = c?.np || (k.includes('@') ? k.split('@')[1] : ''); return np ? acctOfNp(np) : 'main'; },
+        capsIn(scope = acctActive()) { return Object.entries(this.caps()).filter(([k, c]) => c && (scope === 'all' || this.capAcct(k, c) === scope)); },
+        // One more / one less, on the account picked (All accounts: + goes to Main, − to the first account that has one);
+        // meta: { name, img } to remember for tokens DTI doesn't list
+        bump(key, f, delta, meta, scope = acctActive()) {
+            const d = this.raw();   // read again first: another tab may have changed it
+            const store = id => id === 'main' ? d.mine : ((d.acct = d.acct || {})[id] = d.acct[id] || {});
+            const id = scope !== 'all' ? scope : delta > 0 ? 'main' : (acctAll().find(a => (store(a.id)[key]?.[f] || 0) > 0)?.id || 'main');
+            const map = store(id), cur = map[key] || { own: 0, want: 0 };
+            const next = { ...cur, name: meta?.name || cur.name || '', img: meta?.img || cur.img || '', at: Date.now() };
+            next[f] = Math.max(0, Math.min(999, ((cur[f] || 0) + delta) | 0));
+            if (!next.own && !next.want && !next.gone) delete map[key]; else map[key] = next;
+            GM_setValue('dti_tokens', d);
+        },
+        // An imported token you don't have any more (traded it…): one taken away (+1) or given back (−1), on the account
+        // picked (All accounts: `acctId`, the one whose import has it). A new import of that place counts afresh.
+        gone(key, delta, meta, acctId, scope = acctActive()) {
+            const d = this.raw();
+            const id = scope !== 'all' ? scope : acctId || 'main';
+            const map = id === 'main' ? d.mine : ((d.acct = d.acct || {})[id] = d.acct[id] || {});
+            const cur = map[key] || { own: 0, want: 0 };
+            const next = { ...cur, name: meta?.name || cur.name || '', img: meta?.img || cur.img || '', at: Date.now() };
+            next.gone = Math.max(0, (cur.gone || 0) + delta);
+            if (delta > 0) next.goneAt = Date.now();
+            if (!next.gone) { delete next.gone; delete next.goneAt; }
+            if (!next.own && !next.want && !next.gone) delete map[key]; else map[key] = next;
+            GM_setValue('dti_tokens', d);
+        },
+        clearSource(src, scope = acctActive()) {
+            const c = this.caps();
+            Object.keys(c).forEach(k => { if (k.split('@')[0] === src && (scope === 'all' || this.capAcct(k, c[k]) === scope)) delete c[k]; });
+            GM_setValue('dti_tok_cap', c);
+        },
+        capOf(src, scope = acctActive()) {   // one place's imports (several accounts': together) → { at, items } | null
+            const list = this.capsIn(scope).filter(([k]) => k.split('@')[0] === src).map(([, c]) => c);
+            return list.length ? { at: Math.max(...list.map(c => c.at || 0)), items: list.flatMap(c => c.items || []) } : null;
+        },
+    };
+    // ── Your own lists for the tokens you want ("Really want", "Just like"…): each wanted token in one of them, or in none.
+    // GM `dti_tok_lists` = { lists: [{ id, name, color }], of: { tokenKey: listId } } — the same lists for every account
+    const TOK_LIST_COLORS = ['#ef4444', '#f59e0b', '#10b981', '#0ea5e9', '#6366f1', '#ec4899', '#a855f7', '#14b8a6'];
+    const TokLists = {
+        raw() { const d = GM_getValue('dti_tok_lists', null); return d && Array.isArray(d.lists) ? { lists: d.lists, of: d.of && typeof d.of === 'object' ? d.of : {} } : { lists: [], of: {} }; },
+        save(d) { GM_setValue('dti_tok_lists', d); },
+        listOf(d, key) { const id = d.of[key]; return id ? d.lists.find(l => l.id === id) || null : null; },
+        named(name) { const n = String(name || '').trim().toLowerCase(); return this.raw().lists.find(l => l.name.toLowerCase() === n) || null; },
+        put(key, id) { const d = this.raw(); if (id && d.lists.some(l => l.id === id)) d.of[key] = id; else delete d.of[key]; this.save(d); },
+        create(name) {   // → its id (a list of that name already: that one)
+            const have = this.named(name);
+            if (have) return have.id;
+            const d = this.raw(), used = new Set(d.lists.map(l => l.color));
+            const l = { id: 'l' + Date.now().toString(36), name: String(name).trim().slice(0, 40), color: TOK_LIST_COLORS.find(c => !used.has(c)) || TOK_LIST_COLORS[d.lists.length % TOK_LIST_COLORS.length] };
+            d.lists.push(l);
+            this.save(d);
+            return l.id;
+        },
+        edit(id, patch) { const d = this.raw(), l = d.lists.find(x => x.id === id); if (l) { Object.assign(l, patch); this.save(d); } },
+        move(id, dir) {
+            const d = this.raw(), i = d.lists.findIndex(x => x.id === id), j = i + dir;
+            if (i < 0 || j < 0 || j >= d.lists.length) return;
+            [d.lists[i], d.lists[j]] = [d.lists[j], d.lists[i]];
+            this.save(d);
+        },
+        drop(id) { const d = this.raw(); d.lists = d.lists.filter(x => x.id !== id); Object.keys(d.of).forEach(k => { if (d.of[k] === id) delete d.of[k]; }); this.save(d); },
+    };
+    // A token's want list (its card's list button, or the small popover on NC Styles pages): pick one, none, or make a new one
+    function openTokListMenu(anchor, key, after) {
+        const open = document.querySelector('.dti-tk-lmenu');
+        if (open?._anchor === anchor) return open._close();
+        const d = TokLists.raw(), cur = d.of[key] && d.lists.some(l => l.id === d.of[key]) ? d.of[key] : '';
+        const tick = '<small>\u2713</small>';
+        const menu = document.createElement('div');
+        menu.className = 'dti-tk-lmenu';
+        menu.innerHTML = `<div class="dti-tk-tmhd">Want list</div>
+            ${d.lists.length ? `<div class="dti-tk-lmlist">${d.lists.map(l => `<button type="button" data-put="${noteEsc(l.id)}" style="--lc:${noteEsc(l.color)}"${cur === l.id ? ' class="on"' : ''}><i class="dot"></i><span>${noteEsc(l.name)}</span>${cur === l.id ? tick : ''}</button>`).join('')}
+                <button type="button" data-put=""${!cur ? ' class="on"' : ''}><i class="dot none"></i><span>No list</span>${!cur ? tick : ''}</button></div>` : '<p class="dti-tk-lmnote">Make a list for the tokens you want \u2014 Really want, Just like, anything.</p>'}
+            <form class="dti-tk-lmnew"><input type="text" maxlength="40" placeholder="${d.lists.length ? 'New list\u2026' : 'Its name \u2014 e.g. Really want'}" autocomplete="off" spellcheck="false" aria-label="New list name"><button type="submit">Add</button></form>`;
+        const close = tokFloat(menu, anchor);
+        const put = id => { TokLists.put(key, id); close(); after?.(); };
+        menu.addEventListener('click', e => { const b = e.target.closest('[data-put]'); if (b) put(b.dataset.put); });
+        menu.querySelector('form').addEventListener('submit', e => {
+            e.preventDefault();
+            const v = menu.querySelector('.dti-tk-lmnew input').value.trim();
+            if (v) put(TokLists.create(v));
+        });
+        if (!d.lists.length) menu.querySelector('.dti-tk-lmnew input').focus();
+    }
+    // A small menu by a button (My Tokens' list menus): closes on a click outside, Esc, or scrolling the page
+    function tokFloat(menu, anchor) {
+        document.querySelectorAll('.dti-tk-lmenu').forEach(m => m._close?.());
+        document.body.appendChild(menu);
+        const r = anchor.getBoundingClientRect();
+        menu.style.left = Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8)) + 'px';
+        menu.style.top = (r.bottom + 6 + menu.offsetHeight > innerHeight ? Math.max(8, r.top - menu.offsetHeight - 6) : r.bottom + 6) + 'px';
+        const out = e => { if (!menu.contains(e.target) && !anchor.contains(e.target)) close(); };
+        const key = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
+        const scr = e => { if (!menu.contains(e.target)) close(); };
+        function close() {
+            menu.remove();
+            document.removeEventListener('mousedown', out, true); document.removeEventListener('keydown', key, true); window.removeEventListener('scroll', scr, true);
+        }
+        document.addEventListener('mousedown', out, true);
+        document.addEventListener('keydown', key, true);
+        window.addEventListener('scroll', scr, true);
+        menu._close = close; menu._anchor = anchor;
+        return close;
+    }
+
+    // ── The catalog: DTI's NC Styles list (every style is one token — essences and Treasured too, each for one species).
+    // 2.8 MB and ~10 s from DTI, so a slim copy is kept in this site's storage (fetched again after a day).
+    let _tokCatP = null;
+    function loadTokenCatalog(force) {
+        if (_tokCatP && !force) return _tokCatP;
+        _tokCatP = (async () => {
+            const LS = 'dti_tok_catalog_v3';
+            let slim = null;
+            if (!force) { try { slim = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (_) {} }
+            const away = !/(^|\.)openneo\.net$/.test(location.hostname);   // (the DTI panel on Neopets)
+            if (!slim || !Array.isArray(slim.styles) || Date.now() - slim.at > (away ? 7 : 1) * 864e5) {
+                const [styles, home] = await Promise.all([
+                    away ? dtiGetText('/rainbow-pool/styles.json').then(t => JSON.parse(t))
+                        : fetch('/rainbow-pool/styles.json', { credentials: 'include' }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+                    away ? dtiGetText('/').catch(() => '') : fetch('/', { credentials: 'include' }).then(r => r.text()).catch(() => ''),
+                ]);
+                const species = {}, colors = {}, hd = new DOMParser().parseFromString(home, 'text/html');
+                hd.querySelectorAll('select[name="species"] option').forEach(o => { if (/^\d+$/.test(o.value)) species[o.value] = o.textContent.trim(); });
+                hd.querySelectorAll('select[name="color"] option').forEach(o => { if (/^\d+$/.test(o.value)) colors[o.value] = o.textContent.trim(); });
+                // (a style with DTI's placeholder picture: its own picture of the style worn, so the tile shows what it is)
+                const art = s => /mall_bg_circle/.test(s.thumbnail_url || '') ? String((s.swf_assets || []).find(a => a?.urls?.png)?.urls.png || '').split('?')[0] : '';
+                slim = { at: Date.now(), species, colors, styles: styles.map(s => [s.id, s.species_id, tokBase(s.thumbnail_url), s.series_main_name || '', s.adjective_name || '', s.color_id || 0, art(s)]) };
+                try { localStorage.removeItem('dti_tok_catalog_v1'); localStorage.removeItem('dti_tok_catalog_v2'); localStorage.setItem(LS, JSON.stringify(slim)); } catch (_) {}
+            }
+            return buildTokenCatalog(slim);
+        })();
+        _tokCatP.catch(() => { _tokCatP = null; });
+        return _tokCatP;
+    }
+    // Cached copy only (no network) — for painting tiles right away
+    // A DTI page's text from anywhere (on Neopets: through Tampermonkey, with your DTI login) — rejects unless it's a 200
+    function dtiGetText(path, timeout = 60000) {
+        return new Promise((res, rej) => GM_xmlhttpRequest({
+            method: 'GET', url: 'https://impress.openneo.net' + path, timeout,
+            onload: r => r.status === 200 ? res(r.responseText || '') : rej(new Error('HTTP ' + r.status)),
+            onerror: () => rej(new Error('network')), ontimeout: () => rej(new Error('timeout')),
+        }));
+    }
+    function tokenCatalogIfCached() {
+        try { const slim = JSON.parse(localStorage.getItem('dti_tok_catalog_v3') || 'null'); return slim?.styles ? buildTokenCatalog(slim) : null; } catch (_) { return null; }
+    }
+    let _tokCatBuilt = null;
+    function buildTokenCatalog(slim) {
+        if (_tokCatBuilt?.at === slim.at) return _tokCatBuilt;
+        const FALLBACK = 'Acara Aisha Blumaroo Bori Bruce Buzz Chia Chomby Cybunny Draik Elephante Eyrie Flotsam Gelert Gnorbu Grarrl Grundo Hissi Ixi Jetsam Jubjub Kacheek Kau Kiko Koi Korbat Kougra Krawk Kyrii Lenny Lupe Lutari Meerca Moehog Mynci Nimmo Ogrin Peophin Poogle Pteri Quiggle Ruki Scorchio Shoyru Skeith Techo Tonu Tuskaninny Uni Usul Wocky Xweetok Yurble Zafara Vandagyre Varwolf'.split(' ');
+        const sp = id => slim.species?.[id] || FALLBACK[id - 1] || '';
+        const imgNames = new Map();
+        const styleOf = new Map();   // style id → [species id, color id]
+        const extraSids = new Map();   // (TOK_EXTRA color → its unnamed styles, one per pet DTI has seen it on)
+        // The series there are (one Habbo Hotel, typo and all; "Bouncing" is Bouncing Baby) — for reading names
+        const famOf = x => { x = String(x).replace(/^<new\??>\s*/i, '').trim(); return /^hab+o+ hotel\b/i.test(x) ? 'Habbo Hotel' : /^bouncing$/i.test(x) ? 'Bouncing Baby' : x; };
+        const fams = [...new Set(slim.styles.map(r => famOf(r[3])))].filter(f => f && !/^(essence of|treasured)$/i.test(f));
+        const colorNames = Object.values(slim.colors || {});
+        const rows = slim.styles.map(([id, spId, img, ser, adj, colorId, art]) => {
+            styleOf.set(id, [spId, colorId || 0]);
+            const isNew = /^<new\??>/i.test(adj) || /^<new\??>/i.test(ser);
+            if (isNew && id >= TOK_EXTRA_FROM && /^mall_bg_circle\./.test(img) && TOK_EXTRA.some(e => e[2] === colorId)) {
+                extraSids.set(colorId, [...(extraSids.get(colorId) || []), id]);
+                return null;
+            }
+            const adjClean = adj.replace(/^<new\??>\s*/i, '').trim();
+            // (DTI files a few under a series only once it's named them: the name says it too)
+            const essence = /^(essence of|treasured)$/i.test(ser.trim()) || TOK_ESSENCE_RE.test(adjClean);
+            const kind = /^treasured\b/i.test(adjClean) ? 'Treasured' : /^all-star essence\b/i.test(adjClean) ? 'All-Star Essence' : 'Essence';
+            const name = essence ? adjClean : `${adjClean} ${sp(spId)}`.trim();
+            if (!imgNames.has(img)) imgNames.set(img, new Set());
+            imgNames.get(img).add(name);
+            const c = essence ? null : tokClassify(adjClean, fams, slim.colors?.[colorId] || '', colorNames);
+            return { id, img, art: art || '', name, essence, isNew, species: sp(spId), color: c?.color || '', colors: c?.colors || [], type: c?.series ? c.type : '',
+                series: essence ? kind : c.series || (isNew ? 'New' : famOf(ser) || 'New'), spId, colorId, ph: isNew && !essence && /^mall_bg_circle\./i.test(img) };
+        }).filter(Boolean);
+        // DTI's unnamed styles (its placeholder picture, a color for a name — "25th Anniversary Grundo"): named after the
+        // style they most likely are, so they sort with it — the one style of that color the pet doesn't have yet, else the
+        // color's only style (an unnamed version of it) — with "(unnamed)" after; when that can't be told, after the color
+        const named = new Map(), petHas = new Set();   // color → its styles (not Prismatic versions); "pet|style" pairs DTI has
+        rows.forEach(r => {
+            if (r.ph || r.essence || !r.type || /^prismatic /i.test(r.type)) return;
+            named.set(r.colorId, (named.get(r.colorId) || new Set()).add(r.type));
+            petHas.add(r.spId + '|' + r.type);
+        });
+        const phNames = new Map();
+        rows.forEach(r => {
+            if (!r.ph) return;
+            const styles = [...(named.get(r.colorId) || [])], missing = styles.filter(b => !petHas.has(r.spId + '|' + b));
+            const guess = missing.length === 1 ? missing[0] : styles.length === 1 ? styles[0] : '';
+            const c = guess ? tokClassify(guess, fams, r.color, colorNames) : null;
+            const base = `${guess || r.color || 'New'} ${r.species}`.replace(/\s+/g, ' '), n = (phNames.get(base) || 0) + 1;
+            phNames.set(base, n);
+            r.name = `${base} (unnamed${n > 1 ? ' ' + n : ''})`;   // (two unnamed ones for one pet: each its own)
+            if (c?.series) r.series = c.series;
+            r.type = '';   // (not a sure thing: not counted under a style)
+        });
+        const byKey = new Map(), byImg = new Map(), bySid = new Map();
+        rows.forEach(r => {
+            const key = tokNorm(r.name);
+            let t = byKey.get(key);
+            if (!t) { t = { key, name: r.name, img: r.img, art: r.art, species: r.species, color: r.color, colors: r.colors, type: r.type, series: r.series, essence: r.essence, isNew: r.isNew, sid: r.id, sids: [] }; byKey.set(key, t); }
+            if (r.id > t.sid) t.sid = r.id;   // newest style id — for "Newest first"
+            bySid.set(r.id, t);
+            t.sids.push(r.id);   // (one style per pet it's for — essences and Treasured are each for one species)
+            if (imgNames.get(r.img).size === 1) byImg.set(r.img, t);   // pictures shared by different styles are placeholders
+        });
+        TOK_EXTRA.forEach(([name, img, colorId]) => {   // (not named on DTI yet: listed as New, for any pet, with DTI's unnamed styles of it)
+            const key = tokNorm(name);
+            if (byKey.has(key)) return;
+            const sids = extraSids.get(colorId) || [];
+            const t = { key, name, img, species: '', anyPet: true, series: TOK_ESSENCE_RE.test(name) ? (/^treasured/i.test(name) ? 'Treasured' : /^all-star/i.test(name) ? 'All-Star Essence' : 'Essence') : 'New',
+                essence: TOK_ESSENCE_RE.test(name), isNew: true, sid: sids.length ? Math.max(...sids) : 1e9, sids };
+            byKey.set(key, t);
+            sids.forEach(id => bySid.set(id, t));
+            if (!byImg.has(img)) byImg.set(img, t);
+        });
+        const series = [...new Set([...byKey.values()].filter(t => !t.essence).map(t => t.series))].filter(s => s && s !== 'New').sort((a, b) => a.localeCompare(b));
+        const speciesNames = [...new Set([...byKey.values()].map(t => t.species).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+        // A name that reads like a style token: [Prismatic …: ]<series> … <species>
+        const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const looks = new RegExp(`^(?:prismatic [^:]+: )?(?:${series.map(s => esc(s.toLowerCase())).join('|')})(?: .+)? (?:${speciesNames.map(s => esc(s.toLowerCase())).join('|')})$`);
+        return _tokCatBuilt = { at: slim.at, byKey, byImg, bySid, series, speciesNames, looks, styleOf, spName: sp, colorName: id => slim.colors?.[id] || '', colorNames };
+    }
+    // The token a captured item is, in the catalog's words when the catalog knows it (by name, else by picture)
+    function tokKeyFor(item, cat) {
+        const k = tokNorm(item.name);
+        if (!cat || cat.byKey.has(k)) return k;
+        return cat.byImg.get(tokBase(item.img))?.key || k;
+    }
+    // Inventory and Styling Chamber imports are tokens already; a gallery holds anything, so only what reads as one
+    function tokIsToken(item, cat) {
+        const k = tokNorm(item.name);
+        if (TOK_ESSENCE_RE.test(k)) return true;
+        if (!cat) return false;
+        return cat.byKey.has(k) || cat.byImg.has(tokBase(item.img)) || cat.looks.test(k);
+    }
+    // key → { inv, gal, sc, name, img } from the latest imports
+    function tokImported(cat, scope) {
+        const per = new Map();
+        DTITokens.capsIn(scope).forEach(([k, cap]) => {
+            const src = k.split('@')[0];
+            (cap?.items || []).forEach(it => {
+                if ((src === 'gal' || src === 'sdb') && !tokIsToken(it, cat)) return;   // (they hold anything)
+                const k = tokKeyFor(it, cat);
+                const e = per.get(k) || { name: it.name, img: tokBase(it.img), at: 0 };
+                e[src] = (e[src] || 0) + (it.qty || 1);
+                e.at = Math.max(e.at, cap.at || 0);   // (its latest import)
+                per.set(k, e);
+            });
+        });
+        return per;
+    }
+    // First seen: the date DTI first saw a style — close to its release for anything from 2024 on. DTI only shows it
+    // on its NC Styles pages, so it's looked up per species + color (one small page each, gently), saved for good,
+    // and also picked up from any NC Styles page you browse.
+    const TOK_DATES = 'dti_tok_dates_v1';
+    let _tokDates = null;
+    const tokDates = () => _tokDates || (_tokDates = (() => { try { return JSON.parse(localStorage.getItem(TOK_DATES) || '{}') || {}; } catch (_) { return {}; } })());
+    function tokSaveDates(map) {
+        Object.assign(tokDates(), map);
+        try { localStorage.setItem(TOK_DATES, JSON.stringify(tokDates())); } catch (_) {}
+    }
+    function tokDateOf(t) { const d = tokDates(); return (t?.sids || []).map(id => d[id]).filter(Boolean).sort()[0] || ''; }
+    function tokFmtDate(d) { return d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''; }
+    function tokHarvestDates(root) {
+        const m = {};
+        root.querySelectorAll('.rainbow-pool-list > li').forEach(li => {
+            const sid = li.querySelector('a')?.getAttribute('href')?.match(/[?&]style=(\d+)/)?.[1];
+            const t = li.querySelector('time')?.getAttribute('datetime');
+            if (sid && t) m[sid] = t.slice(0, 10);
+        });
+        if (Object.keys(m).length) tokSaveDates(m);
+        return root.querySelector('.rainbow-pool-pagination a.next_page')?.getAttribute('href') || '';
+    }
+    let _tokDateQ = Promise.resolve();
+    const _tokDateAsked = new Set();
+    function tokEnsureDates(tokens, cat, onProgress) {
+        if (!cat?.styleOf) return;
+        const d = tokDates(), groups = new Map();
+        tokens.forEach(t => {
+            if (!t?.sids?.length || t.sids.some(id => d[id])) return;
+            const st = cat.styleOf.get(t.sids[0]);
+            const sp = st && cat.spName(st[0]), co = st && cat.colorName(st[1]);
+            if (!sp || !co) return;
+            const g = sp + '|' + co;
+            if (_tokDateAsked.has(g) && !groups.has(g)) return;
+            _tokDateAsked.add(g);
+            if (!groups.has(g)) groups.set(g, { sp, co, sids: [] });
+            groups.get(g).sids.push(t.sids[0]);
+        });
+        if (!groups.size) return;
+        _tokDateQ = _tokDateQ.then(async () => {
+            for (const { sp, co, sids } of groups.values()) {
+                let url = `/rainbow-pool/styles?species=${encodeURIComponent(sp)}&color=${encodeURIComponent(co)}`;
+                for (let page = 0; url && page < 4; page++) {
+                    try {
+                        const r = await fetch(url, { credentials: 'include' });
+                        url = r.ok ? tokHarvestDates(new DOMParser().parseFromString(await r.text(), 'text/html')) : '';
+                    } catch (_) { url = ''; }
+                    if (sids.every(id => tokDates()[id])) break;
+                    if (url) await new Promise(res => setTimeout(res, 250));
+                }
+                onProgress?.();
+                await new Promise(res => setTimeout(res, 250));
+            }
+        });
+    }
+
+    // Everything known about one token: catalog facts + your numbers
+    // What a style token is, read from its style's name — "[Prismatic <version>: ]<series> <color>" — since DTI's own fields
+    // are patchy: unnamed "<New?>" series on named styles, "Haboo Hotel", every Habbo Hotel color filed under Blue, two
+    // Nostalgic Ghosts under Eerie. The series is the longest known one the name starts with; the color is what follows it
+    // (in DTI's spelling: Usukiboy → Usuki Boy, Anniversary → 25th Anniversary), or DTI's color when the series says it all
+    // (Baby Chocolate, Valentine Plushie). A color in the series counts too (Baby Chocolate: Baby and Chocolate; Plushie Baby: Baby and Plushie).
+    // type = the whole style ("Prismatic Mint Chip: Delightful Chocolate"); base = without the Prismatic version.
+    function tokTypeSplit(t) { const m = String(t).match(/^prismatic ([^:]+):\s*(.+)$/i); return m ? [m[2].trim(), m[1].trim()] : [String(t), '']; }   // [style, Prismatic version]
+    function tokClassify(style, fams, dtiColor, colorNames) {
+        const m = String(style).match(/^prismatic ([^:]+):\s*(.+)$/i);
+        const base = (m ? m[2] : String(style)).trim(), lo = base.toLowerCase();
+        const series = fams.filter(f => lo === f.toLowerCase() || lo.startsWith(f.toLowerCase() + ' ')).sort((a, b) => b.length - a.length)[0] || '';
+        const rest = series ? base.slice(series.length).trim() : '';
+        const sq = x => String(x).toLowerCase().replace(/[^a-z0-9]/g, '');
+        const color = !rest ? dtiColor || '' : colorNames.find(c => sq(c) === sq(rest)) || (dtiColor && sq(dtiColor).endsWith(sq(rest)) ? dtiColor : rest);
+        const colors = [color, ...series.split(' ').map(w => colorNames.find(c => sq(c) === sq(w)))].filter((c, k, a) => c && a.indexOf(c) === k);
+        const prismatic = m ? m[1].trim() : '';
+        return { series, color, colors, base, prismatic, type: prismatic ? `Prismatic ${prismatic}: ${base}` : base };
+    }
+    // ── The Styling Studio's rotation: the style tokens Neopets has in its Studio right now. Read from itemdb's Pet Styles
+    // list (?available=1, 12 a page — asked the way the page asks for its next page, half the page's size; the plain page if
+    // that ever stops working) only for someone who uses "Available now", then kept 12 hours: GM `dti_tok_studio`
+    // { at, total, t: [[name, imageId]] }. An empty or unreadable answer is never kept. ──
+    const TOK_STUDIO_URL = 'https://itemdb.com.br/rainbow-pool/pet-styles?available=1';
+    const TOK_STUDIO_AGE = 12 * 3600e3;
+    const tokStudio = () => GM_getValue('dti_tok_studio', null);
+    let _tokStudioKeys = null;
+    function tokStudioKeys() {   // token key (its name, lower-case) → [name, imageId]; null = not read yet
+        const d = tokStudio();
+        if (!d?.t?.length) return null;
+        if (_tokStudioKeys?.at !== d.at) _tokStudioKeys = { at: d.at, map: new Map(d.t.map(r => [String(r[0]).toLowerCase(), r])) };
+        return _tokStudioKeys.map;
+    }
+    function tokStudioGet(url, rsc) {
+        return new Promise((res, rej) => GM_xmlhttpRequest({
+            method: 'GET', url, headers: rsc ? { RSC: '1' } : {}, timeout: 30000,
+            onload: r => r.status === 200 ? res(r.responseText || '') : rej(new Error('HTTP ' + r.status)),
+            onerror: () => rej(new Error('network')), ontimeout: () => rej(new Error('timeout')),
+        }));
+    }
+    function tokStudioParse(text) {   // the page's data ("tokens":[{ name, imageId, … }]), else its cards; null = can't read it
+        const i = text.indexOf('"tokens":[');
+        if (i >= 0) {
+            let j = i + 9, depth = 0, str = false, bs = false;
+            for (; j < text.length; j++) {
+                const c = text[j];
+                if (str) { if (bs) bs = false; else if (c === '\\') bs = true; else if (c === '"') str = false; continue; }
+                if (c === '"') str = true; else if (c === '[' || c === '{') depth++; else if ((c === ']' || c === '}') && --depth === 0) break;
+            }
+            try { return JSON.parse(text.slice(i + 9, j + 1)).filter(x => x?.name).map(x => [String(x.name), String(x.imageId || '')]); } catch (_) {}
+        }
+        const cards = [...new DOMParser().parseFromString(text, 'text/html').querySelectorAll('a[href^="/rainbow-pool/pet-styles/"] img[alt]')];
+        return cards.length ? cards.map(im => [im.alt, (im.getAttribute('src') || '').match(/preview\/([a-z0-9]+)\.png/i)?.[1] || '']) : null;
+    }
+    let _tokStudioRun = null;
+    function tokStudioRefresh(onStep) {
+        if (_tokStudioRun) return _tokStudioRun;
+        _tokStudioRun = (async () => {
+            const all = new Map();
+            let total = 0;
+            for (let pg = 1; pg <= 40; pg++) {
+                const url = `${TOK_STUDIO_URL}&page=${pg}`;
+                let text = await tokStudioGet(url, true), rows = tokStudioParse(text);
+                if (!rows) { text = await tokStudioGet(url, false); rows = tokStudioParse(text); }
+                if (!rows) throw new Error('unreadable');
+                if (pg === 1) total = +(text.match(/\\?"total(?:Count)?\\?":(\d+)/)?.[1] || 0);
+                const before = all.size;
+                rows.forEach(r => all.set(r[0].toLowerCase(), r));
+                onStep?.(all.size, total);
+                if (rows.length < 12 || all.size === before || (total && all.size >= total)) break;
+                await new Promise(r => setTimeout(r, 300));   // (gently: one page at a time)
+            }
+            if (!all.size) throw new Error('empty');
+            const d = { at: Date.now(), total: total || all.size, t: [...all.values()] };
+            GM_setValue('dti_tok_studio', d);
+            return d;
+        })().finally(() => { _tokStudioRun = null; });
+        return _tokStudioRun;
+    }
+    function tokInfo(key, cat, mine, imported) {
+        const t = cat?.byKey.get(key), m = mine[key], im = imported.get(key);
+        const name = t?.name || im?.name || m?.name || key;
+        const essence = t ? t.essence : TOK_ESSENCE_RE.test(name);
+        let species = t?.species || '';
+        if (!t && !essence) species = (cat?.speciesNames || []).find(s => name.toLowerCase().endsWith(' ' + s.toLowerCase())) || '';
+        const impAll = im ? TOK_SOURCES.reduce((n, s) => n + (im[s.key] || 0), 0) : 0;   // (every place imported)
+        const gone = m?.gone && (m.goneAt || 0) >= (im?.at || 0) ? Math.min(m.gone, impAll) : 0;   // (imported ones you took away — till it's imported again)
+        const imp = impAll - gone;
+        const c = !t && !essence && species ? tokClassify(name.slice(0, -(species.length + 1)), cat?.series || [], '', cat?.colorNames || []) : null;
+        const cls = t || (c?.series ? c : null), [base, prismatic] = cls?.type ? tokTypeSplit(cls.type) : ['', ''];
+        return {
+            key, name, essence, species, anyPet: !!t?.anyPet, known: !!t, isNew: !!t?.isNew, color: cls?.color || '', colors: cls?.colors || [], type: cls?.type || '', base, prismatic,
+            series: t?.series || (essence ? (/^treasured/i.test(name) ? 'Treasured' : /^all-star/i.test(name) ? 'All-Star Essence' : 'Essence') : c?.series || ''), sid: t?.sid || 0, date: t ? tokDateOf(t) : '',
+            img: t?.art || tokImg(t?.img || im?.img || tokBase(m?.img)),
+            hand: m?.own || 0, imp, gone, own: (m?.own || 0) + imp, want: m?.want || 0, from: im || null,
+        };
+    }
+    const tokFromText = from => from ? TOK_SOURCES.filter(s => from[s.key]).map(s => `${s.label} ${from[s.key]}`).join(' · ') : '';
+    function tokOwnStep(info, delta, meta, cat, scope = acctActive()) {   // (scope: the DTI panel on Neopets names the account it's on)
+        const whose = () => scope === 'all' ? acctAll().find(a => tokImported(cat, a.id).has(info.key))?.id : '';
+        if (delta > 0 && info.gone) return DTITokens.gone(info.key, -1, meta, acctAll().find(a => (DTITokens.read(a.id).mine[info.key]?.gone || 0) > 0)?.id, scope);
+        if (delta < 0 && !info.hand && info.imp) return DTITokens.gone(info.key, 1, meta, whose(), scope);
+        DTITokens.bump(info.key, 'own', delta, meta, scope);
+    }
+    const tokOwnTitle = info => { const from = tokFromText(info.from); return from ? `Imported: ${from}${info.gone ? ` \u00b7 ${info.gone} taken away by you (till it\u2019s imported again)` : ''}${info.hand ? ' \u00b7 added by you ' + info.hand : ''}` : 'Added by you'; };
+    function tokAgo(ts) {
+        const s = Math.round((Date.now() - ts) / 1000);
+        return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
+    }
 
     if (location.hostname.includes('neopets.com')) {
         // The Neopets usernames you use (the accounts window offers them as side accounts)
@@ -1339,112 +1989,17 @@
         show(type === 'seeking' ? 'seeking' : 'offering');
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // NOTES — private notes on items, on users (traders), and general notes
-    // ══════════════════════════════════════════════════════════════════════════
-    // All notes live in one GM value: { v: 1, notes: { [key]: note } }
-    //   key   'item:<itemId>' | 'user:<userId>' | 'trade:<random>' | 'note:<random>'
-    //   note  { key, type: 'item'|'user'|'trade'|'general', title, text, pinned, created, updated, ref, trade }
-    //   ref   item → { id, name, img }   user → { id, name, slug }
-    //   trade { partner: { name, id?, slug? } | null, give: [item], get: [item], status, date: 'YYYY-MM-DD' }
-    //         item = { id, name, img, qty }   status = planned | pending | done | off
-    // Every write re-reads the stored copy first, so two tabs editing different notes never
-    // overwrite each other; other tabs pick changes up through GM_addValueChangeListener.
-    const NOTES_KEY = 'dti_notes';
-    const NOTE_KEY_RE = /^(item|user|trade|note):[\w-]{1,48}$/;
-    const TRADE_STATUS = [['planned', 'Planned'], ['pending', 'Pending'], ['done', 'Completed'], ['off', 'Fell through']];
-    const cleanTradeItems = a => (Array.isArray(a) ? a : []).filter(x => x && x.id).map(x => ({
-        id: String(x.id), name: String(x.name || ''), img: String(x.img || ''), qty: Math.max(1, parseInt(x.qty, 10) || 1) }));
-    const cleanTrade = t => ({
-        partner: t?.partner && t.partner.name ? { name: String(t.partner.name), id: String(t.partner.id || ''), slug: String(t.partner.slug || '') } : null,
-        give: cleanTradeItems(t?.give), get: cleanTradeItems(t?.get),
-        status: TRADE_STATUS.some(([v]) => v === t?.status) ? t.status : 'planned',
-        date: /^\d{4}-\d{2}-\d{2}$/.test(t?.date || '') ? t.date : '',
-        acct: typeof t?.acct === 'string' ? t.acct : '',   // (side accounts: whose trade it is)
-    });
-    const DTINotes = (() => {
-        let cache = null;
-        const subs = new Set();
-        const read = () => {
-            try { const s = JSON.parse(GM_getValue(NOTES_KEY, '') || 'null'); if (s && s.notes) return s; } catch (_) {}
-            return { v: 1, notes: {} };
-        };
-        const data = () => cache || (cache = read());
-        const typeOf = key => key.startsWith('item:') ? 'item' : key.startsWith('user:') ? 'user' : key.startsWith('trade:') ? 'trade' : 'general';
-        const emit = keys => subs.forEach(fn => { try { fn(keys); } catch (e) { console.error('[DTI notes]', e); } });
-        function write(mutate) {
-            const d = read();
-            const keys = mutate(d.notes);
-            cache = d;
-            GM_setValue(NOTES_KEY, JSON.stringify(d));
-            paintNoteMarks();
-            emit(keys);
-        }
-        return {
-            typeOf,
-            all: () => Object.values(data().notes),
-            get: key => data().notes[key] || null,
-            // patch: any of { text, title, pinned, ref, trade }. An item/user note with no text is removed —
-            // clearing the box is how you delete it. General notes and trades stay until deleted.
-            save(key, patch) {
-                if (!NOTE_KEY_RE.test(key)) return null;
-                let out = null;
-                write(notes => {
-                    const prev = notes[key], now = Date.now();
-                    const n = Object.assign({ key, type: typeOf(key), title: '', text: '', pinned: false, created: now, updated: now }, prev, patch);
-                    if (patch.ref) n.ref = Object.assign({}, prev?.ref, patch.ref);
-                    if (patch.trade) {
-                        n.trade = cleanTrade(patch.trade);
-                        // (kept when an edit doesn't say; a new one is the picked account's — All accounts: Main's)
-                        if (!n.trade.acct) n.trade.acct = prev?.trade?.acct || (acctMany() && acctActive() !== 'all' ? acctActive() : '');
-                    }
-                    const changed = f => f in patch && (f === 'trade' ? JSON.stringify(n.trade) !== JSON.stringify(prev[f]) : patch[f] !== prev[f]);
-                    if (!prev || ['text', 'title', 'pinned', 'trade'].some(changed)) n.updated = now;
-                    if ((n.type === 'item' || n.type === 'user') && !String(n.text || '').trim()) delete notes[key];
-                    else notes[key] = out = n;
-                    return [key];
-                });
-                return out;
-            },
-            remove(key) { let gone = null; write(notes => { gone = notes[key] || null; delete notes[key]; return [key]; }); return gone; },
-            restore(note) { write(notes => { notes[note.key] = note; return [note.key]; }); },
-            // Merge a backup: each note is added, or replaces ours when the backup copy is newer
-            importMany(list) {
-                const res = { added: 0, updated: 0, skipped: 0 };
-                write(notes => {
-                    const keys = [];
-                    (Array.isArray(list) ? list : []).forEach(n => {
-                        if (!n || typeof n.key !== 'string' || !NOTE_KEY_RE.test(n.key) || typeof (n.text ?? '') !== 'string') { res.skipped++; return; }
-                        const cur = notes[n.key];
-                        if (cur && (cur.updated || 0) >= (n.updated || 0)) { res.skipped++; return; }
-                        notes[n.key] = { key: n.key, type: typeOf(n.key), title: String(n.title || ''), text: String(n.text || ''), pinned: !!n.pinned,
-                            created: Number(n.created) || Date.now(), updated: Number(n.updated) || Date.now(), ref: n.ref && typeof n.ref === 'object' ? n.ref : {} };
-                        if (typeOf(n.key) === 'trade') notes[n.key].trade = cleanTrade(n.trade);
-                        cur ? res.updated++ : res.added++;
-                        keys.push(n.key);
-                    });
-                    return keys;
-                });
-                return res;
-            },
-            onChange(fn) { subs.add(fn); return () => subs.delete(fn); },
-            reload() { cache = read(); paintNoteMarks(); emit(null); },
-        };
-    })();
-    if (typeof GM_addValueChangeListener === 'function') {
-        GM_addValueChangeListener(NOTES_KEY, (k, o, n, remote) => { if (remote) DTINotes.reload(); });
-    }
 
     // Pencils of noted items/users turn solid accent (they still only appear on hover) — one generated
     // rule covers every tile on every page, including cards built later (My Items caches cards off-DOM)
     function paintNoteMarks() {
+        if (location.hostname.includes('neopets.com')) return;   // (DTI's tiles only)
         let st = document.getElementById('dti-note-marks');
         if (!st) { st = document.createElement('style'); st.id = 'dti-note-marks'; (document.head || document.documentElement).appendChild(st); }
         const sel = DTINotes.all().filter(n => n.type !== 'general' && NOTE_KEY_RE.test(n.key)).map(n => `[data-note-key="${n.key}"]`);
         st.textContent = sel.length ? `.dti-note-btn:is(${sel.join(',')}) { background: var(--accent) !important; color: var(--accent-fg, #fff) !important; border-color: var(--accent) !important; }` : '';
     }
 
-    const noteEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     function noteAgo(ts) {
         const s = (Date.now() - ts) / 1000;
         if (s < 45) return 'just now';
@@ -1517,12 +2072,6 @@
     // Trades (notes) an item is part of, most recently edited first
     const tradesWithItem = id => DTINotes.all().filter(x => x.type === 'trade'
         && [...(x.trade?.give || []), ...(x.trade?.get || [])].some(it => it.id === String(id))).sort((a, b) => b.updated - a.updated);
-    // GBCs / BFGBCs are traded as a currency, not as specific capsules (Neopets keeps releasing new ones),
-    // so a trade side records them as generic entries with a fixed cap value.
-    const GBC_KINDS = {
-        gbc:   { name: 'GBC',   full: 'Gift Box Mystery Capsule — any',          caps: 1 },
-        bfgbc: { name: 'BFGBC', full: 'Black Friday GBC — any (double boxes)',   caps: 1.5 },
-    };
     const NOTE_BOARD = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1.2"/><rect x="9" y="2" width="5" height="5" rx="1.2"/><rect x="2" y="9" width="5" height="5" rx="1.2"/><rect x="9" y="9" width="5" height="5" rx="1.2"/></svg>';
     const NOTE_LIST = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><circle cx="2.6" cy="4" r=".8" fill="currentColor" stroke="none"/><circle cx="2.6" cy="8" r=".8" fill="currentColor" stroke="none"/><circle cx="2.6" cy="12" r=".8" fill="currentColor" stroke="none"/></svg>';
     const NOTE_GIFT = '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6.5" width="11" height="7.5" rx="1"/><path d="M1.8 4.2h12.4v2.3H1.8zM8 4.2V14M8 4.2C6.6 1.6 3.9 2 4.5 3.5 4.9 4.4 8 4.2 8 4.2zm0 0c1.4-2.6 4.1-2.2 3.5-.7C11.1 4.4 8 4.2 8 4.2z"/></svg>';
@@ -3050,536 +3599,6 @@
         return app;
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // MY TOKENS — NC style tokens and essences you own and want. DTI doesn't track these, so they're kept in
-    // this browser only, for your own reference.
-    //   dti_tokens  (GM): { v: 1, mine: { [key]: { own, want, name, img, at } } } — what you set by hand
-    //   dti_tok_cap (GM): { inv|sdb|gal|sc: { at, items: [{ name, img, qty }] } } — the latest look at your Inventory, SDB,
-    //                     Gallery and Styling Chamber; importing a place again replaces its list
-    //   You own a token = what you set by hand + what the imports found.
-    //   key = the token's name in lower case (Neopets and DTI name tokens the same way; the picture settles the rest).
-    // ══════════════════════════════════════════════════════════════════════════
-    // An essence-like token (a character's look, for that character's species): Essence of …, All-Star Essence of …, Treasured …
-    const TOK_ESSENCE_RE = /^(?:(?:all-star )?essence of |treasured )/i;
-    // Tokens out on Neopets that DTI hasn't named yet (it only learns a token once someone shows it a pet wearing it):
-    // [name, picture, color id]. Brain Tree, Esophagor and Pant Devil (Oct 2026) are the first essences any species can
-    // wear; until DTI names them, each pet it sees one on is an unnamed "<New?>" style with a placeholder picture in that
-    // essence's color (Woodland 89 / Ghost 29 / Blue 8) — those are folded into the essence here (seen: DTI's own
-    // pictures of styles 100491, 100490, 100492). Each one drops out by itself once DTI has it under its name.
-    const TOK_EXTRA = [
-        ['Essence of Brain Tree', 'dd6c4dde.gif', 89],
-        ['Essence of Esophagor', 'e9a931b3.gif', 29],
-        ['Essence of Pant Devil', '8d77b711.gif', 8],
-    ];
-    const TOK_EXTRA_FROM = 100400;   // (placeholder styles from about then on)
-    function tokNorm(name) { return String(name || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
-    function tokBase(img) { return String(img || '').split(/[?#]/)[0].split('/').pop().toLowerCase(); }
-    // The token's style worn on a pet (itemdb's preview, 600×600) — '' when there's no picture to go by
-    function tokBigSrc(img) {
-        if (/^https:\/\/images\.neopets\.com\/cp\//.test(img || '')) return img;   // (already the style on a pet, 600px)
-        const id = tokBase(img).replace(/\.(gif|png|jpe?g)$/i, '');
-        if (/^mall_bg_circle$/i.test(id)) return '';   // (DTI's placeholder)
-        return id ? `https://cdn.itemdb.com.br/preview/${encodeURIComponent(id)}.png` : '';
-    }
-    // Where the pet is in its big picture → [zoom, centre x, centre y] (fractions of the picture), so big tiles can show
-    // the pet filling its tile instead of a small pet in a lot of white. Measured once per picture — read through
-    // Tampermonkey, as itemdb's server doesn't let pages read its pictures — and remembered in this browser.
-    const TokCrop = (() => {
-        const LS = 'dti_tok_crop_v1';
-        const keyOf = url => String(url).split('/').pop().replace(/\.png$/i, '');
-        const queue = [], pending = new Map();
-        let map = null, active = 0, saveT = 0;
-        const load = () => { if (!map) { try { map = JSON.parse(localStorage.getItem(LS) || '{}') || {}; } catch (_) { map = {}; } } return map; };
-        const save = () => { if (!saveT) saveT = setTimeout(() => { saveT = 0; try { localStorage.setItem(LS, JSON.stringify(map)); } catch (_) {} }, 1500); };   // (while measuring, too)
-        // [z, cx, cy]; false = can't be read (kept); null = couldn't fetch it now (asked again another time)
-        function measure(url) {
-            return new Promise(res => GM_xmlhttpRequest({
-                method: 'GET', url, responseType: 'blob', timeout: 20000,
-                onload: async r => {
-                    if (r.status !== 200 || !r.response) return res(r.status === 404 ? false : null);
-                    try {
-                        const bmp = await createImageBitmap(r.response), N = 150;
-                        const c = document.createElement('canvas'); c.width = c.height = N;
-                        const g = c.getContext('2d', { willReadFrequently: true });
-                        g.drawImage(bmp, 0, 0, N, N); bmp.close?.();
-                        const d = g.getImageData(0, 0, N, N).data;
-                        let x0 = N, y0 = N, x1 = -1, y1 = -1;
-                        for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-                            const i = (y * N + x) * 4;
-                            if (d[i + 3] > 24 && !(d[i] > 242 && d[i + 1] > 242 && d[i + 2] > 242)) {   // (not see-through, not the white around it)
-                                if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
-                            }
-                        }
-                        if (x1 < 0) return res(false);
-                        const span = Math.max(x1 - x0 + 1, y1 - y0 + 1) / N;
-                        const z = Math.max(1, Math.min(2.6, 0.87 / span));   // (the pet fills 87% of the tile; never shrunk, at most 2.6×)
-                        res([+z.toFixed(3), +((x0 + x1 + 1) / 2 / N).toFixed(3), +((y0 + y1 + 1) / 2 / N).toFixed(3)]);
-                    } catch (_) { res(false); }
-                },
-                onerror: () => res(null), ontimeout: () => res(null),
-            }));
-        }
-        const pump = () => {   // six at a time, the latest asked for first (what's on screen now, not what was scrolled past)
-            while (active < 6 && queue.length) {
-                const [url, done] = queue.pop();
-                active++;
-                measure(url).then(v => {
-                    if (v !== null) { load()[keyOf(url)] = v; save(); }
-                    pending.delete(url); active--; done(v || null); pump();
-                });
-            }
-        };
-        return {
-            get: url => load()[keyOf(url)],   // [z, cx, cy] | false | undefined (not measured yet)
-            of(url) {
-                const v = this.get(url);
-                if (v !== undefined) return Promise.resolve(v || null);
-                if (!pending.has(url)) pending.set(url, new Promise(done => { queue.push([url, done]); pump(); }));
-                else { const i = queue.findIndex(q => q[0] === url); if (i >= 0) queue.push(queue.splice(i, 1)[0]); }   // (wanted again: next)
-                return pending.get(url);
-            },
-        };
-    })();
-    const tokCropCss = c => `--z:${c[0]};--cx:${c[1]};--cy:${c[2]}`;
-    function tokImg(base) { return base ? (/^https?:/.test(base) ? base : `https://images.neopets.com/items/${base}`) : ''; }
-    const TOK_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="6.1"/><path d="M8 4.6l1 2.05 2.25.33-1.63 1.58.39 2.24L8 9.74l-2.01 1.06.39-2.24L4.75 6.98 7 6.65z" fill="currentColor" stroke="none"/></svg>';
-    const TOK_SORT_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v10M2.5 10.5 5 13l2.5-2.5M11 13V3M8.5 5.5 11 3l2.5 2.5"/></svg>';
-    const TOK_SOURCES = [   // (icons: the same Neopets ones as the import panel / the DTI button's Pages)
-        { key: 'inv', label: 'Inventory', href: 'https://www.neopets.com/inventory.phtml', icon: 'https://images.neopets.com/themes/h5/basic/images/v2/inventory-icon.png' },
-        { key: 'sdb', label: 'Safety Deposit Box', href: 'https://www.neopets.com/safetydeposit.phtml', icon: 'https://images.neopets.com/themes/h5/grey/images/safetydeposit-icon.png', mixed: true },
-        { key: 'gal', label: 'Gallery', href: 'https://www.neopets.com/gallery/index.phtml', icon: 'https://images.neopets.com/themes/h5/basic/images/v3/gallery-icon.svg', mixed: true },
-        { key: 'sc',  label: 'Styling Chamber', href: 'https://www.neopets.com/stylingchamber/', icon: 'https://images.neopets.com/themes/h5/newyears/images/chamber-icon.png' },
-    ];
-    // Side accounts: Main's hand-set numbers are `mine`, a side account's `acct[id]`; imports are kept per Neopets
-    // username (`inv@username`; `inv` alone = from before side accounts, Main's). read() / capsIn() give the account
-    // picked in the nav — All accounts: everyone's added up.
-    const DTITokens = {
-        raw() { const d = GM_getValue('dti_tokens', null); return d && typeof d.mine === 'object' ? d : { v: 1, mine: {} }; },
-        read(scope = acctActive()) {
-            const d = this.raw();
-            const of = id => (id === 'main' ? d.mine : d.acct?.[id]) || {};
-            if (scope !== 'all') return { v: 1, mine: of(scope) };
-            const sum = {};
-            acctAll().forEach(a => Object.entries(of(a.id)).forEach(([k, m]) => {
-                const t = sum[k] || (sum[k] = { own: 0, want: 0, gone: 0, goneAt: 0, name: '', img: '', at: 0 });
-                t.own += m.own || 0; t.want += m.want || 0; t.gone += m.gone || 0; t.goneAt = Math.max(t.goneAt, m.goneAt || 0);
-                t.name = t.name || m.name || ''; t.img = t.img || m.img || ''; t.at = Math.max(t.at, m.at || 0);
-            }));
-            return { v: 1, mine: sum };
-        },
-        caps() { const c = GM_getValue('dti_tok_cap', null); return c && typeof c === 'object' ? c : {}; },
-        capAcct(k, c) { const np = c?.np || (k.includes('@') ? k.split('@')[1] : ''); return np ? acctOfNp(np) : 'main'; },
-        capsIn(scope = acctActive()) { return Object.entries(this.caps()).filter(([k, c]) => c && (scope === 'all' || this.capAcct(k, c) === scope)); },
-        // One more / one less, on the account picked (All accounts: + goes to Main, − to the first account that has one);
-        // meta: { name, img } to remember for tokens DTI doesn't list
-        bump(key, f, delta, meta) {
-            const d = this.raw();   // read again first: another tab may have changed it
-            const scope = acctActive();
-            const store = id => id === 'main' ? d.mine : ((d.acct = d.acct || {})[id] = d.acct[id] || {});
-            const id = scope !== 'all' ? scope : delta > 0 ? 'main' : (acctAll().find(a => (store(a.id)[key]?.[f] || 0) > 0)?.id || 'main');
-            const map = store(id), cur = map[key] || { own: 0, want: 0 };
-            const next = { ...cur, name: meta?.name || cur.name || '', img: meta?.img || cur.img || '', at: Date.now() };
-            next[f] = Math.max(0, Math.min(999, ((cur[f] || 0) + delta) | 0));
-            if (!next.own && !next.want && !next.gone) delete map[key]; else map[key] = next;
-            GM_setValue('dti_tokens', d);
-        },
-        // An imported token you don't have any more (traded it…): one taken away (+1) or given back (−1), on the account
-        // picked (All accounts: `acctId`, the one whose import has it). A new import of that place counts afresh.
-        gone(key, delta, meta, acctId) {
-            const d = this.raw(), scope = acctActive();
-            const id = scope !== 'all' ? scope : acctId || 'main';
-            const map = id === 'main' ? d.mine : ((d.acct = d.acct || {})[id] = d.acct[id] || {});
-            const cur = map[key] || { own: 0, want: 0 };
-            const next = { ...cur, name: meta?.name || cur.name || '', img: meta?.img || cur.img || '', at: Date.now() };
-            next.gone = Math.max(0, (cur.gone || 0) + delta);
-            if (delta > 0) next.goneAt = Date.now();
-            if (!next.gone) { delete next.gone; delete next.goneAt; }
-            if (!next.own && !next.want && !next.gone) delete map[key]; else map[key] = next;
-            GM_setValue('dti_tokens', d);
-        },
-        clearSource(src, scope = acctActive()) {
-            const c = this.caps();
-            Object.keys(c).forEach(k => { if (k.split('@')[0] === src && (scope === 'all' || this.capAcct(k, c[k]) === scope)) delete c[k]; });
-            GM_setValue('dti_tok_cap', c);
-        },
-        capOf(src, scope = acctActive()) {   // one place's imports (several accounts': together) → { at, items } | null
-            const list = this.capsIn(scope).filter(([k]) => k.split('@')[0] === src).map(([, c]) => c);
-            return list.length ? { at: Math.max(...list.map(c => c.at || 0)), items: list.flatMap(c => c.items || []) } : null;
-        },
-    };
-    // ── Your own lists for the tokens you want ("Really want", "Just like"…): each wanted token in one of them, or in none.
-    // GM `dti_tok_lists` = { lists: [{ id, name, color }], of: { tokenKey: listId } } — the same lists for every account
-    const TOK_LIST_COLORS = ['#ef4444', '#f59e0b', '#10b981', '#0ea5e9', '#6366f1', '#ec4899', '#a855f7', '#14b8a6'];
-    const TokLists = {
-        raw() { const d = GM_getValue('dti_tok_lists', null); return d && Array.isArray(d.lists) ? { lists: d.lists, of: d.of && typeof d.of === 'object' ? d.of : {} } : { lists: [], of: {} }; },
-        save(d) { GM_setValue('dti_tok_lists', d); },
-        listOf(d, key) { const id = d.of[key]; return id ? d.lists.find(l => l.id === id) || null : null; },
-        named(name) { const n = String(name || '').trim().toLowerCase(); return this.raw().lists.find(l => l.name.toLowerCase() === n) || null; },
-        put(key, id) { const d = this.raw(); if (id && d.lists.some(l => l.id === id)) d.of[key] = id; else delete d.of[key]; this.save(d); },
-        create(name) {   // → its id (a list of that name already: that one)
-            const have = this.named(name);
-            if (have) return have.id;
-            const d = this.raw(), used = new Set(d.lists.map(l => l.color));
-            const l = { id: 'l' + Date.now().toString(36), name: String(name).trim().slice(0, 40), color: TOK_LIST_COLORS.find(c => !used.has(c)) || TOK_LIST_COLORS[d.lists.length % TOK_LIST_COLORS.length] };
-            d.lists.push(l);
-            this.save(d);
-            return l.id;
-        },
-        edit(id, patch) { const d = this.raw(), l = d.lists.find(x => x.id === id); if (l) { Object.assign(l, patch); this.save(d); } },
-        move(id, dir) {
-            const d = this.raw(), i = d.lists.findIndex(x => x.id === id), j = i + dir;
-            if (i < 0 || j < 0 || j >= d.lists.length) return;
-            [d.lists[i], d.lists[j]] = [d.lists[j], d.lists[i]];
-            this.save(d);
-        },
-        drop(id) { const d = this.raw(); d.lists = d.lists.filter(x => x.id !== id); Object.keys(d.of).forEach(k => { if (d.of[k] === id) delete d.of[k]; }); this.save(d); },
-    };
-    // A token's want list (its card's list button, or the small popover on NC Styles pages): pick one, none, or make a new one
-    function openTokListMenu(anchor, key, after) {
-        const open = document.querySelector('.dti-tk-lmenu');
-        if (open?._anchor === anchor) return open._close();
-        const d = TokLists.raw(), cur = d.of[key] && d.lists.some(l => l.id === d.of[key]) ? d.of[key] : '';
-        const tick = '<small>\u2713</small>';
-        const menu = document.createElement('div');
-        menu.className = 'dti-tk-lmenu';
-        menu.innerHTML = `<div class="dti-tk-tmhd">Want list</div>
-            ${d.lists.length ? `<div class="dti-tk-lmlist">${d.lists.map(l => `<button type="button" data-put="${noteEsc(l.id)}" style="--lc:${noteEsc(l.color)}"${cur === l.id ? ' class="on"' : ''}><i class="dot"></i><span>${noteEsc(l.name)}</span>${cur === l.id ? tick : ''}</button>`).join('')}
-                <button type="button" data-put=""${!cur ? ' class="on"' : ''}><i class="dot none"></i><span>No list</span>${!cur ? tick : ''}</button></div>` : '<p class="dti-tk-lmnote">Make a list for the tokens you want \u2014 Really want, Just like, anything.</p>'}
-            <form class="dti-tk-lmnew"><input type="text" maxlength="40" placeholder="${d.lists.length ? 'New list\u2026' : 'Its name \u2014 e.g. Really want'}" autocomplete="off" spellcheck="false" aria-label="New list name"><button type="submit">Add</button></form>`;
-        const close = tokFloat(menu, anchor);
-        const put = id => { TokLists.put(key, id); close(); after?.(); };
-        menu.addEventListener('click', e => { const b = e.target.closest('[data-put]'); if (b) put(b.dataset.put); });
-        menu.querySelector('form').addEventListener('submit', e => {
-            e.preventDefault();
-            const v = menu.querySelector('.dti-tk-lmnew input').value.trim();
-            if (v) put(TokLists.create(v));
-        });
-        if (!d.lists.length) menu.querySelector('.dti-tk-lmnew input').focus();
-    }
-    // A small menu by a button (My Tokens' list menus): closes on a click outside, Esc, or scrolling the page
-    function tokFloat(menu, anchor) {
-        document.querySelectorAll('.dti-tk-lmenu').forEach(m => m._close?.());
-        document.body.appendChild(menu);
-        const r = anchor.getBoundingClientRect();
-        menu.style.left = Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8)) + 'px';
-        menu.style.top = (r.bottom + 6 + menu.offsetHeight > innerHeight ? Math.max(8, r.top - menu.offsetHeight - 6) : r.bottom + 6) + 'px';
-        const out = e => { if (!menu.contains(e.target) && !anchor.contains(e.target)) close(); };
-        const key = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
-        const scr = e => { if (!menu.contains(e.target)) close(); };
-        function close() {
-            menu.remove();
-            document.removeEventListener('mousedown', out, true); document.removeEventListener('keydown', key, true); window.removeEventListener('scroll', scr, true);
-        }
-        document.addEventListener('mousedown', out, true);
-        document.addEventListener('keydown', key, true);
-        window.addEventListener('scroll', scr, true);
-        menu._close = close; menu._anchor = anchor;
-        return close;
-    }
-
-    // ── The catalog: DTI's NC Styles list (every style is one token — essences and Treasured too, each for one species).
-    // 2.8 MB and ~10 s from DTI, so a slim copy is kept in this site's storage (fetched again after a day).
-    let _tokCatP = null;
-    function loadTokenCatalog(force) {
-        if (_tokCatP && !force) return _tokCatP;
-        _tokCatP = (async () => {
-            const LS = 'dti_tok_catalog_v3';
-            let slim = null;
-            if (!force) { try { slim = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (_) {} }
-            if (!slim || !Array.isArray(slim.styles) || Date.now() - slim.at > 864e5) {
-                const [styles, home] = await Promise.all([
-                    fetch('/rainbow-pool/styles.json', { credentials: 'include' }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
-                    fetch('/', { credentials: 'include' }).then(r => r.text()).catch(() => ''),
-                ]);
-                const species = {}, colors = {}, hd = new DOMParser().parseFromString(home, 'text/html');
-                hd.querySelectorAll('select[name="species"] option').forEach(o => { if (/^\d+$/.test(o.value)) species[o.value] = o.textContent.trim(); });
-                hd.querySelectorAll('select[name="color"] option').forEach(o => { if (/^\d+$/.test(o.value)) colors[o.value] = o.textContent.trim(); });
-                // (a style with DTI's placeholder picture: its own picture of the style worn, so the tile shows what it is)
-                const art = s => /mall_bg_circle/.test(s.thumbnail_url || '') ? String((s.swf_assets || []).find(a => a?.urls?.png)?.urls.png || '').split('?')[0] : '';
-                slim = { at: Date.now(), species, colors, styles: styles.map(s => [s.id, s.species_id, tokBase(s.thumbnail_url), s.series_main_name || '', s.adjective_name || '', s.color_id || 0, art(s)]) };
-                try { localStorage.removeItem('dti_tok_catalog_v1'); localStorage.removeItem('dti_tok_catalog_v2'); localStorage.setItem(LS, JSON.stringify(slim)); } catch (_) {}
-            }
-            return buildTokenCatalog(slim);
-        })();
-        _tokCatP.catch(() => { _tokCatP = null; });
-        return _tokCatP;
-    }
-    // Cached copy only (no network) — for painting tiles right away
-    function tokenCatalogIfCached() {
-        try { const slim = JSON.parse(localStorage.getItem('dti_tok_catalog_v3') || 'null'); return slim?.styles ? buildTokenCatalog(slim) : null; } catch (_) { return null; }
-    }
-    let _tokCatBuilt = null;
-    function buildTokenCatalog(slim) {
-        if (_tokCatBuilt?.at === slim.at) return _tokCatBuilt;
-        const FALLBACK = 'Acara Aisha Blumaroo Bori Bruce Buzz Chia Chomby Cybunny Draik Elephante Eyrie Flotsam Gelert Gnorbu Grarrl Grundo Hissi Ixi Jetsam Jubjub Kacheek Kau Kiko Koi Korbat Kougra Krawk Kyrii Lenny Lupe Lutari Meerca Moehog Mynci Nimmo Ogrin Peophin Poogle Pteri Quiggle Ruki Scorchio Shoyru Skeith Techo Tonu Tuskaninny Uni Usul Wocky Xweetok Yurble Zafara Vandagyre Varwolf'.split(' ');
-        const sp = id => slim.species?.[id] || FALLBACK[id - 1] || '';
-        const imgNames = new Map();
-        const styleOf = new Map();   // style id → [species id, color id]
-        const extraSids = new Map();   // (TOK_EXTRA color → its unnamed styles, one per pet DTI has seen it on)
-        // The series there are (one Habbo Hotel, typo and all; "Bouncing" is Bouncing Baby) — for reading names
-        const famOf = x => { x = String(x).replace(/^<new\??>\s*/i, '').trim(); return /^hab+o+ hotel\b/i.test(x) ? 'Habbo Hotel' : /^bouncing$/i.test(x) ? 'Bouncing Baby' : x; };
-        const fams = [...new Set(slim.styles.map(r => famOf(r[3])))].filter(f => f && !/^(essence of|treasured)$/i.test(f));
-        const colorNames = Object.values(slim.colors || {});
-        const rows = slim.styles.map(([id, spId, img, ser, adj, colorId, art]) => {
-            styleOf.set(id, [spId, colorId || 0]);
-            const isNew = /^<new\??>/i.test(adj) || /^<new\??>/i.test(ser);
-            if (isNew && id >= TOK_EXTRA_FROM && /^mall_bg_circle\./.test(img) && TOK_EXTRA.some(e => e[2] === colorId)) {
-                extraSids.set(colorId, [...(extraSids.get(colorId) || []), id]);
-                return null;
-            }
-            const adjClean = adj.replace(/^<new\??>\s*/i, '').trim();
-            // (DTI files a few under a series only once it's named them: the name says it too)
-            const essence = /^(essence of|treasured)$/i.test(ser.trim()) || TOK_ESSENCE_RE.test(adjClean);
-            const kind = /^treasured\b/i.test(adjClean) ? 'Treasured' : /^all-star essence\b/i.test(adjClean) ? 'All-Star Essence' : 'Essence';
-            const name = essence ? adjClean : `${adjClean} ${sp(spId)}`.trim();
-            if (!imgNames.has(img)) imgNames.set(img, new Set());
-            imgNames.get(img).add(name);
-            const c = essence ? null : tokClassify(adjClean, fams, slim.colors?.[colorId] || '', colorNames);
-            return { id, img, art: art || '', name, essence, isNew, species: sp(spId), color: c?.color || '', colors: c?.colors || [], type: c?.series ? c.type : '',
-                series: essence ? kind : c.series || (isNew ? 'New' : famOf(ser) || 'New'), spId, colorId, ph: isNew && !essence && /^mall_bg_circle\./i.test(img) };
-        }).filter(Boolean);
-        // DTI's unnamed styles (its placeholder picture, a color for a name — "25th Anniversary Grundo"): named after the
-        // style they most likely are, so they sort with it — the one style of that color the pet doesn't have yet, else the
-        // color's only style (an unnamed version of it) — with "(unnamed)" after; when that can't be told, after the color
-        const named = new Map(), petHas = new Set();   // color → its styles (not Prismatic versions); "pet|style" pairs DTI has
-        rows.forEach(r => {
-            if (r.ph || r.essence || !r.type || /^prismatic /i.test(r.type)) return;
-            named.set(r.colorId, (named.get(r.colorId) || new Set()).add(r.type));
-            petHas.add(r.spId + '|' + r.type);
-        });
-        const phNames = new Map();
-        rows.forEach(r => {
-            if (!r.ph) return;
-            const styles = [...(named.get(r.colorId) || [])], missing = styles.filter(b => !petHas.has(r.spId + '|' + b));
-            const guess = missing.length === 1 ? missing[0] : styles.length === 1 ? styles[0] : '';
-            const c = guess ? tokClassify(guess, fams, r.color, colorNames) : null;
-            const base = `${guess || r.color || 'New'} ${r.species}`.replace(/\s+/g, ' '), n = (phNames.get(base) || 0) + 1;
-            phNames.set(base, n);
-            r.name = `${base} (unnamed${n > 1 ? ' ' + n : ''})`;   // (two unnamed ones for one pet: each its own)
-            if (c?.series) r.series = c.series;
-            r.type = '';   // (not a sure thing: not counted under a style)
-        });
-        const byKey = new Map(), byImg = new Map(), bySid = new Map();
-        rows.forEach(r => {
-            const key = tokNorm(r.name);
-            let t = byKey.get(key);
-            if (!t) { t = { key, name: r.name, img: r.img, art: r.art, species: r.species, color: r.color, colors: r.colors, type: r.type, series: r.series, essence: r.essence, isNew: r.isNew, sid: r.id, sids: [] }; byKey.set(key, t); }
-            if (r.id > t.sid) t.sid = r.id;   // newest style id — for "Newest first"
-            bySid.set(r.id, t);
-            t.sids.push(r.id);   // (one style per pet it's for — essences and Treasured are each for one species)
-            if (imgNames.get(r.img).size === 1) byImg.set(r.img, t);   // pictures shared by different styles are placeholders
-        });
-        TOK_EXTRA.forEach(([name, img, colorId]) => {   // (not named on DTI yet: listed as New, for any pet, with DTI's unnamed styles of it)
-            const key = tokNorm(name);
-            if (byKey.has(key)) return;
-            const sids = extraSids.get(colorId) || [];
-            const t = { key, name, img, species: '', anyPet: true, series: TOK_ESSENCE_RE.test(name) ? (/^treasured/i.test(name) ? 'Treasured' : /^all-star/i.test(name) ? 'All-Star Essence' : 'Essence') : 'New',
-                essence: TOK_ESSENCE_RE.test(name), isNew: true, sid: sids.length ? Math.max(...sids) : 1e9, sids };
-            byKey.set(key, t);
-            sids.forEach(id => bySid.set(id, t));
-            if (!byImg.has(img)) byImg.set(img, t);
-        });
-        const series = [...new Set([...byKey.values()].filter(t => !t.essence).map(t => t.series))].filter(s => s && s !== 'New').sort((a, b) => a.localeCompare(b));
-        const speciesNames = [...new Set([...byKey.values()].map(t => t.species).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-        // A name that reads like a style token: [Prismatic …: ]<series> … <species>
-        const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const looks = new RegExp(`^(?:prismatic [^:]+: )?(?:${series.map(s => esc(s.toLowerCase())).join('|')})(?: .+)? (?:${speciesNames.map(s => esc(s.toLowerCase())).join('|')})$`);
-        return _tokCatBuilt = { at: slim.at, byKey, byImg, bySid, series, speciesNames, looks, styleOf, spName: sp, colorName: id => slim.colors?.[id] || '', colorNames };
-    }
-    // The token a captured item is, in the catalog's words when the catalog knows it (by name, else by picture)
-    function tokKeyFor(item, cat) {
-        const k = tokNorm(item.name);
-        if (!cat || cat.byKey.has(k)) return k;
-        return cat.byImg.get(tokBase(item.img))?.key || k;
-    }
-    // Inventory and Styling Chamber imports are tokens already; a gallery holds anything, so only what reads as one
-    function tokIsToken(item, cat) {
-        const k = tokNorm(item.name);
-        if (TOK_ESSENCE_RE.test(k)) return true;
-        if (!cat) return false;
-        return cat.byKey.has(k) || cat.byImg.has(tokBase(item.img)) || cat.looks.test(k);
-    }
-    // key → { inv, gal, sc, name, img } from the latest imports
-    function tokImported(cat, scope) {
-        const per = new Map();
-        DTITokens.capsIn(scope).forEach(([k, cap]) => {
-            const src = k.split('@')[0];
-            (cap?.items || []).forEach(it => {
-                if ((src === 'gal' || src === 'sdb') && !tokIsToken(it, cat)) return;   // (they hold anything)
-                const k = tokKeyFor(it, cat);
-                const e = per.get(k) || { name: it.name, img: tokBase(it.img), at: 0 };
-                e[src] = (e[src] || 0) + (it.qty || 1);
-                e.at = Math.max(e.at, cap.at || 0);   // (its latest import)
-                per.set(k, e);
-            });
-        });
-        return per;
-    }
-    // First seen: the date DTI first saw a style — close to its release for anything from 2024 on. DTI only shows it
-    // on its NC Styles pages, so it's looked up per species + color (one small page each, gently), saved for good,
-    // and also picked up from any NC Styles page you browse.
-    const TOK_DATES = 'dti_tok_dates_v1';
-    let _tokDates = null;
-    const tokDates = () => _tokDates || (_tokDates = (() => { try { return JSON.parse(localStorage.getItem(TOK_DATES) || '{}') || {}; } catch (_) { return {}; } })());
-    function tokSaveDates(map) {
-        Object.assign(tokDates(), map);
-        try { localStorage.setItem(TOK_DATES, JSON.stringify(tokDates())); } catch (_) {}
-    }
-    function tokDateOf(t) { const d = tokDates(); return (t?.sids || []).map(id => d[id]).filter(Boolean).sort()[0] || ''; }
-    function tokFmtDate(d) { return d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''; }
-    function tokHarvestDates(root) {
-        const m = {};
-        root.querySelectorAll('.rainbow-pool-list > li').forEach(li => {
-            const sid = li.querySelector('a')?.getAttribute('href')?.match(/[?&]style=(\d+)/)?.[1];
-            const t = li.querySelector('time')?.getAttribute('datetime');
-            if (sid && t) m[sid] = t.slice(0, 10);
-        });
-        if (Object.keys(m).length) tokSaveDates(m);
-        return root.querySelector('.rainbow-pool-pagination a.next_page')?.getAttribute('href') || '';
-    }
-    let _tokDateQ = Promise.resolve();
-    const _tokDateAsked = new Set();
-    function tokEnsureDates(tokens, cat, onProgress) {
-        if (!cat?.styleOf) return;
-        const d = tokDates(), groups = new Map();
-        tokens.forEach(t => {
-            if (!t?.sids?.length || t.sids.some(id => d[id])) return;
-            const st = cat.styleOf.get(t.sids[0]);
-            const sp = st && cat.spName(st[0]), co = st && cat.colorName(st[1]);
-            if (!sp || !co) return;
-            const g = sp + '|' + co;
-            if (_tokDateAsked.has(g) && !groups.has(g)) return;
-            _tokDateAsked.add(g);
-            if (!groups.has(g)) groups.set(g, { sp, co, sids: [] });
-            groups.get(g).sids.push(t.sids[0]);
-        });
-        if (!groups.size) return;
-        _tokDateQ = _tokDateQ.then(async () => {
-            for (const { sp, co, sids } of groups.values()) {
-                let url = `/rainbow-pool/styles?species=${encodeURIComponent(sp)}&color=${encodeURIComponent(co)}`;
-                for (let page = 0; url && page < 4; page++) {
-                    try {
-                        const r = await fetch(url, { credentials: 'include' });
-                        url = r.ok ? tokHarvestDates(new DOMParser().parseFromString(await r.text(), 'text/html')) : '';
-                    } catch (_) { url = ''; }
-                    if (sids.every(id => tokDates()[id])) break;
-                    if (url) await new Promise(res => setTimeout(res, 250));
-                }
-                onProgress?.();
-                await new Promise(res => setTimeout(res, 250));
-            }
-        });
-    }
-
-    // Everything known about one token: catalog facts + your numbers
-    // What a style token is, read from its style's name — "[Prismatic <version>: ]<series> <color>" — since DTI's own fields
-    // are patchy: unnamed "<New?>" series on named styles, "Haboo Hotel", every Habbo Hotel color filed under Blue, two
-    // Nostalgic Ghosts under Eerie. The series is the longest known one the name starts with; the color is what follows it
-    // (in DTI's spelling: Usukiboy → Usuki Boy, Anniversary → 25th Anniversary), or DTI's color when the series says it all
-    // (Baby Chocolate, Valentine Plushie). A color in the series counts too (Baby Chocolate: Baby and Chocolate; Plushie Baby: Baby and Plushie).
-    // type = the whole style ("Prismatic Mint Chip: Delightful Chocolate"); base = without the Prismatic version.
-    function tokTypeSplit(t) { const m = String(t).match(/^prismatic ([^:]+):\s*(.+)$/i); return m ? [m[2].trim(), m[1].trim()] : [String(t), '']; }   // [style, Prismatic version]
-    function tokClassify(style, fams, dtiColor, colorNames) {
-        const m = String(style).match(/^prismatic ([^:]+):\s*(.+)$/i);
-        const base = (m ? m[2] : String(style)).trim(), lo = base.toLowerCase();
-        const series = fams.filter(f => lo === f.toLowerCase() || lo.startsWith(f.toLowerCase() + ' ')).sort((a, b) => b.length - a.length)[0] || '';
-        const rest = series ? base.slice(series.length).trim() : '';
-        const sq = x => String(x).toLowerCase().replace(/[^a-z0-9]/g, '');
-        const color = !rest ? dtiColor || '' : colorNames.find(c => sq(c) === sq(rest)) || (dtiColor && sq(dtiColor).endsWith(sq(rest)) ? dtiColor : rest);
-        const colors = [color, ...series.split(' ').map(w => colorNames.find(c => sq(c) === sq(w)))].filter((c, k, a) => c && a.indexOf(c) === k);
-        const prismatic = m ? m[1].trim() : '';
-        return { series, color, colors, base, prismatic, type: prismatic ? `Prismatic ${prismatic}: ${base}` : base };
-    }
-    // ── The Styling Studio's rotation: the style tokens Neopets has in its Studio right now. Read from itemdb's Pet Styles
-    // list (?available=1, 12 a page — asked the way the page asks for its next page, half the page's size; the plain page if
-    // that ever stops working) only for someone who uses "Available now", then kept 12 hours: GM `dti_tok_studio`
-    // { at, total, t: [[name, imageId]] }. An empty or unreadable answer is never kept. ──
-    const TOK_STUDIO_URL = 'https://itemdb.com.br/rainbow-pool/pet-styles?available=1';
-    const TOK_STUDIO_AGE = 12 * 3600e3;
-    const tokStudio = () => GM_getValue('dti_tok_studio', null);
-    let _tokStudioKeys = null;
-    function tokStudioKeys() {   // token key (its name, lower-case) → [name, imageId]; null = not read yet
-        const d = tokStudio();
-        if (!d?.t?.length) return null;
-        if (_tokStudioKeys?.at !== d.at) _tokStudioKeys = { at: d.at, map: new Map(d.t.map(r => [String(r[0]).toLowerCase(), r])) };
-        return _tokStudioKeys.map;
-    }
-    function tokStudioGet(url, rsc) {
-        return new Promise((res, rej) => GM_xmlhttpRequest({
-            method: 'GET', url, headers: rsc ? { RSC: '1' } : {}, timeout: 30000,
-            onload: r => r.status === 200 ? res(r.responseText || '') : rej(new Error('HTTP ' + r.status)),
-            onerror: () => rej(new Error('network')), ontimeout: () => rej(new Error('timeout')),
-        }));
-    }
-    function tokStudioParse(text) {   // the page's data ("tokens":[{ name, imageId, … }]), else its cards; null = can't read it
-        const i = text.indexOf('"tokens":[');
-        if (i >= 0) {
-            let j = i + 9, depth = 0, str = false, bs = false;
-            for (; j < text.length; j++) {
-                const c = text[j];
-                if (str) { if (bs) bs = false; else if (c === '\\') bs = true; else if (c === '"') str = false; continue; }
-                if (c === '"') str = true; else if (c === '[' || c === '{') depth++; else if ((c === ']' || c === '}') && --depth === 0) break;
-            }
-            try { return JSON.parse(text.slice(i + 9, j + 1)).filter(x => x?.name).map(x => [String(x.name), String(x.imageId || '')]); } catch (_) {}
-        }
-        const cards = [...new DOMParser().parseFromString(text, 'text/html').querySelectorAll('a[href^="/rainbow-pool/pet-styles/"] img[alt]')];
-        return cards.length ? cards.map(im => [im.alt, (im.getAttribute('src') || '').match(/preview\/([a-z0-9]+)\.png/i)?.[1] || '']) : null;
-    }
-    let _tokStudioRun = null;
-    function tokStudioRefresh(onStep) {
-        if (_tokStudioRun) return _tokStudioRun;
-        _tokStudioRun = (async () => {
-            const all = new Map();
-            let total = 0;
-            for (let pg = 1; pg <= 40; pg++) {
-                const url = `${TOK_STUDIO_URL}&page=${pg}`;
-                let text = await tokStudioGet(url, true), rows = tokStudioParse(text);
-                if (!rows) { text = await tokStudioGet(url, false); rows = tokStudioParse(text); }
-                if (!rows) throw new Error('unreadable');
-                if (pg === 1) total = +(text.match(/\\?"total(?:Count)?\\?":(\d+)/)?.[1] || 0);
-                const before = all.size;
-                rows.forEach(r => all.set(r[0].toLowerCase(), r));
-                onStep?.(all.size, total);
-                if (rows.length < 12 || all.size === before || (total && all.size >= total)) break;
-                await new Promise(r => setTimeout(r, 300));   // (gently: one page at a time)
-            }
-            if (!all.size) throw new Error('empty');
-            const d = { at: Date.now(), total: total || all.size, t: [...all.values()] };
-            GM_setValue('dti_tok_studio', d);
-            return d;
-        })().finally(() => { _tokStudioRun = null; });
-        return _tokStudioRun;
-    }
-    function tokInfo(key, cat, mine, imported) {
-        const t = cat?.byKey.get(key), m = mine[key], im = imported.get(key);
-        const name = t?.name || im?.name || m?.name || key;
-        const essence = t ? t.essence : TOK_ESSENCE_RE.test(name);
-        let species = t?.species || '';
-        if (!t && !essence) species = (cat?.speciesNames || []).find(s => name.toLowerCase().endsWith(' ' + s.toLowerCase())) || '';
-        const impAll = im ? TOK_SOURCES.reduce((n, s) => n + (im[s.key] || 0), 0) : 0;   // (every place imported)
-        const gone = m?.gone && (m.goneAt || 0) >= (im?.at || 0) ? Math.min(m.gone, impAll) : 0;   // (imported ones you took away — till it's imported again)
-        const imp = impAll - gone;
-        const c = !t && !essence && species ? tokClassify(name.slice(0, -(species.length + 1)), cat?.series || [], '', cat?.colorNames || []) : null;
-        const cls = t || (c?.series ? c : null), [base, prismatic] = cls?.type ? tokTypeSplit(cls.type) : ['', ''];
-        return {
-            key, name, essence, species, anyPet: !!t?.anyPet, known: !!t, isNew: !!t?.isNew, color: cls?.color || '', colors: cls?.colors || [], type: cls?.type || '', base, prismatic,
-            series: t?.series || (essence ? (/^treasured/i.test(name) ? 'Treasured' : /^all-star/i.test(name) ? 'All-Star Essence' : 'Essence') : c?.series || ''), sid: t?.sid || 0, date: t ? tokDateOf(t) : '',
-            img: t?.art || tokImg(t?.img || im?.img || tokBase(m?.img)),
-            hand: m?.own || 0, imp, gone, own: (m?.own || 0) + imp, want: m?.want || 0, from: im || null,
-        };
-    }
-    const tokFromText = from => from ? TOK_SOURCES.filter(s => from[s.key]).map(s => `${s.label} ${from[s.key]}`).join(' · ') : '';
-    function tokOwnStep(info, delta, meta, cat) {
-        const whose = () => acctActive() === 'all' ? acctAll().find(a => tokImported(cat, a.id).has(info.key))?.id : '';
-        if (delta > 0 && info.gone) return DTITokens.gone(info.key, -1, meta, acctAll().find(a => (DTITokens.read(a.id).mine[info.key]?.gone || 0) > 0)?.id);
-        if (delta < 0 && !info.hand && info.imp) return DTITokens.gone(info.key, 1, meta, whose());
-        DTITokens.bump(info.key, 'own', delta, meta);
-    }
-    const tokOwnTitle = info => { const from = tokFromText(info.from); return from ? `Imported: ${from}${info.gone ? ` \u00b7 ${info.gone} taken away by you (till it\u2019s imported again)` : ''}${info.hand ? ' \u00b7 added by you ' + info.hand : ''}` : 'Added by you'; };
-    function tokAgo(ts) {
-        const s = Math.round((Date.now() - ts) / 1000);
-        return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
-    }
 
     // A new custom in a token's style (DTI's editor: /outfits/new?color&species&style). An essence has a style for each
     // pet DTI has seen it on: pick the pet first.
@@ -11303,6 +11322,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['2.0', [
+            'Mini DTI on Neopets: the DTI button is now a small tab on the right edge \u2014 a click opens it, drag it up or down to move it',
+            'Mini DTI: a bigger panel with five tabs \u2014 Trades, Tokens, Seeking, Search and Notes (DTI\u2019s pages are under the DTI logo)',
+            'Mini DTI: click any item (in Search, Seeking or a note) to open it right there \u2014 Seeking, your DTI lists (saved from Neopets), add it to a trade, your note on it, and Own / Want for style tokens',
+            'Mini DTI: a Tokens tab \u2014 the tokens you want (by your want lists), the ones you own, and what\u2019s in the Styling Studio now; search any token to mark it',
+            'Mini DTI: a Notes tab \u2014 your notes on items, people and anything, saved as you type (the same notes as DTI\u2019s Notes)',
+            'Mini DTI: \u201cOn this page\u201d \u2014 the Styling Studio shows the tokens you want in its rotation, the NC Mall the items you\u2019re seeking that are for sale, someone\u2019s lookup, Neomail or gallery your trades with them (and the tokens you want in their gallery), and your Inventory, SDB, Gallery or Styling Chamber an \u201cImport tokens\u201d button. A dot on the tab when there\u2019s something for you',
+            'Customs: a custom\u2019s name lights up when you hover anywhere on its tile',
+            'Customs: double-click a name to rename it really works now (one click on the name still opens the custom)',
+        ]],
         ['1.9', [
             'Top bar: Tokens is up there now, between Customs and Notes (it was in More) \u2014 More is just its arrow, and Log out is a small square beside the gear (it ran past the bar’s edge)',
             'My Tokens: \u201cAvailable now\u201d \u2014 the style tokens you can get on Neopets right now (the Styling Studio\u2019s current rotation, read from itemdb). Shows all of them, or with \u201cMy tokens\u201d the ones you own or want; those tokens get an \u201cAvailable\u201d tag everywhere in My Tokens',
@@ -14218,12 +14247,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         npFabToggle.id = 'dti-np-fab-toggle';
         npFabToggle.type = 'button';
         npFabToggle.className = 'dti-toggle-row' + (GM_getValue('dti_np_fab', true) ? ' active' : '');
-        npFabToggle.innerHTML = '<span class="dti-toggle-txt"><b>DTI button on Neopets</b><small>Your trade reports, an item search and DTI\u2019s pages, from a small button on Neopets \u2014 drag it anywhere, \u00d7 tucks it away</small></span><span class="dti-ts"></span>';
-        npFabToggle.title = 'A small DTI button on Neopets pages: your trade reports (the same ones as in Notes), an item search with NC values, and links to DTI';
+        npFabToggle.innerHTML = '<span class="dti-toggle-txt"><b>Mini DTI on Neopets</b><small>Your trades, tokens, Seeking, notes and an item search (with your lists), from a small DTI tab on the right of Neopets pages \u2014 and what the page you\u2019re on has for you. Drag the tab up or down to move it</small></span><span class="dti-ts"></span>';
+        npFabToggle.title = 'A small DTI tab on Neopets pages: your trade reports, tokens, Seeking list and notes (the same ones as on DTI), an item search with your lists, and DTI\u2019s pages';
         npFabToggle.addEventListener('click', () => {
             const next = !GM_getValue('dti_np_fab', true);
             GM_setValue('dti_np_fab', next);
-            if (next) GM_setValue('dti_np_fab_min', false);   // turned back on: show it, not the tucked-away tab
             npFabToggle.classList.toggle('active', next);
         });
         linkifyRow.appendChild(npFabToggle);
@@ -21343,7 +21371,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     color: var(--text) !important; text-decoration: none !important; cursor: text;
                     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color .13s;
                 }
-                ul#outfits .outfit-name:hover { color: var(--accent-text, var(--accent)) !important; }
+                ul#outfits > li:hover .outfit-name { color: var(--accent-text, var(--accent)) !important; }   /* (anywhere on the tile, not just the name) */
                 .dti-rename-inp {
                     flex: 1; min-width: 0; width: auto !important; height: auto; padding: 2px 8px !important; border-radius: 8px !important;
                     font-size: clamp(11.5px, 7cqi, 20px) !important; font-weight: 700;
@@ -21518,12 +21546,21 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (delBtn) { delBtn.innerHTML = NOTE_TRASH; delBtn.title = 'Delete'; delBtn.setAttribute('aria-label', 'Delete'); acts.appendChild(del); }
             li.appendChild(acts);
             footer?.remove();
-            // Double-click the name to rename
+            // Double-click the name to rename. The name is a link, so its click waits a moment for a second one
+            // (one click still opens the custom; the picture opens it at once; Ctrl / middle click as usual)
             const nameEl = li.querySelector('.outfit-name');
             if (nameEl && id) {
                 nameEl.title = `${nameEl.textContent.trim()} — double-click to rename`;
+                let openT = 0;
+                nameEl.addEventListener('click', e => {
+                    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || !nameEl.getAttribute('href')) return;
+                    e.preventDefault(); e.stopPropagation();
+                    if (openT || e.detail > 1) return;
+                    openT = setTimeout(() => { openT = 0; if (nameEl.isConnected) dtiGo(nameEl.getAttribute('href')); }, 260);
+                }, true);
                 nameEl.addEventListener('dblclick', e => {
                     e.preventDefault();
+                    clearTimeout(openT); openT = 0;
                     const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'dti-rename-inp';
                     inp.value = nameEl.textContent.trim(); nameEl.replaceWith(inp);
                     inp.focus(); inp.select();
@@ -26663,15 +26700,18 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const AT = tok['--accent-text'] || A, AG = tok['--accent-glow'] || `color-mix(in srgb, ${A} 14%, transparent)`;
         const NC = tok['--nc'] || '#d97706', OK = tok['--success'] || '#16a34a', RED = '#e5484d';
         const slug = GM_getValue('dti_user_slug', ''), D = 'https://impress.openneo.net';
-        const LINKS = [
+        const LINKS = [   // (the DTI logo's menu: DTI's pages, in a new tab)
             ['Home', D + '/', 'Your pets and the newest items'],
             ['My Items', slug ? `${D}/user/${slug}/closet` : D + '/your-items', 'Your item lists'],
             ['Customs', D + '/your-outfits', 'Your saved outfits'],
-            ['NC Mall Guide', D + '/items?q=dti-enhance#mall', 'What’s new, leaving and inside'],
-            ['Trade Finder', D + '/items?q=dti-enhance#finder', 'Who’s offering your wishlist'],
+            ['My Tokens', D + '/items?q=dti-enhance#tokens', 'Style tokens and essences'],
+            ['Notes', D + '/items?q=dti-enhance#notes', 'Notes and trade reports'],
+            ['Seeking', D + '/items?q=dti-enhance#seeking', 'The items you want now'],
+            ['NC Mall Guide', D + '/items?q=dti-enhance#mall', 'What\u2019s new, leaving and inside'],
+            ['Trade Finder', D + '/items?q=dti-enhance#finder', 'Who\u2019s offering your wishlist'],
             ['Neofriends', D + '/items?q=dti-enhance#neofriends', 'Traders you follow'],
-            ['Notes', D + '/items?q=dti-enhance#notes', 'All your notes and trade reports'],
         ];
+        const TABS = [['trades', 'Trades'], ['tokens', 'Tokens'], ['seeking', 'Seeking'], ['search', 'Search'], ['notes', 'Notes']];
         const LOGO = '<svg viewBox="0 0 16 15" fill="none" aria-hidden="true"><path d="M8 1C8 1 9.8 1 9.8 2.6 9.8 3.8 8.8 4.2 8 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 4.5 2 10h12z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M2 12.5h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
         const ICO = {
             plus: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>',
@@ -26680,6 +26720,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             search: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14"/></svg>',
             swap: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 5.5h10M10 3l2.5 2.5L10 8M13.5 10.5h-10M6 8l-2.5 2.5L6 13"/></svg>',
             gift: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5.6" width="12" height="3.2" rx=".8"/><path d="M3 8.8v4.4c0 .5.3.8.8.8h8.4c.5 0 .8-.3.8-.8V8.8M8 5.6V14M8 5.6S6.9 2.4 5.2 3c-1.3.5-.7 2.6 2.8 2.6zm0 0s1.1-3.2 2.8-2.6c1.3.5.7 2.6-2.8 2.6z"/></svg>',
+            note: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h3l7-7-3-3-7 7z"/><path d="M9 4l3 3"/></svg>',
+            pin: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2.5h4l-.6 4 2.1 2.2H4.5l2.1-2.2z"/><path d="M8 8.7V14"/></svg>',
+            user: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="5.6" r="2.7"/><path d="M2.8 13.8c.6-2.6 2.7-4 5.2-4s4.6 1.4 5.2 4"/></svg>',
+            here: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 14.5s4.8-4.3 4.8-8a4.8 4.8 0 0 0-9.6 0c0 3.7 4.8 8 4.8 8z"/><circle cx="8" cy="6.5" r="1.7"/></svg>',
+            down: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.8 7.6 8 10.8l3.2-3.2M3 13.5h10"/></svg>',
         };
         const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
         const ago = ts => {
@@ -26689,39 +26734,26 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         };
         const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
-        // ── Trade reports: the same notes, read and written the way DTI's Notes does (read fresh, change, write back) ──
-        const STATUS = [['planned', 'Planned'], ['pending', 'Pending'], ['done', 'Completed'], ['off', 'Fell through']];
+        // ── Trade reports: DTI's own notes (the same code as DTI's Notes — live both ways) ──
+        const STATUS = TRADE_STATUS;
         const stLabel = v => (STATUS.find(([x]) => x === v) || STATUS[0])[1];
-        const GBCS = { gbc: { name: 'GBC', full: 'Gift Box Mystery Capsule \u2014 any', caps: '1 cap' }, bfgbc: { name: 'BFGBC', full: 'Black Friday GBC \u2014 any (double boxes)', caps: '1.5 caps' } };
-        const itemPic = (x, title) => GBCS[x.id] ? `<span class="gico"${title ? ` title="${esc(title)}"` : ''}>${ICO.gift}</span>`
+        const gbcCaps = id => { const c = GBC_KINDS[id]?.caps || 0; return `${c} cap${c === 1 ? '' : 's'}`; };
+        const itemPic = (x, title) => GBC_KINDS[x.id] ? `<span class="gico"${title ? ` title="${esc(title)}"` : ''}>${ICO.gift}</span>`
             : x.img ? `<img src="${esc(x.img)}" alt=""${title ? ` title="${esc(title)}"` : ''}>` : `<span class="noimg"${title ? ` title="${esc(title)}"` : ''}></span>`;
-        const cleanItems = a => (Array.isArray(a) ? a : []).filter(x => x && x.id).map(x => ({
-            id: String(x.id), name: String(x.name || ''), img: String(x.img || ''), qty: Math.max(1, parseInt(x.qty, 10) || 1) }));
-        const cleanT = t => ({
-            partner: t?.partner && t.partner.name ? { name: String(t.partner.name), id: String(t.partner.id || ''), slug: String(t.partner.slug || '') } : null,
-            give: cleanItems(t?.give), get: cleanItems(t?.get),
-            status: STATUS.some(([v]) => v === t?.status) ? t.status : 'planned',
-            date: /^\d{4}-\d{2}-\d{2}$/.test(t?.date || '') ? t.date : '',
-            acct: typeof t?.acct === 'string' ? t.acct : '',
-        });
         // Side accounts: the trades and gifts of the Neopets account you're logged into here (or all, with "All accounts")
         const meAcct = () => acctOfNp(npWhoAmI());
         const inMine = acct => !acctMany() || ui.allAcct || acct === meAcct();
-        const notesRead = () => { try { const d = JSON.parse(GM_getValue('dti_notes', '') || 'null'); if (d && d.notes) return d; } catch (_) {} return { v: 1, notes: {} }; };
-        const trades = () => Object.values(notesRead().notes).filter(n => n && String(n.key || '').startsWith('trade:'));
-        const tradeOf = key => notesRead().notes[key] || null;
+        const trades = () => DTINotes.all().filter(n => n && String(n.key || '').startsWith('trade:'));
+        const tradeOf = key => DTINotes.get(key);
         const isOpen = n => !['done', 'off'].includes(n.trade?.status);
         const titleOf = n => n.title || (n.trade?.partner?.name ? `Trade with ${n.trade.partner.name}` : 'Trade');
         const newKey = () => 'trade:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-        function saveNote(key, patch) {
-            const d = notesRead(), prev = d.notes[key], now = Date.now();
-            const n = Object.assign({ key, type: 'trade', title: '', text: '', pinned: false, created: now }, prev, patch, { updated: now });
-            n.trade = cleanT(patch.trade || prev?.trade);
-            if (!n.trade.acct) n.trade.acct = prev?.trade?.acct || (acctMany() ? meAcct() : '');   // (a new one: this account's)
-            d.notes[key] = n;
-            GM_setValue('dti_notes', JSON.stringify(d));
+        function saveNote(key, patch) {   // (a new trade is this account's)
+            const prev = DTINotes.get(key), trade = cleanTrade(patch.trade || prev?.trade);
+            if (!trade.acct) trade.acct = prev?.trade?.acct || (acctMany() ? meAcct() : '');
+            DTINotes.save(key, Object.assign({}, patch, { trade }));
         }
-        function removeNote(key) { const d = notesRead(); delete d.notes[key]; GM_setValue('dti_notes', JSON.stringify(d)); }
+        const removeNote = key => DTINotes.remove(key);
         // the most recent open trade with someone (where a gift from or to them goes)
         const openTradeWith = who => { const w = String(who || '').toLowerCase(); return w ? trades().filter(n => isOpen(n) && (n.trade?.partner?.name || '').toLowerCase() === w).sort((a, b) => (b.updated || 0) - (a.updated || 0))[0] || null : null; };
         // names to suggest: the people in your trade reports and gifts, the latest first
@@ -26760,43 +26792,36 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             button, input, textarea { font-family: inherit; }
             :focus-visible { outline: 2px solid ${A}; outline-offset: 1px; }
             [hidden] { display: none !important; }
-            .fab { position: relative; width: 42px; height: 42px; margin: 0 14px; padding: 0; border: none; border-radius: 50%; cursor: grab; display: grid; place-items: center;
-                background: ${A}; color: ${AF}; box-shadow: 0 4px 14px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.2); opacity: .82;
-                transition: opacity .15s, transform .15s; touch-action: none; }
-            .fab:hover, .wrap.open .fab { opacity: 1; transform: scale(1.06); }
-            .fab:active { cursor: grabbing; }
-            .fab svg { width: 22px; height: 20px; pointer-events: none; }
-            .badge { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 99px; pointer-events: none;
+            /* The DTI button: a tab on the right edge — a click opens the panel, a drag slides it up or down */
+            .fab { position: relative; width: 18px; height: 50px; padding: 0; border: none; border-radius: 10px 0 0 10px; cursor: pointer; display: grid; place-items: center;
+                background: ${A}; color: ${AF}; box-shadow: 0 2px 10px rgba(0,0,0,.2); opacity: .72; transition: opacity .15s, width .15s; touch-action: none; }
+            .fab:hover, .wrap.open .fab, .wrap.drag .fab { opacity: 1; width: 22px; }
+            .wrap.drag .fab { cursor: grabbing; }
+            .fab svg { width: 12px; height: 11px; pointer-events: none; }
+            .badge { position: absolute; top: -7px; left: -9px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 99px; pointer-events: none;
                 background: ${RED}; color: #fff; font: 800 10px/18px system-ui, sans-serif; font-style: normal; text-align: center; box-shadow: 0 0 0 2px ${S}; }
-            .x { position: absolute; top: -6px; width: 18px; height: 18px; padding: 0; border: 1px solid ${B}; border-radius: 50%; cursor: pointer; display: grid; place-items: center;
-                background: ${S}; color: ${M}; font: 700 11px/1 system-ui, sans-serif; opacity: 0; transition: opacity .15s; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
-            .wrap:not(.right) .x { left: 46px; } .wrap.right .x { right: 46px; }
-            .wrap:hover .x { opacity: 1; }
-            .wrap.open .x { display: none; }
-            .x:hover { color: ${T}; }
-            .tab { width: 16px; height: 46px; padding: 0; border: none; cursor: pointer; display: grid; place-items: center; background: ${A}; color: ${AF};
-                opacity: .55; transition: opacity .15s, width .15s; box-shadow: 0 2px 8px rgba(0,0,0,.18); }
-            .wrap:not(.right) .tab { border-radius: 0 9px 9px 0; } .wrap.right .tab { border-radius: 9px 0 0 9px; }
-            .tab:hover { opacity: 1; width: 20px; }
-            .tab svg { width: 11px; height: 10px; }
+            .cdot { position: absolute; top: 5px; left: 50%; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: ${AF}; box-shadow: 0 0 0 1.5px ${A}; pointer-events: none; }
 
             /* The panel */
-            .panel { position: absolute; bottom: 0; width: 370px; max-width: calc(100vw - 84px); display: flex; flex-direction: column; overflow: hidden;
+            .panel { position: absolute; bottom: 0; width: 420px; max-width: calc(100vw - 40px); display: flex; flex-direction: column; overflow: hidden;
                 border-radius: 16px; background: ${S}; border: 1px solid ${B}; box-shadow: 0 16px 44px rgba(0,0,0,.26); font-size: 13px; color: ${T}; }
-            .wrap:not(.right) .panel { left: 62px; } .wrap.right .panel { right: 62px; }
+            .panel { right: 28px; }
             .wrap.down .panel { bottom: auto; top: 0; }
             .ph { display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 12px; border-bottom: 1px solid ${B}; }
-            .brand { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 800; }
+            .brand { position: relative; flex: none; display: inline-flex; align-items: center; gap: 3px; height: 32px; padding: 0 5px 0 4px; border: none; border-radius: 9px; background: none; cursor: pointer; color: ${M}; }
+            .brand:hover, .brand.on { background: ${S2}; color: ${T}; }
             .brand i { width: 24px; height: 24px; border-radius: 8px; display: grid; place-items: center; background: ${A}; color: ${AF}; }
             .brand i svg { width: 14px; height: 13px; }
+            .brand .chev { width: 12px; height: 12px; transition: transform .15s; }
+            .brand.on .chev { transform: rotate(180deg); }
             .tabs { margin-left: auto; display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: ${S2}; }
-            .tabs button { height: 27px; padding: 0 10px; border: none; border-radius: 7px; background: none; color: ${M}; cursor: pointer; font-size: 12px; font-weight: 700;
+            .tabs button { height: 27px; padding: 0 9px; border: none; border-radius: 7px; background: none; color: ${M}; cursor: pointer; font-size: 12px; font-weight: 700;
                 display: inline-flex; align-items: center; gap: 5px; }
             .tabs button:hover { color: ${T}; }
             .tabs button.on { background: ${S}; color: ${AT}; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
             .tabs b { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 99px; background: ${RED}; color: #fff; font-size: 10px; line-height: 16px; text-align: center; }
             .tabs b:empty { display: none; }
-            .body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px; scrollbar-width: thin; scrollbar-color: ${B} transparent; }
+            .body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: 12px; scrollbar-width: thin; scrollbar-color: ${B} transparent; }
 
             /* Shared bits */
             .btn { height: 30px; padding: 0 11px; border-radius: 8px; border: 1px solid ${B}; background: ${S}; color: ${T}; cursor: pointer; font-size: 12px; font-weight: 700; }
@@ -26951,7 +26976,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .sr img { width: 38px; height: 38px; flex: none; border-radius: 8px; background: #fff; box-shadow: 0 0 0 1px ${B}; object-fit: contain; }
             .sr .nm { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .sr:hover .nm { color: ${AT}; }
-            .val { flex: none; padding: 1px 7px; border-radius: 99px; background: ${AG}; color: ${AT}; font-size: 11px; font-weight: 700; white-space: nowrap; }
+            .val { flex: 0 1 auto; min-width: 0; max-width: 42%; padding: 1px 7px; border-radius: 99px; background: ${AG}; color: ${AT}; font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .imeta .val { max-width: none; white-space: normal; line-height: 1.4; border-radius: 9px; }
             .val:empty { display: none; }
             .go { display: grid; flex: none; color: ${M}; }
             .go svg { width: 10px; height: 10px; }
@@ -26967,46 +26993,166 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .lnk svg { width: 10px; height: 10px; flex: none; color: ${M}; }
             .lnk:hover { background: ${S2}; }
             .lnk:hover b, .lnk:hover svg { color: ${AT}; }
+
+            /* DTI's pages (the logo) */
+            .menu { position: absolute; top: 50px; left: 8px; z-index: 6; width: 262px; max-height: calc(100% - 60px); overflow-y: auto; padding: 5px; border-radius: 12px; background: ${S}; border: 1px solid ${B}; box-shadow: 0 12px 32px rgba(0,0,0,.22); }
+            .menu .lnk { padding: 7px 9px; }
+            .mhint { margin: 6px 9px 4px; font-size: 10.5px; line-height: 1.45; color: ${M}; }
+            .addbtn { width: 100%; height: 38px; border: none; border-radius: 10px; background: ${A}; color: ${AF}; font-size: 13.5px; font-weight: 700; cursor: pointer;
+                display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 10px; }
+            .addbtn svg { width: 13px; height: 13px; }
+            .addbtn:hover { filter: brightness(1.08); }
+            .ndel { margin-left: auto; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid transparent; background: none; color: ${M}; cursor: pointer; font-size: 12px; font-weight: 700; }
+            .ndel:hover, .ndel.sure { color: ${RED}; border-color: color-mix(in srgb, ${RED} 40%, ${B}); }
+            /* On this page */
+            .ctx { margin: 0 0 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, ${A} 40%, ${B}); background: color-mix(in srgb, ${A} 6%, ${S}); overflow: hidden; }
+            .ctxhd { width: 100%; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: none; background: none; cursor: pointer; color: ${T}; font-size: 12px; text-align: left; }
+            .ctxhd svg { width: 14px; height: 14px; flex: none; color: ${AT}; }
+            .ctxhd b { flex: none; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: ${AT}; }
+            .ctxhd span { flex: 1; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .ctxhd i { flex: none; padding: 0 6px; border-radius: 99px; background: ${A}; color: ${AF}; font-style: normal; font-size: 10.5px; font-weight: 800; line-height: 17px; }
+            .ctxhd em { flex: none; font-style: normal; font-size: 10px; color: ${M}; }
+            .ctxbody { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 10px; }
+            .ctxbody .btn.pri { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; }
+            .cline { font-size: 12px; line-height: 1.5; color: ${T}; }
+            .cline small { color: ${M}; }
+            .crow { width: 100%; display: flex; align-items: center; gap: 8px; padding: 5px 7px 5px 5px; border-radius: 9px; background: ${S}; border: 1px solid ${B}; cursor: pointer; text-align: left; color: ${T}; font: inherit; font-size: 12px; }
+            .crow:hover { border-color: ${A}; }
+            .crow img, .crow .noimg { width: 30px; height: 30px; flex: none; border-radius: 6px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px ${B}; }
+            .crow span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+            .crow em { flex: none; font-style: normal; font-size: 11px; font-weight: 700; color: ${M}; }
+            .crow em.sale { color: ${OK}; } .crow em.soon { color: ${NC}; }
+            .lnkbtn { align-self: flex-start; padding: 0; border: none; background: none; color: ${AT}; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+            .lnkbtn:hover { text-decoration: underline; }
+            /* Search and Seeking rows open the item here */
+            .sr, .skrow { cursor: pointer; }
+            .sr:focus-visible, .skrow:focus-visible { outline-offset: -2px; }
+            .sr .go { padding: 5px; margin: -5px 0; border-radius: 6px; color: ${M}; text-decoration: none; }
+            .sr .go:hover { background: ${S}; color: ${AT}; }
+            /* One item */
+            .ihero { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
+            .ihero img, .ihero .noimg { width: 72px; height: 72px; flex: none; border-radius: 12px; background: #fff; box-shadow: 0 0 0 1px ${B}; object-fit: contain; }
+            .ihtxt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+            .ihtxt b { font-size: 14px; line-height: 1.35; }
+            .imeta { display: flex; align-items: center; gap: 6px; min-height: 18px; }
+            .iseek { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 11px; border: 1px solid #fdba74; background: #fff7ed; color: #9a3412; cursor: pointer; text-align: left; font: inherit; }
+            .iseek .skic { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 1px solid #fdba74; color: #ea580c; font-size: 15px; background: #fff; }
+            .iseek > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; line-height: 1.35; }
+            .iseek b { font-size: 12.5px; } .iseek small { font-size: 11px; opacity: .85; }
+            .iseek .sw { position: relative; flex: none; width: 30px; height: 18px; border-radius: 99px; background: #fed7aa; }
+            .iseek .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .15s; }
+            .iseek.on { background: #f97316; border-color: #f97316; color: #fff; }
+            .iseek.on .skic { color: #f97316; border-color: #fff; }
+            .iseek.on .sw { background: rgba(255,255,255,.45); } .iseek.on .sw::after { transform: translateX(12px); }
+            .ilists { display: flex; flex-direction: column; gap: 4px; }
+            .lgh { margin: 3px 2px 1px; font-size: 11px; font-weight: 700; color: ${M}; }
+            .lrow { display: flex; align-items: center; gap: 8px; padding: 4px 5px 4px 10px; border-radius: 9px; border: 1px solid ${B}; background: ${S}; font-size: 12.5px; }
+            .lrow > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+            .lrow.has { border-color: color-mix(in srgb, ${A} 45%, ${B}); background: color-mix(in srgb, ${A} 5%, ${S}); }
+            .lrow.changed { box-shadow: 0 0 0 2px ${AG}; }
+            .lfoot { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+            .lmsg { flex: 1; font-size: 11.5px; font-weight: 700; color: ${OK}; } .lmsg.err { color: ${RED}; }
+            .itrades { display: flex; flex-direction: column; gap: 5px; }
+            .itr { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+            .itr > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+            .itr.new > span { color: ${M}; }
+            .itr .btn { height: 26px; padding: 0 9px; font-size: 11.5px; }
+            .itr .btn.done { border-color: ${OK}; color: ${OK}; }
+            .inotef { margin-top: 14px; }
+            /* Tokens */
+            .seg3, .seg4 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; margin-bottom: 9px; border-radius: 10px; background: ${S2}; }
+            .seg4 { grid-template-columns: repeat(4, 1fr); }
+            .seg3 button, .seg4 button { height: 29px; padding: 0 4px; border: none; border-radius: 7px; background: none; color: ${M}; cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
+            .seg3 button i, .seg4 button i { font-style: normal; font-size: 10.5px; opacity: .75; }
+            .seg3 button:hover, .seg4 button:hover { color: ${T}; }
+            .seg3 button.on, .seg4 button.on { background: ${S}; color: ${AT}; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+            .tkrow { border-radius: 11px; border: 1px solid ${B}; background: ${S}; overflow: hidden; }
+            .tkrow.open { border-color: ${A}; }
+            .tkmain { width: 100%; display: flex; align-items: center; gap: 9px; padding: 6px 8px 6px 6px; border: none; background: none; cursor: pointer; text-align: left; color: ${T}; font: inherit; }
+            .tkmain img, .tkmain .noimg { width: 38px; height: 38px; flex: none; border-radius: 8px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px ${B}; }
+            .tktxt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
+            .tktxt b { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .tktxt small { font-size: 11px; color: ${M}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .tkmarks { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; max-width: 120px; }
+            .tkmarks i { font-style: normal; padding: 0 6px; border-radius: 99px; font-size: 9.5px; font-weight: 800; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+            .tkmarks .av { background: ${OK}; color: #fff; text-transform: uppercase; letter-spacing: .03em; }
+            .tkmarks .ow { background: ${AG}; color: ${AT}; }
+            .tkmarks .wa { background: color-mix(in srgb, #ec4899 14%, transparent); color: #db2777; }
+            .tkmarks .ll { border: 1px solid var(--lc); color: ${T}; background: color-mix(in srgb, var(--lc) 12%, transparent); }
+            .tkedit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px 10px; border-top: 1px solid ${B}; background: color-mix(in srgb, ${S2} 50%, ${S}); }
+            .tkedit.solo { border: 1px solid ${B}; border-radius: 11px; }
+            .tkstep { display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 0 2px 0 10px; border-radius: 99px; border: 1px solid ${B}; background: ${S}; }
+            .tkstep span { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: ${M}; margin-right: 4px; }
+            .tkstep button { width: 24px; height: 24px; padding: 0; border: none; border-radius: 50%; background: none; color: ${M}; cursor: pointer; font-size: 15px; line-height: 1; }
+            .tkstep button:hover:not(:disabled) { background: ${S2}; color: ${AT}; }
+            .tkstep button:disabled { opacity: .35; cursor: default; }
+            .tkstep b { min-width: 18px; text-align: center; font-size: 12.5px; }
+            .tklist { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: ${M}; }
+            .tklist select { height: 30px; max-width: 150px; padding: 0 6px; border-radius: 8px; border: 1px solid ${B}; background: ${S}; color: ${T}; font: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+            .tkfrom { flex-basis: 100%; font-size: 10.5px; color: ${M}; }
+            .ldot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+            .tknote { display: flex; align-items: center; gap: 8px; margin: 0 0 9px; padding: 7px 10px; border-radius: 10px; font-size: 11.5px; line-height: 1.4; color: ${M}; background: color-mix(in srgb, ${OK} 8%, ${S}); border: 1px solid color-mix(in srgb, ${OK} 28%, ${B}); }
+            .tknote span { flex: 1; } .tknote a { color: ${AT}; font-weight: 700; }
+            .tknote button { flex: none; height: 24px; padding: 0 9px; border-radius: 7px; border: 1px solid ${B}; background: ${S}; color: ${T}; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; }
+            /* Notes */
+            .ntrow { width: 100%; display: flex; align-items: flex-start; gap: 9px; padding: 8px 9px; border-radius: 11px; border: 1px solid ${B}; background: ${S}; cursor: pointer; text-align: left; color: ${T}; font: inherit; }
+            .ntrow:hover { border-color: ${A}; }
+            .ntrow img, .ntrow .noimg, .ntico { width: 32px; height: 32px; flex: none; border-radius: 8px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px ${B}; }
+            .ntico { display: grid; place-items: center; background: ${S2}; color: ${M}; } .ntico svg { width: 15px; height: 15px; }
+            .nttxt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+            .ntt { display: flex; align-items: center; gap: 5px; }
+            .ntt b { flex: 1; min-width: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .ntt .pin { display: grid; color: ${AT}; } .ntt .pin svg { width: 12px; height: 12px; }
+            .ntt em { flex: none; font-style: normal; font-size: 10.5px; color: ${M}; }
+            .nttxt small { font-size: 11.5px; color: ${M}; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+            .nttxt small:empty { display: none; }
+            .ntitem { width: 100%; display: flex; align-items: center; gap: 9px; margin-bottom: 10px; padding: 6px 10px 6px 6px; border-radius: 10px; border: 1px solid ${B}; background: ${S}; cursor: pointer; color: ${T}; font: inherit; font-size: 12.5px; font-weight: 600; text-align: left; }
+            .ntitem img { width: 32px; height: 32px; flex: none; border-radius: 7px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px ${B}; }
+            .ntitem span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .ntitem em { font-style: normal; font-size: 11px; color: ${AT}; font-weight: 700; }
+            .ntitem:hover { border-color: ${A}; }
+            .iconbtn.on { background: ${A}; border-color: ${A}; color: ${AF}; }
+            .ntsaved { flex: 1; font-size: 11px; color: ${M}; }
         </style>
-        <div class="wrap">
-            <button type="button" class="fab" title="DTI — your trades, item search and DTI’s pages (drag to move)" aria-label="DTI">${LOGO}<i class="badge" hidden></i></button>
-            <button type="button" class="x" title="Tuck it away" aria-label="Tuck the DTI button away">×</button>
-            <button type="button" class="tab" hidden title="Show the DTI button" aria-label="Show the DTI button">${LOGO}</button>
+        <div class="wrap right">
+            <button type="button" class="fab" title="DTI \u2014 your trades, tokens, notes and item search (drag it up or down to move it)" aria-label="DTI">${LOGO}<i class="cdot" hidden></i><i class="badge" hidden></i></button>
             <section class="panel" hidden aria-label="DTI">
                 <header class="ph">
-                    <span class="brand"><i>${LOGO}</i>DTI</span>
-                    <nav class="tabs">${[['trades', 'Trades'], ['seeking', 'Seeking'], ['search', 'Search'], ['links', 'Pages']].map(([t, l]) => `<button type="button" data-t="${t}">${l}${t === 'trades' ? '<b class="tbadge" title="New NC gifts"></b>' : ''}</button>`).join('')}</nav>
+                    <button type="button" class="brand" title="DTI\u2019s pages" aria-label="DTI\u2019s pages" aria-haspopup="true"><i>${LOGO}</i><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5l4 4 4-4"/></svg></button>
+                    <nav class="tabs">${TABS.map(([t, l]) => `<button type="button" data-t="${t}">${l}${t === 'trades' ? '<b class="tbadge" title="New NC gifts"></b>' : ''}</button>`).join('')}</nav>
                 </header>
+                <div class="menu" hidden>${LINKS.map(([l, u, d]) => `<a class="lnk" href="${esc(u)}" target="_blank" rel="noopener"><span><b>${l}</b><small>${d}</small></span>${ICO.ext}</a>`).join('')}
+                    <p class="mhint">Drag the DTI tab up or down to move it \u00b7 turn it off in DTI\u2019s \u2699 \u203a Neopets</p></div>
                 <div class="body"></div>
                 <datalist id="partners"></datalist>
             </section>
         </div>`;
         document.body.appendChild(host);
         const $ = q => root.querySelector(q);
-        const wrap = $('.wrap'), fab = $('.fab'), x = $('.x'), tab = $('.tab'), panel = $('.panel'), body = $('.body');
-        const pos = Object.assign({ side: 'left', y: 0.78 }, GM_getValue('dti_np_fab_pos', {}) || {});
-        let min = !!GM_getValue('dti_np_fab_min', false);
-        const savedTab = GM_getValue('dti_np_panel_tab', 'trades');
-        const ui = { tab: ['trades', 'seeking', 'search', 'links'].includes(savedTab) ? savedTab : 'trades', view: 'list', key: '', stFor: '', openGift: '', showDone: false, q: '', allAcct: false };
+        const wrap = $('.wrap'), fab = $('.fab'), panel = $('.panel'), body = $('.body'), menu = $('.menu');
+        const pos = Object.assign({ y: 0.6 }, GM_getValue('dti_np_fab_pos', {}) || {});   // (how far down the right edge, 0–1)
+        const savedTab = GM_getValue('dti_np_panel_tab', 'trades'), savedSeg = GM_getValue('dti_np_tk_seg', 'want');
+        const ui = { tab: TABS.some(([t]) => t === savedTab) ? savedTab : 'trades', view: 'list', key: '', stFor: '', openGift: '', showDone: false, q: '', allAcct: false,
+            draft: null,   // a new trade report's trader, before anything's saved ({ key, partner })
+            item: null, itemTop: 0,   // an item open in the panel (from Search, Seeking, a note, On this page)
+            tk: { seg: ['want', 'own', 'studio'].includes(savedSeg) ? savedSeg : 'want', q: '', open: '' },
+            nt: { seg: '', q: '', key: '' } };
         const hostCss = (k, v) => host.style.setProperty(k, v, 'important');
         hostCss('position', 'fixed'); hostCss('z-index', '2147483000'); hostCss('margin', '0'); hostCss('padding', '0');
-        function place() {
-            const h = min ? 46 : 42;
-            hostCss('top', Math.round(Math.min(Math.max(8, pos.y * innerHeight - h / 2), innerHeight - h - 8)) + 'px');
-            hostCss(pos.side, '0px'); hostCss(pos.side === 'left' ? 'right' : 'left', 'auto');
-            wrap.classList.toggle('right', pos.side === 'right');
-            fab.hidden = x.hidden = min; tab.hidden = !min;
-            if (min) openPanel(false);
-        }
-        // Opens toward the roomier half of the screen, as tall as fits (up to 580px)
+        hostCss('right', '0px'); hostCss('left', 'auto');
+        const FAB_H = 50;
+        function place(y = pos.y * innerHeight) { hostCss('top', Math.round(Math.min(Math.max(8, y - FAB_H / 2), innerHeight - FAB_H - 8)) + 'px'); }
+        // Opens toward the roomier half of the screen, as tall as fits (up to 640px)
         function fit() {
             const r = fab.getBoundingClientRect(), down = r.top + r.height / 2 < innerHeight / 2;
             wrap.classList.toggle('down', down);
-            panel.style.height = Math.max(260, Math.min(580, down ? innerHeight - r.top - 12 : r.bottom - 12)) + 'px';
+            panel.style.height = Math.max(280, Math.min(640, down ? innerHeight - r.top - 12 : r.bottom - 12)) + 'px';
         }
+        function showMenu(on) { menu.hidden = !on; $('.brand').classList.toggle('on', on); }
         function openPanel(open) {
             panel.hidden = !open;
             wrap.classList.toggle('open', open);
+            showMenu(false);
             if (!open) { ui.stFor = ''; return; }
             fit();
             render();
@@ -27014,25 +27160,30 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
         // ── Drawing ──
         function paintBadge() {
-            const n = waitingGifts().length;
+            const n = waitingGifts().length, c = ctxCount();
             const b = $('.badge');
             b.hidden = !n; b.textContent = n > 9 ? '9+' : String(n);
             $('.tbadge').textContent = n ? String(n) : '';
-            fab.title = n ? `DTI — ${n} NC gift${n === 1 ? '' : 's'} to put in a trade report` : 'DTI — your trades, item search and DTI’s pages (drag to move)';
+            $('.cdot').hidden = !c || !!n;
+            fab.title = n ? `DTI \u2014 ${n} NC gift${n === 1 ? '' : 's'} to put in a trade report`
+                : c ? `DTI \u2014 on this page: ${ctxModel()?.tip || ''}` : 'DTI \u2014 your trades, tokens, notes and item search (drag it up or down to move it)';
         }
         function render() {
             root.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === ui.tab));
             paintBadge();
-            if (ui.tab === 'search') return renderSearch();
-            if (ui.tab === 'links') return renderLinks();
-            if (ui.tab === 'seeking') return renderSeeking();
-            return ui.view === 'edit' ? renderEditor() : renderTrades();
+            if (ui.item) return renderItem();
+            if (ui.tab === 'search') renderSearch();
+            else if (ui.tab === 'tokens') renderTokens();
+            else if (ui.tab === 'seeking') renderSeeking();
+            else if (ui.tab === 'notes') { if (ui.nt.key) return renderNoteEd(); renderNotes(); }
+            else { if (ui.view === 'edit') return renderEditor(); renderTrades(); }
+            paintCtx();   // (the list views: what this page has for you, on top)
         }
         const thumbs = list => !list.length ? '<span class="none">nothing yet</span>'
             : list.slice(0, 3).map(x => itemPic(x, x.name + (x.qty > 1 ? ' ×' + x.qty : ''))).join('')
                 + (list.length > 3 ? `<span class="n">+${list.length - 3}</span>` : '');
         function tradeRow(n) {
-            const t = cleanT(n.trade);
+            const t = cleanTrade(n.trade);
             return `<div class="trow">
                 <button type="button" class="tmain" data-open="${esc(n.key)}" title="Open this trade report">
                     <span class="ttop"><b>${esc(titleOf(n))}</b><span class="when">${esc(ago(n.updated))}</span></span>
@@ -27077,16 +27228,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 ${giftsOn() ? '' : '<p class="hint">Tip: turn on NC gift tracking in DTI’s ⚙ › Neopets, and the NC gifts you send and accept show up here, ready to put in a trade report.</p>'}`;
         }
         // the trade being edited (a new one exists only once something's been filled in)
-        const cur = () => tradeOf(ui.key) || { key: ui.key, title: '', text: '', trade: { partner: null, give: [], get: [], status: 'planned', date: today() } };
-        function patchTrade(fn) { const t = cleanT(cur().trade); fn(t); saveNote(ui.key, { trade: t }); }
+        const cur = () => tradeOf(ui.key) || { key: ui.key, title: '', text: '', trade: { partner: ui.draft?.key === ui.key ? { name: ui.draft.partner } : null, give: [], get: [], status: 'planned', date: today() } };
+        function patchTrade(fn) { const t = cleanTrade(cur().trade); fn(t); saveNote(ui.key, { trade: t }); }
         const itemRow = (it, side, i) => `<div class="it">
                 ${itemPic(it)}
-                ${/^\d+$/.test(it.id) ? `<a class="nm" href="${D}/items/${esc(it.id)}" target="_blank" rel="noopener" title="${esc(it.name)} on DTI">${esc(it.name)}</a>` : `<span class="nm" title="${esc(GBCS[it.id] ? `${GBCS[it.id].full} \u00b7 ${GBCS[it.id].caps}` : it.name)}">${esc(it.name)}</span>`}
+                ${/^\d+$/.test(it.id) ? `<a class="nm" href="${D}/items/${esc(it.id)}" target="_blank" rel="noopener" title="${esc(it.name)} on DTI">${esc(it.name)}</a>` : `<span class="nm" title="${esc(GBC_KINDS[it.id] ? `${GBC_KINDS[it.id].full} \u00b7 ${gbcCaps(it.id)}` : it.name)}">${esc(it.name)}</span>`}
                 <span class="qty"><button type="button" data-q="-1" data-side="${side}" data-i="${i}" title="One fewer"${it.qty <= 1 ? ' disabled' : ''}>−</button><b>${it.qty}</b><button type="button" data-q="1" data-side="${side}" data-i="${i}" title="One more">+</button></span>
                 <button type="button" class="rm" data-rm="${i}" data-side="${side}" title="Take it off" aria-label="Take ${esc(it.name)} off">×</button>
             </div>`;
         function renderEditor() {
-            const n = cur(), t = cleanT(n.trade), saved = !!tradeOf(ui.key);
+            const n = cur(), t = cleanTrade(n.trade), saved = !!tradeOf(ui.key);
             body.innerHTML = `<div class="edhead">
                     <button type="button" class="iconbtn back" title="Back to your trades" aria-label="Back">${ICO.back}</button>
                     <b class="edtitle">${esc(saved ? titleOf(n) : 'New trade report')}</b>
@@ -27099,7 +27250,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     <div class="shd">${side === 'give' ? 'You give' : 'You get'}<b>${t[side].reduce((s, it) => s + it.qty, 0) || ''}</b></div>
                     ${t[side].map((it, i) => itemRow(it, side, i)).join('')}
                     <div class="add"><input class="txt" data-add="${side}" placeholder="＋ Add an item…" autocomplete="off" spellcheck="false"><div class="drop" hidden></div></div>
-                    <div class="quick">${Object.entries(GBCS).map(([id, g]) => `<button type="button" data-gbc="${id}" data-side="${side}" title="Add a ${g.name} (${esc(g.full)}) \u2014 ${g.caps}">${ICO.gift}+ ${g.name}</button>`).join('')}</div>
+                    <div class="quick">${Object.entries(GBC_KINDS).map(([id, g]) => `<button type="button" data-gbc="${id}" data-side="${side}" title="Add a ${g.name} (${esc(g.full)}) \u2014 ${gbcCaps(id)}">${ICO.gift}+ ${g.name}</button>`).join('')}</div>
                 </div>`).join('')}
                 <label class="fld"><span>Notes</span><textarea class="txt text" placeholder="Anything to remember about this trade">${esc(n.text || '')}</textarea></label>
                 <div class="edfoot"><input type="date" class="txt date" value="${esc(t.date)}" title="When it happened" aria-label="Date">
@@ -27117,7 +27268,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             // typing saves as you go (and at once when you leave the box)
             const partner = body.querySelector('.partner'), text = body.querySelector('.text'), date = body.querySelector('.date');
             const savePartner = () => {
-                const name = partner.value.trim(), was = cleanT(cur().trade).partner;
+                const name = partner.value.trim(), was = cleanTrade(cur().trade).partner;
                 if ((was?.name || '') === name) return;
                 patchTrade(t => { t.partner = name ? (was && was.name === name ? was : { name }) : null; });
                 body.querySelector('.edtitle').textContent = titleOf(cur());
@@ -27138,7 +27289,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     ${itemPic(it)}<span>${esc(it.name)}</span>${it.nc ? '<i class="tag">NC</i>' : ''}${it.typed ? '<i class="tag typed">as typed</i>' : ''}</button>`).join(''));
                 const pick = it => {
                     if (!it) return;
-                    patchTrade(t => { const ex = t[side].find(o => o.id === it.id); if (ex) ex.qty++; else t[side].push({ id: it.id, name: GBCS[it.id]?.name || it.name, img: it.img, qty: 1 }); });
+                    patchTrade(t => { const ex = t[side].find(o => o.id === it.id); if (ex) ex.qty++; else t[side].push({ id: it.id, name: GBC_KINDS[it.id]?.name || it.name, img: it.img, qty: 1 }); });
                     rerenderEditor(side);
                 };
                 inp.addEventListener('input', () => {
@@ -27150,7 +27301,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         const my = ++gen, d = await dtiJSON('/items.json?q=' + encodeURIComponent(q));
                         if (my !== gen || !inp.isConnected) return;
                         results = (d?.items || []).slice(0, 8).map(it => ({ id: String(it.id), name: it.name, img: it.thumbnail_url || '', nc: !!it['nc?'] }));
-                        if (/\b(bf)?gbcs?\b|gift ?box|black friday/i.test(q)) results.unshift(...Object.entries(GBCS).map(([id, g]) => ({ id, name: `${g.name} \u2014 ${g.full.replace(/ \u2014 .*$/, '')}`, img: '' })));   // (any GBC, as Notes has it)
+                        if (/\b(bf)?gbcs?\b|gift ?box|black friday/i.test(q)) results.unshift(...Object.entries(GBC_KINDS).map(([id, g]) => ({ id, name: `${g.name} \u2014 ${g.full.replace(/ \u2014 .*$/, '')}`, img: '' })));   // (any GBC, as Notes has it)
                         if (!results.some(it => it.name.toLowerCase() === q.toLowerCase())) results.push({ id: npId(q), name: q, img: '', typed: true });
                         hl = 0;
                         paint();
@@ -27183,16 +27334,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 sk.title = on ? 'On your Seeking list \u2014 click to take it off' : 'Seeking now: add it to your Seeking list';
             }, true);
             let timer = 0, gen = 0;
-            const empty = () => { res.innerHTML = '<div class="empty"><b>Find any item</b>Search DTI by name. NC items show what they’re worth, and a click opens the item on DTI.</div>'; };
+            const empty = () => { res.innerHTML = '<div class="empty"><b>Find any item</b>Search DTI by name. NC items show what they’re worth. A click opens it here: your lists, Seeking, a note or a trade.</div>'; };
             const paint = () => {
                 const { items, page, pages } = lastSearch;
                 if (!items.length) { res.innerHTML = '<div class="msg">No items found</div>'; return; }
-                res.innerHTML = items.map(it => `<a class="sr" href="${D}/items/${esc(it.id)}" target="_blank" rel="noopener" title="Open ${esc(it.name)} on DTI">
-                    <img src="${esc(it.thumbnail_url || '')}" alt="" loading="lazy"><span class="nm">${esc(it.name)}</span>${it['nc?'] ? '<i class="tag">NC</i><span class="val"></span>' : ''}<span class="sk${seekHas(it.id) ? ' on' : ''}" role="button" data-skadd="${esc(JSON.stringify({ id: String(it.id), name: it.name, img: it.thumbnail_url || '' }))}" title="${seekHas(it.id) ? 'On your Seeking list \u2014 click to take it off' : 'Seeking now: add it to your Seeking list'}">\u25ce</span><span class="go">${ICO.ext}</span></a>`).join('');
+                res.innerHTML = items.map(it => `<div class="sr" role="button" tabindex="0" data-item="${esc(JSON.stringify({ id: String(it.id), name: it.name, img: it.thumbnail_url || '', nc: !!it['nc?'] }))}" title="${esc(it.name)} \u2014 your lists, Seeking, a note, a trade">
+                    <img src="${esc(it.thumbnail_url || '')}" alt="" loading="lazy"><span class="nm">${esc(it.name)}</span>${it['nc?'] ? '<i class="tag">NC</i><span class="val"></span>' : ''}<span class="sk${seekHas(it.id) ? ' on' : ''}" role="button" data-skadd="${esc(JSON.stringify({ id: String(it.id), name: it.name, img: it.thumbnail_url || '' }))}" title="${seekHas(it.id) ? 'On your Seeking list \u2014 click to take it off' : 'Seeking now: add it to your Seeking list'}">\u25ce</span><a class="go" href="${D}/items/${esc(it.id)}" target="_blank" rel="noopener" title="Open it on DTI">${ICO.ext}</a></div>`).join('');
                 if (page < pages) res.insertAdjacentHTML('beforeend', `<button type="button" class="smore">Show more <small>page ${page} of ${pages}</small></button>`);
                 res.querySelectorAll('.sr').forEach((a, i) => {
                     if (!items[i]['nc?']) return;
-                    npNcValue(items[i].name).then(v => { const el = a.querySelector('.val'); if (el && v) el.textContent = capNums(v) ? String(v).replace(/\*$/, '') + ' caps' : v; });
+                    npNcValue(items[i].name).then(v => { const el = a.querySelector('.val'); if (el && v) { el.textContent = capNums(v) ? String(v).replace(/\*$/, '') + ' caps' : v; el.title = String(v); } });
                 });
             };
             const run = async q => {
@@ -27238,8 +27389,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const ma = acctMany() ? acctGet(meAcct()) : null;
             body.innerHTML = `${ma ? `<div class="acctbar"><i style="background:${esc(ma.color)}"></i><span>${ui.allAcct ? 'All your accounts' : `${esc(acctName(ma))} is seeking`}</span><button type="button" class="acctall">${ui.allAcct ? `Just ${esc(acctName(ma))}` : 'All accounts'}</button></div>` : ''}
                 ${list.length ? `<div class="sec">Seeking now <b>${list.length}</b></div>
-                    <div class="list">${list.map(e => `<div class="skrow" data-sk="${esc(e.id)}">
-                        <a href="${D}/items/${esc(e.id)}" target="_blank" rel="noopener" title="${esc(e.name)} on DTI">${e.img ? `<img src="${esc(e.img)}" alt="" loading="lazy">` : '<span class="noimg"></span>'}</a>
+                    <div class="list">${list.map(e => `<div class="skrow" data-sk="${esc(e.id)}" role="button" tabindex="0" data-item="${esc(JSON.stringify({ id: String(e.id), name: e.name || '', img: e.img || '' }))}" title="${esc(e.name || 'Item')} \u2014 your lists, a note, a trade">
+                        ${e.img ? `<img src="${esc(e.img)}" alt="" loading="lazy">` : '<span class="noimg"></span>'}
                         <span class="sktxt"><b>${esc(e.name || 'Item')}</b><span class="skval" hidden></span>${e.note ? `<small>${esc(e.note)}</small>` : ''}</span>
                         <button type="button" class="rm" data-skrm="${esc(e.id)}" title="Take it off your Seeking list" aria-label="Remove">\u00d7</button>
                     </div>`).join('')}</div>
@@ -27251,33 +27402,394 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 npNcValue(e.name).then(v => { const el = row.querySelector('.skval'); if (el && capNums(v)) { el.textContent = String(v).replace(/\*$/, '') + ' caps'; el.hidden = false; } });
             });
         }
-        function renderLinks() {
-            body.innerHTML = LINKS.map(([l, u, d]) => `<a class="lnk" href="${esc(u)}" target="_blank" rel="noopener"><span><b>${l}</b><small>${d}</small></span>${ICO.ext}</a>`).join('')
-                + '<p class="hint">Drag the DTI button to move it · × tucks it away · turn it off in DTI’s ⚙ › Neopets</p>';
+        // ════ On this page: what the Neopets page you're on has for you (a card at the top of the panel, a dot on the tab) ════
+        const ctx = (() => {
+            const path = location.pathname, qs = new URLSearchParams(location.search), me = npWhoAmI();
+            if (/^\/mall\/stylingstudio/i.test(path)) return { kind: 'studio', label: 'Styling Studio' };
+            if (/^ncmall\./i.test(location.hostname)) return { kind: 'mall', label: 'NC Mall' };
+            const gal = /^\/gallery\//i.test(path);
+            const who = (path === '/userlookup.phtml' && qs.get('user')) || (path === '/neomessages.phtml' && qs.get('recipient')) || (gal && qs.get('gu')) || '';
+            if (who && who.toLowerCase() !== me) return { kind: 'user', who, gallery: gal, label: gal ? `${who}’s gallery` : who };
+            const src = path === '/inventory.phtml' ? 'inv' : path === '/safetydeposit.phtml' ? 'sdb' : gal ? 'gal' : /^\/stylingchamber/i.test(path) ? 'sc' : '';
+            return src ? { kind: 'import', src, label: `Your ${TOK_SOURCES.find(s => s.key === src)?.label || 'items'}` } : null;
+        })();
+        let ctxBusy = '', mallFail = false, studioFail = false;
+        // The NC Mall now — the list DTI's NC Mall Guide uses — kept 30 minutes in this site's storage
+        let mallP = null;
+        const mallCached = () => { try { const c = JSON.parse(localStorage.getItem('dti_np_mall') || 'null'); return c?.t && Date.now() - c.t < 30 * 60e3 && Array.isArray(c.items) ? c.items : null; } catch (_) { return null; } };
+        function npMallFeed() {
+            return mallP || (mallP = new Promise(res => {
+                const c = mallCached();
+                if (c) return res(c);
+                GM_xmlhttpRequest({ method: 'GET', url: 'https://dtr-itemdb.dti-remix.workers.dev/mall-status', timeout: 20000,
+                    onload: r => {
+                        let items = null;
+                        try { items = JSON.parse(r.responseText).items; } catch (_) {}
+                        if (!Array.isArray(items) || !items.length) { mallP = null; return res(null); }
+                        const slim = items.map(x => ({ id: String(x.item_id), name: x.name, img: x.image || '', price: x.price, dp: x.discountPrice, de: x.discountEnd || '', sb: x.saleBegin || '', se: x.saleEnd || '' }));
+                        try { localStorage.setItem('dti_np_mall', JSON.stringify({ t: Date.now(), items: slim })); } catch (_) {}
+                        res(slim);
+                    },
+                    onerror: () => { mallP = null; res(null); }, ontimeout: () => { mallP = null; res(null); } });
+            }));
+        }
+        const mallNow = r => { const now = Date.now(); return (!r.sb || Date.parse(r.sb) <= now) && (!r.se || Date.parse(r.se) > now); };
+        const mallTag = r => {
+            const now = Date.now();
+            if (r.dp != null && r.de && Date.parse(r.de) > now) return `<em class="sale">${esc(r.dp)} NC · sale</em>`;
+            const left = r.se ? Math.ceil((Date.parse(r.se) - now) / 864e5) : 99;
+            if (left <= 7) return `<em class="soon">leaves in ${left} day${left === 1 ? '' : 's'}</em>`;
+            return `<em>${r.price ? esc(r.price) + ' NC' : 'Free'}</em>`;
+        };
+        // The tokens you want (no catalog needed: the names and pictures My Tokens keeps)
+        const myTokWant = () => { const mine = DTITokens.read(tkScope()).mine; return Object.keys(mine).filter(k => (mine[k].want || 0) > 0).map(k => tokInfo(k, tkCat, mine, new Map())); };
+        const tokPic = i => i.img ? `<img src="${esc(i.img)}" alt="" loading="lazy">` : '<span class="noimg"></span>';
+        const ctxTokRow = (i, seg = 'want') => `<button type="button" class="crow" data-tkgo="${seg}" data-tkkey="${esc(i.key)}" title="Open it in Tokens">${tokPic(i)}<span>${esc(i.name)}</span><em>${i.want ? 'Wanted' : i.own ? 'Owned' : ''}</em></button>`;
+        // → { n: things here for you, tip, body } — from what's already here (the loads it needs start in ctxLoads)
+        function ctxModel() {
+            if (!ctx) return null;
+            if (ctx.kind === 'studio') {
+                const st = tokStudioKeys();
+                if (!st) return { n: 0, body: ctxBusy === 'studio' ? '<div class="msg">Reading the Studio’s rotation…</div>'
+                    : `<div class="cline">${studioFail ? 'Couldn’t reach itemdb for the rotation.' : 'See which of the tokens you want are in the Studio’s rotation (read from itemdb).'}</div><button type="button" class="btn pri" data-studioread>${studioFail ? 'Try again' : 'Check the rotation'}</button>` };
+                const want = myTokWant().filter(i => st.has(i.key));
+                return { n: want.length, tip: `${want.length} token${want.length === 1 ? '' : 's'} you want ${want.length === 1 ? 'is' : 'are'} in the Styling Studio`,
+                    body: (want.length ? `<div class="cline"><b>${want.length}</b> token${want.length === 1 ? '' : 's'} you want ${want.length === 1 ? 'is' : 'are'} in this rotation</div>${want.map(i => ctxTokRow(i, 'studio')).join('')}`
+                        : `<div class="cline">None of the tokens you want are in this rotation.</div>`)
+                        + `<button type="button" class="lnkbtn" data-tkgo="studio">See the whole rotation (${st.size}) ›</button>` };
+            }
+            if (ctx.kind === 'mall') {
+                const seek = seekAll().filter(e => inMine(seekAcct(e)));
+                if (!seek.length) return { n: 0, body: '<div class="cline">Your Seeking list is empty — items on it show here when they’re in the NC Mall.</div>' };
+                const feed = mallCached();
+                if (!feed) return { n: 0, body: mallFail ? '<div class="cline">Couldn’t check the NC Mall right now.</div>' : '<div class="msg">Checking the NC Mall…</div>' };
+                const hits = seek.map(e => ({ e, r: feed.find(r => r.id === String(e.id) && mallNow(r)) })).filter(x => x.r);
+                return { n: hits.length, tip: `${hits.length} item${hits.length === 1 ? '' : 's'} you’re seeking ${hits.length === 1 ? 'is' : 'are'} in the NC Mall`,
+                    body: hits.length ? `<div class="cline"><b>${hits.length}</b> item${hits.length === 1 ? '' : 's'} you’re seeking ${hits.length === 1 ? 'is' : 'are'} in the NC Mall now</div>`
+                        + hits.map(({ e, r }) => `<button type="button" class="crow" data-item="${esc(JSON.stringify({ id: String(e.id), name: e.name || r.name, img: e.img || r.img, nc: true }))}">${(e.img || r.img) ? `<img src="${esc(e.img || r.img)}" alt="">` : '<span class="noimg"></span>'}<span>${esc(e.name || r.name)}</span>${mallTag(r)}</button>`).join('')
+                        : `<div class="cline">Nothing you’re seeking is in the NC Mall right now <small>(${seek.length} on your list)</small>.</div>` };
+            }
+            if (ctx.kind === 'user') {
+                const w = ctx.who.toLowerCase();
+                const theirs = trades().filter(n => (n.trade?.partner?.name || '').toLowerCase() === w).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+                const open = theirs.filter(isOpen);
+                let has = [];
+                if (ctx.gallery) {
+                    const want = new Map(myTokWant().map(i => [i.key, i]));
+                    has = [...new Set([...scrapeNeoItems('gal').keys()].map(tokNorm))].filter(k => want.has(k)).map(k => want.get(k));
+                }
+                const n = open.length + has.length;
+                return { n, tip: [open.length ? `${open.length} open trade${open.length === 1 ? '' : 's'} with ${ctx.who}` : '', has.length ? `they have ${has.length} token${has.length === 1 ? '' : 's'} you want` : ''].filter(Boolean).join(' · '),
+                    body: (has.length ? `<div class="cline">They have <b>${has.length}</b> token${has.length === 1 ? '' : 's'} you want</div>${has.map(i => ctxTokRow(i)).join('')}` : '')
+                        + (open.length ? `<div class="cline">Open trade${open.length === 1 ? '' : 's'} with ${esc(ctx.who)}</div><div class="list">${open.map(tradeRow).join('')}</div>`
+                            : `<div class="cline">${theirs.length ? `${theirs.length} finished trade${theirs.length === 1 ? '' : 's'} with ${esc(ctx.who)} — none open.` : `No trade reports with ${esc(ctx.who)} yet.`}</div>`)
+                        + `<button type="button" class="btn pri" data-newwith>${ICO.plus.replace('<svg ', '<svg width="11" height="11" ')} Trade report with ${esc(ctx.who)}</button>` };
+            }
+            if (ctx.kind === 'import') {
+                const ask = GM_getValue('dti_tok_capture', 0);
+                if (ask && ask.src === ctx.src && Date.now() - ask.at < 30 * 60e3) return { n: 0, body: '<div class="cline">Importing your tokens from this page — the import panel is on the page.</div>' };
+                const cap = DTITokens.capOf(ctx.src, tkScope());
+                return { n: 0, body: `<div class="cline">${cap ? `Last import from here: ${esc(ago(cap.at))}.` : 'Bring the style tokens on this page into My Tokens.'}${ctx.src === 'sdb' ? ' <small>(the SDB’s NC side)</small>' : ctx.src === 'sc' ? ' <small>(with “Show All” on)</small>' : ''}</div>
+                    <button type="button" class="btn pri" data-import>${ICO.down.replace('<svg ', '<svg width="12" height="12" ')} Import tokens from this page</button>` };
+            }
+            return null;
+        }
+        const ctxCount = () => { try { return ctxModel()?.n || 0; } catch (_) { return 0; } };
+        function paintCtx() {
+            const m = ctx && ctxModel();
+            if (!m) return;
+            const fold = !!(GM_getValue('dti_np_ctx_fold', {}) || {})[ctx.kind];
+            body.insertAdjacentHTML('afterbegin', `<section class="ctx${fold ? ' fold' : ''}">
+                <button type="button" class="ctxhd" data-ctxfold aria-expanded="${!fold}" title="${fold ? 'Show' : 'Hide'} what this page has for you">${ICO.here}<b>On this page</b><span>${esc(ctx.label)}</span>${m.n ? `<i>${m.n}</i>` : ''}<em>${fold ? '▾' : '▴'}</em></button>
+                ${fold ? '' : `<div class="ctxbody">${m.body}</div>`}</section>`);
+            ctxLoads();
+        }
+        function ctxLoads() {   // what the card needs, once: the NC Mall list; the Studio's rotation when it's old (you've used it)
+            if (ctxBusy) return;
+            if (ctx?.kind === 'mall' && !mallCached() && !mallFail && seekAll().length) {
+                ctxBusy = 'mall';
+                npMallFeed().then(items => { ctxBusy = ''; mallFail = !items; paintBadge(); if (!panel.hidden && !ui.item) rerender(); });
+            }
+            if (ctx?.kind === 'studio' && tokStudio() && Date.now() - tokStudio().at > TOK_STUDIO_AGE && !studioFail) studioRead();
+        }
+        function studioRead() {
+            if (ctxBusy) return;
+            ctxBusy = 'studio'; studioFail = false;
+            tokStudioRefresh().then(() => { studioFail = false; }).catch(() => { studioFail = true; })
+                .finally(() => { ctxBusy = ''; paintBadge(); if (!panel.hidden && !ui.item) rerender(); });
+        }
+        function rerender() { const top = body.scrollTop; render(); body.scrollTop = top; }
+
+        // ════ Tokens: My Tokens' own data — for the account you're logged into here (or all of yours) ════
+        let tkCat = null, tkCatState = '', tkT = 0;
+        const tkScope = () => acctMany() && !ui.allAcct ? meAcct() : 'all';
+        function tkLoadCat() {   // DTI's token list: this site's own copy (a week), else read from DTI — only once Tokens is used
+            if (tkCatState) return;
+            tkCatState = 'loading';
+            tkCat = tokenCatalogIfCached();
+            loadTokenCatalog().then(c => { tkCat = c; tkCatState = 'ok'; }).catch(() => { tkCatState = tkCat ? 'ok' : 'error'; })
+                .finally(() => { if (!panel.hidden && (ui.tab === 'tokens' || ui.item)) rerender(); });
+        }
+        // One token's info: yours, or one from the Studio's rotation / an item open here that DTI doesn't list (its name and picture)
+        function tkInfoOf(key, also) {
+            const scope = tkScope(), mine = DTITokens.read(scope).mine, imported = tokImported(tkCat, scope);
+            const r = tokStudioKeys()?.get(key);
+            if (!tkCat?.byKey.has(key) && !imported.has(key) && (r || also)) imported.set(key, r ? { name: r[0], img: r[1] ? r[1] + '.gif' : '' } : also);
+            return tokInfo(key, tkCat, mine, imported);
+        }
+        const tkEditHtml = (i, solo) => {
+            const lists = TokLists.raw(), l = TokLists.listOf(lists, i.key);
+            return `<div class="tkedit${solo ? ' solo' : ''}" data-tk="${esc(i.key)}"${solo ? ` data-tkname="${esc(i.name)}" data-tkimg="${esc(i.img || '')}"` : ''}>
+                <div class="tkstep"><span>Own</span><button type="button" data-tkstep="own" data-d="-1"${i.own ? '' : ' disabled'} aria-label="One less">−</button><b>${i.own}</b><button type="button" data-tkstep="own" data-d="1" aria-label="One more">+</button></div>
+                <div class="tkstep"><span>Want</span><button type="button" data-tkstep="want" data-d="-1"${i.want ? '' : ' disabled'} aria-label="One less">−</button><b>${i.want}</b><button type="button" data-tkstep="want" data-d="1" aria-label="One more">+</button></div>
+                ${i.want ? `<label class="tklist"><span>List</span><select data-tklist>${['<option value="">No list</option>', ...lists.lists.map(x => `<option value="${esc(x.id)}"${l?.id === x.id ? ' selected' : ''}>${esc(x.name)}</option>`)].join('')}</select></label>` : ''}
+                ${i.from || i.gone ? `<small class="tkfrom">${esc(tokOwnTitle(i))}</small>` : ''}
+            </div>`;
+        };
+        const tkRow = (i, st, lists) => {
+            const l = i.want ? TokLists.listOf(lists, i.key) : null, open = ui.tk.open === i.key;
+            const meta = [i.series || (i.essence ? 'Essence' : ''), i.species || (i.anyPet ? 'any pet' : '')].filter(Boolean).join(' · ');
+            return `<div class="tkrow${open ? ' open' : ''}" data-tkrow="${esc(i.key)}">
+                <button type="button" class="tkmain" data-tkopen="${esc(i.key)}" aria-expanded="${open}" title="${open ? 'Close' : 'Own, want, its list'}">
+                    ${tokPic(i)}<span class="tktxt"><b>${esc(i.name)}</b>${meta ? `<small>${esc(meta)}</small>` : ''}</span>
+                    <span class="tkmarks">${st?.has(i.key) ? '<i class="av" title="In the Styling Studio right now">Available</i>' : ''}${l ? `<i class="ll" style="--lc:${esc(l.color)}">${esc(l.name)}</i>` : ''}${i.own ? `<i class="ow">Owned${i.own > 1 ? ' ×' + i.own : ''}</i>` : ''}${i.want && !l ? '<i class="wa">Wanted</i>' : ''}</span>
+                </button>
+                ${open ? tkEditHtml(i) : ''}
+            </div>`;
+        };
+        function renderTokens() {
+            tkLoadCat();
+            const scope = tkScope(), mine = DTITokens.read(scope).mine, imported = tokImported(tkCat, scope), st = tokStudioKeys();
+            const yourKeys = new Set([...Object.keys(mine), ...imported.keys()]);
+            if (st) st.forEach((r, k) => { if (!tkCat?.byKey.has(k) && !imported.has(k)) imported.set(k, { name: r[0], img: r[1] ? r[1] + '.gif' : '' }); });
+            const info = k => tokInfo(k, tkCat, mine, imported);
+            const yours = [...yourKeys].map(info), byKey = new Map(yours.map(i => [i.key, i]));
+            const own = yours.filter(i => i.own).sort((a, b) => a.name.localeCompare(b.name)), want = yours.filter(i => i.want).sort((a, b) => a.name.localeCompare(b.name));
+            const studio = st ? [...st.keys()].map(k => byKey.get(k) || info(k)) : [];
+            const seg = ui.tk.seg, q = ui.tk.q.trim().toLowerCase(), lists = TokLists.raw();
+            const hit = i => !q || `${i.name} ${i.series} ${i.species}`.toLowerCase().includes(q);
+            const list = (seg === 'own' ? own : seg === 'studio' ? studio : want).filter(hit);
+            // a search also looks through every token (to mark one you just saw)
+            const shown = new Set(list.map(i => i.key));
+            const more = q.length >= 2 && tkCat && seg !== 'studio' ? [...tkCat.byKey.keys()].filter(k => !shown.has(k) && k.includes(q)).slice(0, 40).map(k => byKey.get(k) || info(k)) : [];
+            const rows = arr => `<div class="list">${arr.map(i => tkRow(i, st, lists)).join('')}</div>`;
+            let main;
+            if (seg === 'want' && !q && lists.lists.length && list.length) {   // by your want lists
+                const by = new Map(lists.lists.map(l => [l.id, []])), none = [];
+                list.forEach(i => { const l = TokLists.listOf(lists, i.key); (l ? by.get(l.id) : none).push(i); });
+                main = lists.lists.filter(l => by.get(l.id).length).map(l => `<div class="sec"><i class="ldot" style="background:${esc(l.color)}"></i>${esc(l.name)} <b>${by.get(l.id).length}</b></div>${rows(by.get(l.id))}`).join('')
+                    + (none.length ? `<div class="sec">Not in a list <b>${none.length}</b></div>${rows(none)}` : '');
+            } else main = list.length ? rows(list) : '';
+            const empty = q ? (more.length ? '' : '<div class="msg">No tokens match</div>')
+                : seg === 'want' ? '<div class="empty"><b>No tokens wanted yet</b>Search any token above and press Want on it — the same Want list as My Tokens.</div>'
+                : seg === 'own' ? '<div class="empty"><b>No tokens owned yet</b>Open your Inventory, SDB, Gallery or Styling Chamber on Neopets — “On this page” up top has an Import button there.</div>'
+                : '';
+            const sd = tokStudio();
+            const studioHead = seg !== 'studio' ? '' : st
+                ? `<div class="tknote"><span>The Styling Studio’s rotation · from <a href="${esc(TOK_STUDIO_URL)}" target="_blank" rel="noopener">itemdb</a>, ${ctxBusy === 'studio' ? 'checking…' : 'checked ' + esc(ago(sd.at))}</span><button type="button" data-studioread${ctxBusy === 'studio' ? ' disabled' : ''}>Check again</button></div>`
+                : `<div class="empty"><b>The Styling Studio’s rotation</b>Which style tokens you can get on Neopets right now — read from itemdb (the same list as “Available now” in My Tokens).<br><br>${ctxBusy === 'studio' ? '<span class="msg">Reading it…</span>' : `<button type="button" class="btn pri" data-studioread>${studioFail ? 'Couldn’t reach itemdb — try again' : 'Read the rotation'}</button>`}</div>`;
+            const ma = acctMany() ? acctGet(meAcct()) : null;
+            body.innerHTML = `${ma ? `<div class="acctbar"><i style="background:${esc(ma.color)}"></i><span>${ui.allAcct ? 'All your accounts' : `${esc(acctName(ma))}’s tokens`}</span><button type="button" class="acctall">${ui.allAcct ? `Just ${esc(acctName(ma))}` : 'All accounts'}</button></div>` : ''}
+                <div class="seg3">${[['want', 'Wanted', want.length], ['own', 'Owned', own.length], ['studio', 'In Studio', st ? st.size : '']].map(([v, l, n]) => `<button type="button" data-tkseg="${v}" class="${seg === v ? 'on' : ''}">${l}${n !== '' ? ` <i>${n}</i>` : ''}</button>`).join('')}</div>
+                ${seg !== 'studio' || st ? `<label class="sbox">${ICO.search}<input class="txt tkq" type="search" placeholder="${seg === 'studio' ? 'Search the rotation…' : 'Search your tokens — or any token'}" value="${esc(ui.tk.q)}" autocomplete="off" spellcheck="false"></label>` : ''}
+                ${studioHead}
+                ${tkCatState === 'loading' && !tkCat ? '<div class="msg">Loading DTI’s token list… (the first time takes a moment)</div>' : tkCatState === 'error' ? '<div class="msg">Couldn’t load DTI’s token list — names and pictures only for now.</div>' : ''}
+                ${main || empty}
+                ${more.length ? `<div class="sec">${list.length ? 'More tokens' : 'Tokens'} <b>${more.length}</b></div>${rows(more)}` : ''}
+                <a class="alllink" href="${D}/items?q=dti-enhance#tokens" target="_blank" rel="noopener">My Tokens on DTI ${ICO.ext}</a>`;
+            const qi = body.querySelector('.tkq');
+            qi?.addEventListener('input', () => {
+                ui.tk.q = qi.value;
+                clearTimeout(tkT);
+                tkT = setTimeout(() => { const p = qi.selectionStart; rerender(); const n = body.querySelector('.tkq'); if (n) { n.focus(); n.setSelectionRange(p, p); } }, 160);
+            });
+        }
+        // after a token changed: its row (Tokens) or its box (an item open here) drawn again — nothing else moves
+        function tkRefresh(key) {
+            if (ui.item) {
+                const box = body.querySelector('.tkedit.solo');
+                if (box) box.outerHTML = tkEditHtml(tkInfoOf(key, { name: box.dataset.tkname, img: box.dataset.tkimg }), true);
+                return;
+            }
+            rerender();
+        }
+
+        // ════ Notes: your notes on items, people and anything — DTI's Notes (trade reports are in Trades) ════
+        let ntT = 0;
+        const noteTitle = n => n.type === 'general' ? (n.title || String(n.text || '').split('\n')[0].slice(0, 70) || 'Untitled note') : (n.ref?.name || (n.type === 'user' ? 'A trader' : 'An item'));
+        const ntRow = n => `<button type="button" class="ntrow" data-ntkey="${esc(n.key)}">
+                ${n.type === 'item' ? (n.ref?.img ? `<img src="${esc(n.ref.img)}" alt="" loading="lazy">` : '<span class="noimg"></span>') : `<span class="ntico">${n.type === 'user' ? ICO.user : ICO.note}</span>`}
+                <span class="nttxt"><span class="ntt"><b>${esc(noteTitle(n))}</b>${n.pinned ? `<i class="pin" title="Pinned">${ICO.pin}</i>` : ''}<em>${esc(ago(n.updated))}</em></span>
+                <small>${esc(String(n.type === 'general' && !n.title ? String(n.text || '').split('\n').slice(1).join(' ') : (n.text || '')).replace(/\s+/g, ' ').slice(0, 120))}</small></span>
+            </button>`;
+        function renderNotes() {
+            const q = ui.nt.q.trim().toLowerCase(), seg = ui.nt.seg;
+            const all = DTINotes.all().filter(n => n && n.type !== 'trade' && !String(n.key || '').startsWith('trade:'));
+            const cnt = t => all.filter(n => !t || n.type === t).length;
+            const list = all.filter(n => (!seg || n.type === seg) && (!q || `${noteTitle(n)} ${n.text || ''}`.toLowerCase().includes(q)))
+                .sort((a, b) => (!!b.pinned - !!a.pinned) || (b.updated || 0) - (a.updated || 0));
+            body.innerHTML = `<button type="button" class="addbtn" data-ntnew>${ICO.plus}Note</button>
+                ${all.length ? `<div class="seg4">${[['', 'All'], ['item', 'Items'], ['user', 'People'], ['general', 'Notes']].map(([v, l]) => `<button type="button" data-ntseg="${v}" class="${seg === v ? 'on' : ''}">${l} <i>${cnt(v)}</i></button>`).join('')}</div>
+                    <label class="sbox">${ICO.search}<input class="txt ntq" type="search" placeholder="Search your notes…" value="${esc(ui.nt.q)}" autocomplete="off" spellcheck="false"></label>` : ''}
+                <div class="list">${list.map(ntRow).join('') || (all.length ? '<div class="msg">No notes match</div>'
+                    : '<div class="empty"><b>No notes yet</b>Write anything down with ＋ Note — or open an item (Search, Seeking) and add a note to it. They’re the same notes as DTI’s Notes.</div>')}</div>
+                <a class="alllink" href="${D}/items?q=dti-enhance#notes" target="_blank" rel="noopener">All your notes on DTI ${ICO.ext}</a>`;
+            const qi = body.querySelector('.ntq');
+            qi?.addEventListener('input', () => {
+                ui.nt.q = qi.value;
+                clearTimeout(ntT);
+                ntT = setTimeout(() => { const p = qi.selectionStart; rerender(); const n = body.querySelector('.ntq'); if (n) { n.focus(); n.setSelectionRange(p, p); } }, 160);
+            });
+        }
+        function renderNoteEd() {
+            const key = ui.nt.key, saved = DTINotes.get(key);
+            const n = saved || { key, type: DTINotes.typeOf(key), title: '', text: '', pinned: false };
+            body.innerHTML = `<div class="edhead">
+                    <button type="button" class="iconbtn" data-ntback title="Back to your notes" aria-label="Back">${ICO.back}</button>
+                    <b class="edtitle">${esc(n.type === 'general' ? (saved ? 'Note' : 'New note') : noteTitle(n))}</b>
+                    <button type="button" class="iconbtn${n.pinned ? ' on' : ''}" data-ntpin title="${n.pinned ? 'Unpin it' : 'Pin it to the top'}" aria-pressed="${!!n.pinned}">${ICO.pin}</button>
+                    <a class="iconbtn" href="${D}/items?q=dti-enhance#notes/${esc(key)}" target="_blank" rel="noopener" title="Open it in DTI’s Notes">${ICO.ext}</a>
+                </div>
+                ${n.type === 'item' && n.ref?.id ? `<button type="button" class="ntitem" data-item="${esc(JSON.stringify({ id: String(n.ref.id), name: n.ref.name || '', img: n.ref.img || '' }))}">${n.ref.img ? `<img src="${esc(n.ref.img)}" alt="">` : ''}<span>${esc(n.ref.name || 'Item')}</span><em>Open ›</em></button>` : ''}
+                ${n.type === 'general' ? `<label class="fld"><span>Title</span><input class="txt ntitle" placeholder="A title (if you like)" maxlength="120" value="${esc(n.title || '')}"></label>` : ''}
+                <label class="fld"><span>${n.type === 'general' ? 'Note' : 'Your note'}</span><textarea class="txt ntext" rows="9" placeholder="Write anything…">${esc(n.text || '')}</textarea></label>
+                <div class="edfoot"><span class="ntsaved">${saved ? 'Saved ' + esc(ago(n.updated)) : 'Saved as you type'}</span><button type="button" class="ndel" data-ntdel${saved ? '' : ' hidden'}>Delete</button></div>`;
+            const ta = body.querySelector('.ntext'), ti = body.querySelector('.ntitle'), msg = body.querySelector('.ntsaved');
+            let t = 0;
+            const save = () => {
+                clearTimeout(t);
+                const cur = DTINotes.get(key), patch = { text: ta.value };
+                if (ti) patch.title = ti.value.trim();
+                if (!cur && !patch.text.trim() && !patch.title) return;
+                if (cur && (cur.text || '') === patch.text && (!ti || (cur.title || '') === patch.title)) return;
+                DTINotes.save(key, patch);
+                const now = DTINotes.get(key);
+                msg.textContent = now ? 'Saved ✓' : 'Empty — removed';
+                body.querySelector('.ndel').hidden = !now;
+            };
+            [ta, ti].filter(Boolean).forEach(el => { el.addEventListener('input', () => { clearTimeout(t); t = setTimeout(save, 600); }); el.addEventListener('change', save); });
+        }
+
+        // ════ One item, here in the panel: Seeking, your lists, a trade, its note — and Own / Want when it's a style token ════
+        let itemLists = null;   // the open item's lists: { id, form, rows: [{ key, label, want, orig, cur }], saving, msg, err }
+        function renderItem() {
+            const it = ui.item, onDti = /^\d+$/.test(String(it.id)), seek = onDti && seekHas(it.id);
+            const note = onDti ? DTINotes.get('item:' + it.id) : null;
+            const tkKey = tokNorm(it.name);
+            const isTok = TOK_ESSENCE_RE.test(tkKey) || !!tkCat?.byKey.has(tkKey) || !!DTITokens.read(tkScope()).mine[tkKey] || !!tokStudioKeys()?.has(tkKey);
+            const ti = isTok ? tkInfoOf(tkKey, { name: it.name, img: it.img || '' }) : null;
+            const open = trades().filter(n => isOpen(n) && inMine(acctOfTrade(n.trade))).sort((a, b) => (b.updated || 0) - (a.updated || 0)).slice(0, 4);
+            body.innerHTML = `<div class="edhead">
+                    <button type="button" class="iconbtn" data-iback title="Back" aria-label="Back">${ICO.back}</button>
+                    <span class="edtitle"></span>
+                    ${onDti ? `<a class="iconbtn" href="${D}/items/${esc(it.id)}" target="_blank" rel="noopener" title="Open it on DTI">${ICO.ext}</a>` : ''}
+                </div>
+                <div class="ihero">${it.img ? `<img src="${esc(it.img)}" alt="">` : '<span class="noimg"></span>'}<div class="ihtxt"><b>${esc(it.name)}</b><span class="imeta">${it.nc ? '<i class="tag">NC</i>' : ''}<span class="val ival"></span></span></div></div>
+                ${onDti ? `<button type="button" class="iseek${seek ? ' on' : ''}" data-iseek aria-pressed="${seek}"><span class="skic">◎</span><span><b>Seeking now</b><small>${seek ? 'On your Seeking list' : 'Your short list of items you want ASAP'}</small></span><i class="sw"></i></button>` : ''}
+                ${ti ? `<div class="sec">Style token</div>${tkEditHtml(ti, true)}` : ''}
+                <div class="sec">Your lists</div>
+                <div class="ilists">${onDti ? '<div class="msg">Loading your lists…</div>' : '<div class="msg">This one isn’t on DTI, so it can’t go on your lists.</div>'}</div>
+                <div class="sec">Add to a trade</div>
+                <div class="itrades">${open.map(n => `<div class="itr"><span title="${esc(titleOf(n))}">${esc(titleOf(n))}</span><button type="button" class="btn" data-itrade="${esc(n.key)}" data-side="give">You give</button><button type="button" class="btn" data-itrade="${esc(n.key)}" data-side="get">You get</button></div>`).join('')}
+                    <div class="itr new"><span>${open.length ? 'A new trade report' : 'Start a trade report'}</span><button type="button" class="btn" data-inew="give">You give</button><button type="button" class="btn" data-inew="get">You get</button></div></div>
+                ${onDti ? `<label class="fld inotef"><span>Your note</span><textarea class="txt inote" placeholder="Anything to remember about this item — the same note as on DTI">${esc(note?.text || '')}</textarea></label>` : ''}`;
+            npNcValue(it.name).then(v => { const el = body.querySelector('.ival'); if (el && v && ui.item === it) el.textContent = capNums(v) ? String(v).replace(/\*$/, '') + ' caps' : v; }).catch(() => {});
+            const ta = body.querySelector('.inote');
+            if (ta) {
+                let t = 0;
+                const save = () => {
+                    clearTimeout(t);
+                    if ((DTINotes.get('item:' + it.id)?.text || '') === ta.value) return;
+                    DTINotes.save('item:' + it.id, { text: ta.value, ref: { id: String(it.id), name: it.name, img: it.img || '' } });
+                };
+                ta.addEventListener('input', () => { clearTimeout(t); t = setTimeout(save, 600); });
+                ta.addEventListener('change', save);
+            }
+            if (onDti) loadItemLists(String(it.id));
+        }
+        // Your DTI lists with this item in them — read from the item's page on DTI (its own "Track this" form) and saved the
+        // way that form saves: only the lists you changed (DTI sets quantities)
+        async function loadItemLists(id) {
+            if (itemLists?.id === id) return paintItemLists();
+            let form = null, failed = false;
+            try { form = new DOMParser().parseFromString(await dtiGetText('/items/' + id, 20000), 'text/html').querySelector('form.user-lists-form'); } catch (_) { failed = true; }
+            const el = body.querySelector('.ilists');
+            if (!el || String(ui.item?.id) !== id) return;
+            if (!form) { el.innerHTML = `<div class="msg">${failed ? 'Couldn’t reach DTI — try again in a moment.' : 'Log in to DTI in this browser to keep lists of your items.'}</div>`; return; }
+            const rows = [...form.querySelectorAll('.closet-hangers-ownership-groups > div')].flatMap(g => {
+                const want = /want/i.test(g.querySelector('h4')?.textContent || '');
+                return [...g.querySelectorAll('li')].map(li => {
+                    const inp = li.querySelector('input[type="number"]');
+                    if (!inp) return null;
+                    const orig = Math.max(0, parseInt(inp.value, 10) || 0);
+                    return { key: inp.name, orig, cur: orig, want, label: /^quantity\[(true|false)\]$/.test(inp.name) ? 'Not in a list' : (li.querySelector('label')?.textContent.trim() || 'List') };
+                }).filter(Boolean);
+            });
+            itemLists = { id, form, rows, saving: false, msg: '', err: false };
+            paintItemLists();
+        }
+        function paintItemLists() {
+            const L = itemLists, el = body.querySelector('.ilists');
+            if (!L || !el || String(ui.item?.id) !== L.id) return;
+            if (!L.rows.length) { el.innerHTML = '<div class="msg">You don’t have any lists on DTI yet.</div>'; return; }
+            const changed = L.rows.filter(r => r.cur !== r.orig).length;
+            const group = want => {
+                const rs = L.rows.map((r, i) => [r, i]).filter(([r]) => r.want === want);
+                return rs.length ? `<div class="lgh">${want ? 'Items you want' : 'Items you own'}</div>` + rs.map(([r, i]) => `<div class="lrow${r.cur ? ' has' : ''}${r.cur !== r.orig ? ' changed' : ''}">
+                    <span title="${esc(r.label)}">${esc(r.label)}</span><span class="qty"><button type="button" data-lq="-1" data-li="${i}"${r.cur ? '' : ' disabled'} aria-label="One less">−</button><b>${r.cur}</b><button type="button" data-lq="1" data-li="${i}" aria-label="One more">+</button></span></div>`).join('') : '';
+            };
+            el.innerHTML = group(true) + group(false)
+                + `<div class="lfoot"><span class="lmsg${L.err ? ' err' : ''}" aria-live="polite">${esc(L.msg)}</span><button type="button" class="btn pri" data-lsave${changed && !L.saving ? '' : ' disabled'}>${L.saving ? 'Saving…' : 'Save'}</button></div>`;
+        }
+        async function saveItemLists() {
+            const L = itemLists, changed = L ? L.rows.filter(r => r.cur !== r.orig) : [];
+            if (!changed.length || L.saving) return;
+            L.saving = true; L.msg = ''; paintItemLists();
+            const token = L.form.querySelector('input[name="authenticity_token"]')?.value || '';
+            const fd = new URLSearchParams({ _method: 'put', authenticity_token: token });
+            changed.forEach(r => fd.set(r.key, String(r.cur)));
+            const ok = await new Promise(res => GM_xmlhttpRequest({
+                method: 'POST', url: new URL(L.form.getAttribute('action') || '', D).href, data: fd.toString(), timeout: 20000,
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': token },
+                onload: r => res(r.status >= 200 && r.status < 400 && !/sign_in|\/login/.test(r.finalUrl || '')),
+                onerror: () => res(false), ontimeout: () => res(false),
+            }));
+            L.saving = false;
+            if (ok) { changed.forEach(r => { r.orig = r.cur; }); L.msg = 'Saved ✓'; L.err = false; }
+            else { L.msg = 'Couldn’t save — try again'; L.err = true; }
+            paintItemLists();
         }
 
         // ── Clicks in the panel ──
         $('.tabs').addEventListener('click', e => {
             const b = e.target.closest('button[data-t]');
             if (!b) return;
-            if (b.dataset.t === ui.tab && ui.tab === 'trades') ui.view = 'list';   // (the Trades tab again: back to the list)
+            if (b.dataset.t === ui.tab && !ui.item) {   // (the tab again: back to its start)
+                if (ui.tab === 'trades') { ui.view = 'list'; ui.draft = null; }
+                if (ui.tab === 'notes') ui.nt.key = '';
+                if (ui.tab === 'tokens') ui.tk.open = '';
+            }
+            ui.item = null; itemLists = null;
             ui.tab = b.dataset.t;
             GM_setValue('dti_np_panel_tab', ui.tab);
             render();
+            body.scrollTop = 0;
             if (ui.tab === 'search') body.querySelector('.sq')?.focus();
         });
+        $('.brand').addEventListener('click', () => showMenu(menu.hidden));
+        panel.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.menu, .brand')) showMenu(false); });
         body.addEventListener('click', async e => {
             const b = e.target.closest('[data-open], [data-st], [data-set], [data-g], [data-gact], [data-seg], [data-q], [data-gbc], [data-rm], [data-skrm], .newbtn, .morebtn, .acctall, .seekoff, .back, .del');
             if (ui.stFor && !e.target.closest('.stmenu, [data-st]')) { ui.stFor = ''; if (!b) render(); }
             if (!b) return;
             const d = b.dataset;
-            if (b.matches('.newbtn')) { ui.view = 'edit'; ui.key = newKey(); render(); body.querySelector('.partner')?.focus(); return; }
-            if (d.open) { ui.view = 'edit'; ui.key = d.open; render(); return; }
+            if (b.matches('.newbtn')) { ui.view = 'edit'; ui.key = newKey(); ui.draft = null; render(); body.querySelector('.partner')?.focus(); return; }
+            if (d.open) { ui.tab = 'trades'; ui.item = null; ui.view = 'edit'; ui.key = d.open; render(); body.scrollTop = 0; return; }   // (from Trades, or On this page)
             if (d.st) { ui.stFor = ui.stFor === d.st ? '' : d.st; render(); return; }
             if (d.set) {
                 const key = ui.stFor, n = tradeOf(key);
                 ui.stFor = '';
-                if (n) saveNote(key, { trade: Object.assign(cleanT(n.trade), { status: d.set }) });
+                if (n) saveNote(key, { trade: Object.assign(cleanTrade(n.trade), { status: d.set }) });
                 render();
                 return;
             }
@@ -27299,7 +27811,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (d.seg) { patchTrade(t => { t.status = d.seg; }); rerenderEditor(); return; }
             if (d.q) { patchTrade(t => { const it = t[d.side][+d.i]; if (it) it.qty = Math.max(1, it.qty + +d.q); }); rerenderEditor(); return; }
             if (d.rm) { patchTrade(t => { t[d.side].splice(+d.rm, 1); }); rerenderEditor(); return; }
-            if (d.gbc) { patchTrade(t => { const ex = t[d.side].find(o => o.id === d.gbc); if (ex) ex.qty++; else t[d.side].push({ id: d.gbc, name: GBCS[d.gbc].name, img: '', qty: 1 }); }); rerenderEditor(); return; }
+            if (d.gbc) { patchTrade(t => { const ex = t[d.side].find(o => o.id === d.gbc); if (ex) ex.qty++; else t[d.side].push({ id: d.gbc, name: GBC_KINDS[d.gbc].name, img: '', qty: 1 }); }); rerenderEditor(); return; }
             if (b.matches('.del')) {
                 if (!b.classList.contains('sure')) { b.classList.add('sure'); b.textContent = 'Delete it for good?'; return; }
                 removeNote(ui.key);
@@ -27319,7 +27831,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const items = await asTradeItems(pick.map(i => g.items[i]));
             const side = g.dir === 'in' ? 'get' : 'give';
             const key = b.dataset.gact === 'add' ? b.dataset.key : newKey(), prev = tradeOf(key);
-            const t = prev ? cleanT(prev.trade) : { partner: g.who ? { name: g.who } : null, give: [], get: [], status: 'pending', date: g.date || today(), acct: acctMany() ? acctOfNp(g.np) : '' };
+            const t = prev ? cleanTrade(prev.trade) : { partner: g.who ? { name: g.who } : null, give: [], get: [], status: 'pending', date: g.date || today(), acct: acctMany() ? acctOfNp(g.np) : '' };
             items.forEach(it => { const ex = t[side].find(o => o.id === it.id); if (ex) ex.qty += it.qty; else t[side].push(it); });
             t.status = t.give.length && t.get.length ? 'done' : 'pending';   // (both ways done: the trade is complete — as in Notes)
             saveNote(key, { trade: t });
@@ -27329,49 +27841,149 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (!panel.hidden) render();
         }
 
-        // ── Moving, tucking, opening ──
+        // ── The newer parts' clicks: an item, tokens, notes, On this page ──
+        body.addEventListener('click', e => {
+            const t = e.target;
+            if (t.closest('[data-skrm], [data-skadd], .go, .stmenu, [data-st], [data-open]')) return;   // (the trades' handler has those, or it's a link)
+            const b = t.closest('[data-item], [data-iback], [data-iseek], [data-lq], [data-lsave], [data-itrade], [data-inew], [data-tkseg], [data-tkopen], [data-tkstep], [data-studioread], [data-tkgo], [data-ntkey], [data-ntnew], [data-ntseg], [data-ntback], [data-ntpin], [data-ntdel], [data-ctxfold], [data-import], [data-newwith]');
+            if (!b || b.disabled) return;
+            const d = b.dataset;
+            if ('item' in d) {
+                let it = null;
+                try { it = JSON.parse(d.item); } catch (_) {}
+                if (!it?.name) return;
+                ui.itemTop = body.scrollTop; ui.item = it; itemLists = null;
+                render(); body.scrollTop = 0;
+                return;
+            }
+            if ('iback' in d) { ui.item = null; itemLists = null; render(); body.scrollTop = ui.itemTop || 0; return; }
+            if ('iseek' in d) {
+                const it = ui.item, on = !seekHas(it.id);
+                seekSave(items => { if (on) items[it.id] = { name: it.name, img: it.img || '', at: Date.now(), note: '', acct: acctMany() ? meAcct() : '', ord: -Date.now() }; else delete items[it.id]; });
+                b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+                b.querySelector('small').textContent = on ? 'On your Seeking list' : 'Your short list of items you want ASAP';
+                paintBadge();
+                return;
+            }
+            if ('lq' in d) { const r = itemLists?.rows[+d.li]; if (r) { r.cur = Math.max(0, Math.min(999, r.cur + Number(d.lq))); itemLists.msg = ''; paintItemLists(); } return; }
+            if ('lsave' in d) { saveItemLists(); return; }
+            if (d.itrade) {
+                const n = tradeOf(d.itrade), it = ui.item, side = d.side;
+                if (!n || !it) return;
+                const tr = cleanTrade(n.trade), ex = tr[side].find(o => o.id === String(it.id));
+                if (ex) ex.qty++; else tr[side].push({ id: String(it.id), name: it.name, img: it.img || '', qty: 1 });
+                saveNote(d.itrade, { trade: tr });
+                b.classList.add('done'); b.textContent = 'Added \u2713';
+                setTimeout(() => { if (b.isConnected) { b.classList.remove('done'); b.textContent = side === 'give' ? 'You give' : 'You get'; } }, 1600);
+                return;
+            }
+            if (d.inew) {
+                const it = ui.item, key = newKey();
+                saveNote(key, { trade: { partner: null, give: [], get: [], status: 'planned', date: today(), [d.inew]: [{ id: String(it.id), name: it.name, img: it.img || '', qty: 1 }] } });
+                ui.item = null; itemLists = null; ui.tab = 'trades'; GM_setValue('dti_np_panel_tab', 'trades');
+                ui.view = 'edit'; ui.key = key; ui.draft = null;
+                render(); body.scrollTop = 0; body.querySelector('.partner')?.focus();
+                return;
+            }
+            if (d.tkseg) { ui.tk.seg = d.tkseg; ui.tk.open = ''; GM_setValue('dti_np_tk_seg', d.tkseg); render(); body.scrollTop = 0; return; }
+            if (d.tkopen) { ui.tk.open = ui.tk.open === d.tkopen ? '' : d.tkopen; rerender(); return; }
+            if (d.tkstep) {
+                const box = b.closest('[data-tk]'), key = box?.dataset.tk;
+                if (!key) return;
+                const i = tkInfoOf(key, box.dataset.tkname ? { name: box.dataset.tkname, img: box.dataset.tkimg || '' } : null), delta = Number(d.d), meta = { name: i.name, img: i.img };
+                if (d.tkstep === 'own') tokOwnStep(i, delta, meta, tkCat, tkScope());
+                else DTITokens.bump(key, 'want', delta, meta, tkScope());
+                tkRefresh(key); paintBadge();
+                return;
+            }
+            if ('studioread' in d) { studioFail = false; studioRead(); rerender(); return; }
+            if (d.tkgo) {
+                ui.item = null; ui.tab = 'tokens'; GM_setValue('dti_np_panel_tab', 'tokens');
+                ui.tk.seg = d.tkgo; ui.tk.q = ''; ui.tk.open = d.tkkey || '';
+                render();
+                body.querySelector(`.tkrow.open`)?.scrollIntoView({ block: 'center' });
+                return;
+            }
+            if (d.ntkey) { ui.nt.key = d.ntkey; render(); body.scrollTop = 0; return; }
+            if ('ntnew' in d) { ui.nt.key = 'note:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); render(); body.querySelector('.ntext')?.focus(); return; }
+            if ('ntseg' in d) { ui.nt.seg = d.ntseg; render(); return; }
+            if ('ntback' in d) { ui.nt.key = ''; render(); return; }
+            if ('ntpin' in d) {
+                const n = DTINotes.get(ui.nt.key), on = !n?.pinned;
+                DTINotes.save(ui.nt.key, { pinned: on });
+                b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); b.title = on ? 'Unpin it' : 'Pin it to the top';
+                const del = body.querySelector('.ndel'); if (del) del.hidden = !DTINotes.get(ui.nt.key);
+                return;
+            }
+            if ('ntdel' in d) {
+                if (!b.classList.contains('sure')) { b.classList.add('sure'); b.textContent = 'Delete it for good?'; return; }
+                DTINotes.remove(ui.nt.key); ui.nt.key = ''; render();
+                return;
+            }
+            if ('ctxfold' in d) { const f = GM_getValue('dti_np_ctx_fold', {}) || {}; f[ctx.kind] = !f[ctx.kind]; GM_setValue('dti_np_ctx_fold', f); rerender(); return; }
+            if ('import' in d) { const at = Date.now(); GM_setValue('dti_tok_capture', { at, src: ctx.src }); openPanel(false); runTokenCapture(ctx.src, at); return; }
+            if ('newwith' in d) {
+                ui.item = null; ui.tab = 'trades'; GM_setValue('dti_np_panel_tab', 'trades');
+                ui.view = 'edit'; ui.key = newKey(); ui.draft = { key: ui.key, partner: ctx.who };
+                render(); body.scrollTop = 0; body.querySelector('[data-add="give"]')?.focus();
+            }
+        });
+        body.addEventListener('change', e => {   // a wanted token's list
+            if (!e.target.matches('[data-tklist]')) return;
+            const key = e.target.closest('[data-tk]')?.dataset.tk;
+            if (key) { TokLists.put(key, e.target.value); tkRefresh(key); }
+        });
+        body.addEventListener('keydown', e => {   // rows that open an item: Enter / Space too
+            if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.sr[data-item], .skrow[data-item]')) { e.preventDefault(); e.target.click(); }
+        });
+
+        // ── Moving and opening: a click opens the panel; a drag slides the tab up or down the right edge ──
         place();
         addEventListener('resize', () => { place(); if (!panel.hidden) fit(); });   // (only moves it: a phone's keyboard opening resizes too)
-        // drag (a press that moves) or click (one that doesn't)
         let drag = null;
         fab.addEventListener('pointerdown', e => {
             if (e.button !== 0) return;
-            const r = host.getBoundingClientRect();
-            drag = { x0: e.clientX, y0: e.clientY, dx: e.clientX - r.left, dy: e.clientY - r.top, moved: false };
+            drag = { y0: e.clientY, dy: e.clientY - (host.getBoundingClientRect().top + FAB_H / 2), moved: false };
             fab.setPointerCapture(e.pointerId);
         });
         fab.addEventListener('pointermove', e => {
             if (!drag) return;
-            if (!drag.moved && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 5) return;
-            drag.moved = true;
-            openPanel(false);
-            hostCss('left', Math.min(Math.max(0, e.clientX - drag.dx), innerWidth - 70) + 'px'); hostCss('right', 'auto');
-            hostCss('top', Math.min(Math.max(8, e.clientY - drag.dy), innerHeight - 50) + 'px');
+            if (!drag.moved && Math.abs(e.clientY - drag.y0) < 5) return;
+            if (!drag.moved) { drag.moved = true; openPanel(false); wrap.classList.add('drag'); }
+            place(e.clientY - drag.dy);
         });
-        fab.addEventListener('pointerup', e => {
+        const endDrag = e => {
             if (!drag) return;
             const moved = drag.moved;
             drag = null;
-            if (!moved) return openPanel(panel.hidden);
-            pos.side = e.clientX < innerWidth / 2 ? 'left' : 'right';
-            pos.y = Math.min(0.96, Math.max(0.04, e.clientY / innerHeight));
-            GM_setValue('dti_np_fab_pos', { side: pos.side, y: pos.y });
+            wrap.classList.remove('drag');
+            if (!moved) { if (e.type === 'pointerup') openPanel(panel.hidden); return; }
+            const r = host.getBoundingClientRect();
+            pos.y = Math.min(0.96, Math.max(0.04, (r.top + FAB_H / 2) / innerHeight));
+            GM_setValue('dti_np_fab_pos', { y: pos.y });
             place();
-        });
-        x.addEventListener('click', () => { min = true; GM_setValue('dti_np_fab_min', true); place(); });
-        tab.addEventListener('click', () => { min = false; GM_setValue('dti_np_fab_min', false); place(); });
+        };
+        fab.addEventListener('pointerup', endDrag);
+        fab.addEventListener('pointercancel', endDrag);
+        fab.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(panel.hidden); } });
         // a click anywhere else, or Esc, closes it; keys typed in it stay in it (not Neopets' page)
         document.addEventListener('pointerdown', e => { if (!panel.hidden && !e.composedPath().includes(host)) openPanel(false); }, true);
         document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.hidden) openPanel(false); });
         panel.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') { openPanel(false); fab.focus(); } });
         ['keyup', 'keypress'].forEach(t => panel.addEventListener(t, e => e.stopPropagation()));
-        // live: trade reports changed on DTI (or another tab), gifts recorded, tracking turned on or off
+        // live: your notes, tokens or Seeking list changed on DTI (or another tab), gifts recorded, tracking turned on or off
+        // (drawn again only on a list — not while you type, or in an open trade, note or item)
         if (typeof GM_addValueChangeListener === 'function') {
-            const relist = () => { paintBadge(); if (!panel.hidden && ui.tab === 'trades' && ui.view === 'list' && !ui.stFor) render(); };
-            GM_addValueChangeListener('dti_notes', (k, o, n, remote) => { if (remote) relist(); });
-            GM_addValueChangeListener('dti_np_gifts', relist);
-            GM_addValueChangeListener('dti_track_gifts', relist);
+            const typing = () => { const a = root.activeElement; return !!a && a.matches('input:not([type="checkbox"]), textarea, select'); };
+            const relist = () => {
+                paintBadge();
+                if (panel.hidden || ui.stFor || ui.item || typing() || (ui.tab === 'trades' && ui.view === 'edit') || (ui.tab === 'notes' && ui.nt.key)) return;
+                rerender();
+            };
+            ['dti_notes', 'dti_tokens', 'dti_tok_cap', 'dti_tok_lists', 'dti_tok_studio', 'dti_seeking'].forEach(k => GM_addValueChangeListener(k, (kk, o, n, remote) => { if (remote) relist(); }));
+            ['dti_np_gifts', 'dti_track_gifts'].forEach(k => GM_addValueChangeListener(k, relist));
         }
+        if (ctx?.kind === 'mall' && seekAll().length) ctxLoads();   // (the NC Mall: is anything you're seeking in it? — for the dot)
         paintBadge();
     }
 
