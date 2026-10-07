@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      1.5
+// @version      1.6
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -3040,7 +3040,7 @@
         const queue = [], pending = new Map();
         let map = null, active = 0, saveT = 0;
         const load = () => { if (!map) { try { map = JSON.parse(localStorage.getItem(LS) || '{}') || {}; } catch (_) { map = {}; } } return map; };
-        const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(LS, JSON.stringify(map)); } catch (_) {} }, 500); };
+        const save = () => { if (!saveT) saveT = setTimeout(() => { saveT = 0; try { localStorage.setItem(LS, JSON.stringify(map)); } catch (_) {} }, 1500); };   // (while measuring, too)
         // [z, cx, cy]; false = can't be read (kept); null = couldn't fetch it now (asked again another time)
         function measure(url) {
             return new Promise(res => GM_xmlhttpRequest({
@@ -3069,9 +3069,9 @@
                 onerror: () => res(null), ontimeout: () => res(null),
             }));
         }
-        const pump = () => {   // four at a time
-            while (active < 4 && queue.length) {
-                const [url, done] = queue.shift();
+        const pump = () => {   // six at a time, the latest asked for first (what's on screen now, not what was scrolled past)
+            while (active < 6 && queue.length) {
+                const [url, done] = queue.pop();
                 active++;
                 measure(url).then(v => {
                     if (v !== null) { load()[keyOf(url)] = v; save(); }
@@ -3085,6 +3085,7 @@
                 const v = this.get(url);
                 if (v !== undefined) return Promise.resolve(v || null);
                 if (!pending.has(url)) pending.set(url, new Promise(done => { queue.push([url, done]); pump(); }));
+                else { const i = queue.findIndex(q => q[0] === url); if (i >= 0) queue.push(queue.splice(i, 1)[0]); }   // (wanted again: next)
                 return pending.get(url);
             },
         };
@@ -3092,10 +3093,10 @@
     const tokCropCss = c => `--z:${c[0]};--cx:${c[1]};--cy:${c[2]}`;
     function tokImg(base) { return base ? (/^https?:/.test(base) ? base : `https://images.neopets.com/items/${base}`) : ''; }
     const TOK_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="6.1"/><path d="M8 4.6l1 2.05 2.25.33-1.63 1.58.39 2.24L8 9.74l-2.01 1.06.39-2.24L4.75 6.98 7 6.65z" fill="currentColor" stroke="none"/></svg>';
-    const TOK_SOURCES = [
-        { key: 'inv', label: 'Inventory', href: 'https://www.neopets.com/inventory.phtml' },
-        { key: 'gal', label: 'Gallery', href: 'https://www.neopets.com/gallery/index.phtml' },
-        { key: 'sc',  label: 'Styling Chamber', href: 'https://www.neopets.com/stylingchamber/' },
+    const TOK_SOURCES = [   // (icons: the same Neopets ones as the import panel / the DTI button's Pages)
+        { key: 'inv', label: 'Inventory', href: 'https://www.neopets.com/inventory.phtml', icon: 'https://images.neopets.com/themes/h5/basic/images/v2/inventory-icon.png' },
+        { key: 'gal', label: 'Gallery', href: 'https://www.neopets.com/gallery/index.phtml', icon: 'https://images.neopets.com/themes/h5/basic/images/v3/gallery-icon.svg' },
+        { key: 'sc',  label: 'Styling Chamber', href: 'https://www.neopets.com/stylingchamber/', icon: 'https://images.neopets.com/themes/h5/newyears/images/chamber-icon.png' },
     ];
     // Side accounts: Main's hand-set numbers are `mine`, a side account's `acct[id]`; imports are kept per Neopets
     // username (`inv@username`; `inv` alone = from before side accounts, Main's). read() / capsIn() give the account
@@ -3192,13 +3193,13 @@
             const name = essence ? adjClean : `${adjClean} ${sp(spId)}`.trim();
             if (!imgNames.has(img)) imgNames.set(img, new Set());
             imgNames.get(img).add(name);
-            return { id, img, name, essence, isNew, species: sp(spId), series: essence ? kind : isNew ? 'New' : ser.replace(/^<new\??>\s*/i, '').trim() };
+            return { id, img, name, essence, isNew, species: sp(spId), color: essence ? '' : slim.colors?.[colorId] || '', series: essence ? kind : isNew ? 'New' : ser.replace(/^<new\??>\s*/i, '').trim() };
         }).filter(Boolean);
         const byKey = new Map(), byImg = new Map(), bySid = new Map();
         rows.forEach(r => {
             const key = tokNorm(r.name);
             let t = byKey.get(key);
-            if (!t) { t = { key, name: r.name, img: r.img, species: r.species, series: r.series, essence: r.essence, isNew: r.isNew, sid: r.id, sids: [] }; byKey.set(key, t); }
+            if (!t) { t = { key, name: r.name, img: r.img, species: r.species, color: r.color, series: r.series, essence: r.essence, isNew: r.isNew, sid: r.id, sids: [] }; byKey.set(key, t); }
             if (r.id > t.sid) t.sid = r.id;   // newest style id — for "Newest first"
             bySid.set(r.id, t);
             t.sids.push(r.id);   // (one style per pet it's for — essences and Treasured are each for one species)
@@ -3219,7 +3220,7 @@
         // A name that reads like a style token: [Prismatic …: ]<series> … <species>
         const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const looks = new RegExp(`^(?:prismatic [^:]+: )?(?:${series.map(s => esc(s.toLowerCase())).join('|')}) .+ (?:${speciesNames.map(s => esc(s.toLowerCase())).join('|')})$`);
-        return _tokCatBuilt = { at: slim.at, byKey, byImg, bySid, series, speciesNames, looks, styleOf, spName: sp, colorName: id => slim.colors?.[id] || '' };
+        return _tokCatBuilt = { at: slim.at, byKey, byImg, bySid, series, speciesNames, looks, styleOf, spName: sp, colorName: id => slim.colors?.[id] || '', colorNames: Object.values(slim.colors || {}) };
     }
     // The token a captured item is, in the catalog's words when the catalog knows it (by name, else by picture)
     function tokKeyFor(item, cat) {
@@ -3306,6 +3307,17 @@
     }
 
     // Everything known about one token: catalog facts + your numbers
+    function tokNameParts(name, cat) {   // [series, color] from "[Prismatic …: ]<series> <color> <species>", when it reads like that
+        let n = String(name).replace(/^prismatic [^:]+:\s*/i, '').trim();
+        const lo = () => n.toLowerCase();
+        const ser = (cat?.series || []).filter(x => lo().startsWith(x.toLowerCase() + ' ')).sort((a, b) => b.length - a.length)[0];
+        if (!ser) return ['', ''];
+        n = n.slice(ser.length + 1);
+        const spc = (cat?.speciesNames || []).find(x => lo().endsWith(' ' + x.toLowerCase()));
+        if (spc) n = n.slice(0, -(spc.length + 1));
+        n = n.trim();
+        return [ser, (cat?.colorNames || []).find(c => c.toLowerCase() === n.toLowerCase()) || n];
+    }
     function tokInfo(key, cat, mine, imported) {
         const t = cat?.byKey.get(key), m = mine[key], im = imported.get(key);
         const name = t?.name || im?.name || m?.name || key;
@@ -3313,9 +3325,10 @@
         let species = t?.species || '';
         if (!t && !essence) species = (cat?.speciesNames || []).find(s => name.toLowerCase().endsWith(' ' + s.toLowerCase())) || '';
         const imp = im ? (im.inv || 0) + (im.gal || 0) + (im.sc || 0) : 0;
+        const parts = !t && !essence ? tokNameParts(name, cat) : null;
         return {
-            key, name, essence, species, anyPet: !!t?.anyPet, known: !!t, isNew: !!t?.isNew,
-            series: t?.series || (essence ? (/^treasured/i.test(name) ? 'Treasured' : 'Essence') : ''), sid: t?.sid || 0, date: t ? tokDateOf(t) : '',
+            key, name, essence, species, anyPet: !!t?.anyPet, known: !!t, isNew: !!t?.isNew, color: t ? t.color || '' : parts?.[1] || '',
+            series: t?.series || (essence ? (/^treasured/i.test(name) ? 'Treasured' : 'Essence') : parts?.[0] || ''), sid: t?.sid || 0, date: t ? tokDateOf(t) : '',
             img: tokImg(t?.img || im?.img || tokBase(m?.img)),
             hand: m?.own || 0, imp, own: (m?.own || 0) + imp, want: m?.want || 0, from: im || null,
         };
@@ -3520,7 +3533,7 @@
     function mountTokensApp(host, { inModal = false } = {}) {
         const SEARCH = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14"/></svg>';
         const DOWN = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v8M4.8 7.6 8 10.8l3.2-3.2M3 13.5h10"/></svg>';
-        const ui = Object.assign({ view: 'mine', kind: '', state: '', q: '', species: '', series: '', sort: 'name', size: 'big' }, GM_getValue('dti_tok_ui', {}) || {});   // (Big tiles until another size is picked)
+        const ui = Object.assign({ view: 'mine', kind: '', state: '', q: '', species: '', series: '', color: '', sort: 'name', size: 'big' }, GM_getValue('dti_tok_ui', {}) || {});   // (Big tiles until another size is picked)
         ui.q = '';
         const app = document.createElement('div');
         app.id = 'dti-tokens-app';
@@ -3539,7 +3552,8 @@
                 <label class="dti-tk-search">${SEARCH}<input type="search" placeholder="Search tokens…" autocomplete="off" spellcheck="false"></label>
                 <select class="dti-tk-sel" data-ui="species"><option value="">All species</option></select>
                 <select class="dti-tk-sel" data-ui="series"><option value="">All series</option></select>
-                <select class="dti-tk-sel" data-ui="sort"><option value="name">Name</option><option value="species">Species</option><option value="new">Newest</option><option value="own">Most owned</option></select>
+                <select class="dti-tk-sel" data-ui="color"><option value="">All colors</option></select>
+                <select class="dti-tk-sel" data-ui="sort"><option value="name">Name</option><option value="species">Species</option><option value="color">Color</option><option value="new">Newest</option><option value="own">Most owned</option></select>
                 <div class="dti-tk-seg dti-tk-size" data-ui="size">
                     <button type="button" data-v="" title="Small tiles" aria-label="Small tiles"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="1.5" y="1.5" width="3.6" height="3.6" rx="1"/><rect x="6.2" y="1.5" width="3.6" height="3.6" rx="1"/><rect x="10.9" y="1.5" width="3.6" height="3.6" rx="1"/><rect x="1.5" y="6.2" width="3.6" height="3.6" rx="1"/><rect x="6.2" y="6.2" width="3.6" height="3.6" rx="1"/><rect x="10.9" y="6.2" width="3.6" height="3.6" rx="1"/><rect x="1.5" y="10.9" width="3.6" height="3.6" rx="1"/><rect x="6.2" y="10.9" width="3.6" height="3.6" rx="1"/><rect x="10.9" y="10.9" width="3.6" height="3.6" rx="1"/></svg></button>
                     <button type="button" data-v="big" title="Big tiles \u2014 each style worn on a pet" aria-label="Big tiles"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="1.5" y="1.5" width="5.8" height="5.8" rx="1.4"/><rect x="8.7" y="1.5" width="5.8" height="5.8" rx="1.4"/><rect x="1.5" y="8.7" width="5.8" height="5.8" rx="1.4"/><rect x="8.7" y="8.7" width="5.8" height="5.8" rx="1.4"/></svg></button>
@@ -3566,6 +3580,7 @@
             };
             opts(spSel, 'All species', cat?.speciesNames || []);
             opts(seSel, 'All series', cat?.series || []);
+            colorOpts(opts);
             $('select[data-ui="sort"]').value = ui.sort;
             app.querySelectorAll('.dti-tk-sel').forEach(sel => {
                 const cs = sel.closest('.dti-csel');
@@ -3573,15 +3588,36 @@
                 makeCustomSelect(sel, { className: 'dti-tk-csel' });
             });
         };
+        // Colors: the ones there are in the series picked (and the view: My tokens = yours)
+        function colorOpts(opts) {
+            const sel = $('select[data-ui="color"]');
+            const vals = [...new Set(allInfos().filter(i => !i.essence && i.color && (!ui.series || i.series === ui.series)).map(i => i.color))].sort((a, b) => a.localeCompare(b));
+            opts(sel, 'All colors', vals);
+            if (ui.color && !vals.includes(ui.color)) { ui.color = ''; saveUi(); }
+        }
+        function refillColors() {
+            const sel = $('select[data-ui="color"]');
+            colorOpts((s, first, vals) => {
+                s.innerHTML = `<option value="">${first}</option>` + vals.map(v => `<option value="${noteEsc(v)}">${noteEsc(v)}</option>`).join('');
+                s.value = vals.includes(ui.color) ? ui.color : '';
+            });
+            const cs = sel.closest('.dti-csel');
+            if (cs) { cs.replaceWith(sel); delete sel.dataset.dtiCselWired; }
+            makeCustomSelect(sel, { className: 'dti-tk-csel' });
+        }
         app.addEventListener('change', e => {
             const sel = e.target.closest('.dti-tk-sel');
             if (!sel) return;
-            ui[sel.dataset.ui] = sel.value; saveUi(); render();
+            ui[sel.dataset.ui] = sel.value; saveUi();
+            if (sel.dataset.ui === 'series') refillColors();
+            render();
         });
         app.querySelectorAll('.dti-tk-seg').forEach(seg => seg.addEventListener('click', e => {
             const b = e.target.closest('button[data-v]');
             if (!b) return;
-            ui[seg.dataset.ui] = b.dataset.v; saveUi(); render();
+            ui[seg.dataset.ui] = b.dataset.v; saveUi();
+            if (seg.dataset.ui === 'view') refillColors();
+            render();
         }));
         const searchInp = $('.dti-tk-search input');
         let qT = 0;
@@ -3592,8 +3628,8 @@
         function bigPic(info) {
             const big = ['big', 'three', 'two', 'full'].includes(ui.size) && tokBigSrc(info.img);
             if (!big) return info.img ? `<img src="${noteEsc(info.img)}" alt="" loading="lazy">` : '';
-            const c = ui.size !== 'full' && TokCrop.get(big);
-            return `<img src="${noteEsc(big)}" data-small="${noteEsc(info.img)}"${c ? ` class="crop" style="${tokCropCss(c)}"` : ''} alt="" loading="lazy">`;
+            const c = ui.size !== 'full' && TokCrop.get(big);   // (not measured yet: kept hidden until it is, so it doesn't jump in size)
+            return `<img src="${noteEsc(big)}" data-small="${noteEsc(info.img)}"${c ? ` class="crop" style="${tokCropCss(c)}"` : ui.size !== 'full' && c === undefined ? ' class="wait"' : ''} alt="" loading="lazy">`;
         }
         function card(info) {
             const meta = [info.series || (info.essence ? 'Essence' : ''), info.species || (info.anyPet ? 'any pet' : '')].filter(Boolean).join(' · ') || 'Style token';
@@ -3616,7 +3652,7 @@
         // (a big picture that isn't there → the token's own picture)
         grid.addEventListener('error', e => {
             const img = e.target;
-            if (img.tagName === 'IMG' && img.dataset.small && img.getAttribute('src') !== img.dataset.small) { img.classList.remove('crop'); img.removeAttribute('style'); img.src = img.dataset.small; img.classList.add('small'); }
+            if (img.tagName === 'IMG' && img.dataset.small && img.getAttribute('src') !== img.dataset.small) { img.classList.remove('crop', 'wait'); img.removeAttribute('style'); img.src = img.dataset.small; img.classList.add('small'); }
         }, true);
         grid.addEventListener('click', e => {
             const tryBtn = e.target.closest('.dti-tk-try');
@@ -3687,12 +3723,14 @@
                 if (ui.kind === 'style' && i.essence) return false;
                 if (ui.species && i.species !== ui.species) return false;
                 if (ui.series && i.series !== ui.series) return false;
-                if (q && !`${i.name} ${i.series} ${i.species}`.toLowerCase().includes(q)) return false;
+                if (ui.color && i.color !== ui.color) return false;
+                if (q && !`${i.name} ${i.series} ${i.color} ${i.species}`.toLowerCase().includes(q)) return false;
                 return true;
             });
             const by = {
                 name: (a, b) => a.name.localeCompare(b.name),
                 species: (a, b) => (a.species || '~').localeCompare(b.species || '~') || a.name.localeCompare(b.name),
+                color: (a, b) => (a.color || '~').localeCompare(b.color || '~') || (a.species || '~').localeCompare(b.species || '~') || a.name.localeCompare(b.name),
                 new: (a, b) => (b.sid || 0) - (a.sid || 0) || a.name.localeCompare(b.name),
                 own: (a, b) => b.own - a.own || b.want - a.want || a.name.localeCompare(b.name),
             }[ui.sort] || ((a, b) => a.name.localeCompare(b.name));
@@ -3705,7 +3743,7 @@
             if (ui.view === 'mine' && cat) tokEnsureDates(list.map(i => cat.byKey.get(i.key)).filter(Boolean), cat, paintDates);
             empty.hidden = list.length > 0;
             if (!list.length) {
-                const filtered = ui.kind || ui.species || ui.series || ui.q || (ui.view === 'mine' && ui.state);
+                const filtered = ui.kind || ui.species || ui.series || ui.color || ui.q || (ui.view === 'mine' && ui.state);
                 empty.innerHTML = filtered
                     ? '<b>Nothing matches</b><span>Try another search or filter.</span>'
                     : ui.view === 'mine'
@@ -3759,14 +3797,19 @@
         // Bigger tiles: pictures not measured yet are measured as their cards come into view, then cropped
         const cropObs = new IntersectionObserver(es => es.forEach(e => {
             if (!e.isIntersecting) return;
-            cropObs.unobserve(e.target);
             const img = e.target.querySelector('.dti-tk-pic img[data-small]');
-            if (!img || img.classList.contains('small')) return;
+            if (!img || img.classList.contains('small')) { cropObs.unobserve(e.target); return img?.classList.remove('wait'); }
+            if (img.dataset.asked) return void TokCrop.of(img.getAttribute('src'));   // (back in view, still waiting: next in line)
+            img.dataset.asked = '1';
+            const show = setTimeout(() => img.classList.remove('wait'), 8000);   // (a slow one shows anyway)
             TokCrop.of(img.getAttribute('src')).then(c => {
-                if (!c || !img.isConnected || img.classList.contains('small') || !['big', 'three', 'two'].includes(ui.size)) return;
-                img.style.cssText = tokCropCss(c); img.classList.add('crop');
+                clearTimeout(show);
+                cropObs.unobserve(e.target);
+                if (!img.isConnected) return;
+                if (c && !img.classList.contains('small') && ['big', 'three', 'two'].includes(ui.size)) { img.style.cssText = tokCropCss(c); img.classList.add('crop'); }
+                img.classList.remove('wait');
             });
-        }), { rootMargin: '300px' });
+        }), { rootMargin: '1000px' });   // (well before it scrolls into view)
         empty.addEventListener('click', e => {
             const b = e.target.closest('[data-go]');
             if (!b) return;
@@ -3784,6 +3827,7 @@
                     const c = DTITokens.capOf(s.key);
                     const n = c ? (s.key === 'gal' ? c.items.filter(it => tokIsToken(it, cat)).length : c.items.length) : 0;
                     return `<div class="dti-tk-imp-row" data-src="${s.key}">
+                        <img class="dti-tk-imp-ico" src="${s.icon}" alt="" loading="lazy">
                         <div><b>${s.label}</b><small>${c ? `${n} token${n === 1 ? '' : 's'} · ${tokAgo(c.at)}` : 'Not imported yet'}</small></div>
                         ${c ? `<button type="button" class="dti-tk-imp-clear" title="Forget this import">${POP_ICO.close}</button>` : ''}
                         <button type="button" class="dti-tk-btn primary" data-open="${s.key}">${c ? 'Update' : 'Import'}</button>
@@ -4100,6 +4144,7 @@
             }
             .dti-tk-imp-h { padding: 8px 10px 6px; font-size: 10.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); }
             .dti-tk-imp-row { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 10px; border-radius: 10px; }
+            .dti-tk-imp-ico { width: 30px; height: 30px; flex-shrink: 0; margin-right: 2px; object-fit: contain; }
             .dti-tk-imp-row:hover { background: var(--surface-2); }
             .dti-tk-imp-row > div { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
             .dti-tk-imp-row b { font-size: 13px; font-weight: 700; color: var(--text); }
@@ -4171,7 +4216,8 @@
             .dti-tk-tmlist { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; }
             .dti-tk-tmlist a { padding: 6px 8px; border-radius: 7px; font-size: 13px; font-weight: 600; color: var(--text) !important; text-decoration: none !important; }
             .dti-tk-tmlist a:hover { background: var(--surface-2); color: var(--accent-text, var(--accent)) !important; }
-            .dti-tk-pic img { transition: transform .15s; }
+            .dti-tk-pic img { transition: transform .15s, opacity .2s; }
+            .dti-tk-pic img.wait { opacity: 0; }
             .dti-tk-pic:hover img { transform: scale(1.07); }
             .dti-tks-strip img { cursor: zoom-in; }
             #dti-tk-preview {
@@ -9711,6 +9757,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['1.6', [
+            'My Tokens: filter by Color (its list follows the series you pick — Nostalgic › Halloween, say) or sort by it. Tokens DTI doesn’t have yet get their series and color from their name',
+            'My Tokens: bigger tiles no longer jump in size as you scroll — each picture appears once it’s sized to its card, the ones on screen first, and the sizes are remembered for next time',
+            'My Tokens › Import from Neopets shows each place’s Neopets icon',
+        ]],
         ['1.5', [
             'Side accounts (\u2699 \u203a Neopets): name your Neopets accounts, say which DTI lists are whose, and switch between them where your username is \u2014 My Items, tokens, Neopets imports, trade reports, Trade Finder and Neofriends follow the account you pick, or show them all together',
             'Seeking: your short list of the items you want NOW (More \u203a Seeking, and a panel on My Items) \u2014 add from any item\u2019s \u201cAdd to your lists\u201d button, its popup or its page; drag to set priority, add notes, see who\u2019s offering, copy the list as text for the boards. Trade Finder puts it first (and ranks people who have it higher), Neofriends and the NC Mall alerts point it out, the DTI button on Neopets has a Seeking tab, and NC board posts that mention it are highlighted',
@@ -13773,7 +13824,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     return sel;
                 };
                 const spSel = mk('species', 'All species', cat?.speciesNames || []), seSel = mk('series', 'All series', cat?.series || []);
-                _rbTokPick = () => GM_setValue('dti_tok_ui', { ...(GM_getValue('dti_tok_ui', {}) || {}), view: 'all', kind: '', species: spSel.value, series: seSel.value });
+                _rbTokPick = () => GM_setValue('dti_tok_ui', { ...(GM_getValue('dti_tok_ui', {}) || {}), view: 'all', kind: '', species: spSel.value, series: seSel.value, color: '' });
                 const goBtn = document.createElement('button');
                 goBtn.className = 'dti-sc-btn'; goBtn.type = 'button'; goBtn.textContent = 'Go';
                 goBtn.addEventListener('click', () => { _rbTokPick(); location.href = '/terms#tokens'; });
