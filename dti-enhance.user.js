@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      2.1
+// @version      2.2
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -297,28 +297,34 @@
         const load = () => { if (!map) { try { map = JSON.parse(localStorage.getItem(LS) || '{}') || {}; } catch (_) { map = {}; } } return map; };
         const save = () => { if (!saveT) saveT = setTimeout(() => { saveT = 0; try { localStorage.setItem(LS, JSON.stringify(map)); } catch (_) {} }, 1500); };   // (while measuring, too)
         // [z, cx, cy]; false = can't be read (kept); null = couldn't fetch it now (asked again another time)
+        // [z, cx, cy] of the pet in a picture (an ImageBitmap) | false (nothing there but the white around it)
+        function cropOf(bmp) {
+            const N = 150;
+            const c = document.createElement('canvas'); c.width = c.height = N;
+            const g = c.getContext('2d', { willReadFrequently: true });
+            g.drawImage(bmp, 0, 0, N, N);
+            const d = g.getImageData(0, 0, N, N).data;
+            let x0 = N, y0 = N, x1 = -1, y1 = -1;
+            for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+                const i = (y * N + x) * 4;
+                if (d[i + 3] > 24 && !(d[i] > 242 && d[i + 1] > 242 && d[i + 2] > 242)) {   // (not see-through, not the white around it)
+                    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+                }
+            }
+            if (x1 < 0) return false;
+            const span = Math.max(x1 - x0 + 1, y1 - y0 + 1) / N;
+            const z = Math.max(1, Math.min(2.6, 0.87 / span));   // (the pet fills 87% of the tile; never shrunk, at most 2.6×)
+            return [+z.toFixed(3), +((x0 + x1 + 1) / 2 / N).toFixed(3), +((y0 + y1 + 1) / 2 / N).toFixed(3)];
+        }
         function measure(url) {
             return new Promise(res => GM_xmlhttpRequest({
                 method: 'GET', url, responseType: 'blob', timeout: 20000,
                 onload: async r => {
                     if (r.status !== 200 || !r.response) return res(r.status === 404 ? false : null);
                     try {
-                        const bmp = await createImageBitmap(r.response), N = 150;
-                        const c = document.createElement('canvas'); c.width = c.height = N;
-                        const g = c.getContext('2d', { willReadFrequently: true });
-                        g.drawImage(bmp, 0, 0, N, N); bmp.close?.();
-                        const d = g.getImageData(0, 0, N, N).data;
-                        let x0 = N, y0 = N, x1 = -1, y1 = -1;
-                        for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-                            const i = (y * N + x) * 4;
-                            if (d[i + 3] > 24 && !(d[i] > 242 && d[i + 1] > 242 && d[i + 2] > 242)) {   // (not see-through, not the white around it)
-                                if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
-                            }
-                        }
-                        if (x1 < 0) return res(false);
-                        const span = Math.max(x1 - x0 + 1, y1 - y0 + 1) / N;
-                        const z = Math.max(1, Math.min(2.6, 0.87 / span));   // (the pet fills 87% of the tile; never shrunk, at most 2.6×)
-                        res([+z.toFixed(3), +((x0 + x1 + 1) / 2 / N).toFixed(3), +((y0 + y1 + 1) / 2 / N).toFixed(3)]);
+                        const bmp = await createImageBitmap(r.response), v = cropOf(bmp);
+                        bmp.close?.();
+                        res(v);
                     } catch (_) { res(false); }
                 },
                 onerror: () => res(null), ontimeout: () => res(null),
@@ -336,6 +342,8 @@
         };
         return {
             get: url => load()[keyOf(url)],   // [z, cx, cy] | false | undefined (not measured yet)
+            put(url, v) { load()[keyOf(url)] = v; save(); },   // (measured elsewhere — TokThumb)
+            cropOf,
             of(url) {
                 const v = this.get(url);
                 if (v !== undefined) return Promise.resolve(v || null);
@@ -346,6 +354,77 @@
         };
     })();
     const tokCropCss = c => `--z:${c[0]};--cx:${c[1]};--cy:${c[2]}`;
+    // A style worn on a pet, made small for a tile: its big picture cropped to the pet and drawn at the tile's exact size
+    // (px = screen pixels) with the canvas's best smoothing — a browser shrinking a 600px picture by itself leaves jagged
+    // outlines. Each one is drawn once and kept in IndexedDB (DTICache 'tthumb:<picture>:<px>', ~10KB), so a style seen
+    // before shows at once. Making one = one download (through Tampermonkey, like TokCrop; the crop is measured from it
+    // when it isn't known yet) — itemdb doesn't cache these, about half a second each — twelve at a time; `urgent` ones
+    // (on screen) go before the rest. One itemdb has no picture of is remembered too ('none'). → Promise<object URL | ''>
+    const TokThumb = (() => {
+        const made = new Map(), hot = [], cold = [];
+        let active = 0;
+        const pump = () => {
+            while (active < 12 && (hot.length || cold.length)) {
+                active++;
+                (hot.length ? hot : cold).shift().run().then(() => { active--; pump(); });
+            }
+        };
+        const draw = (bmp, crop, px) => new Promise(res => {
+            // (closer in than TokCrop's 87%: the pet fills 94% of a small tile — one already filling its picture stays whole)
+            const [z0, cx, cy] = crop || [1, .5, .5], z = z0 > 1 ? z0 * 0.94 / 0.87 : 1, w = 1 / z;
+            const l = Math.min(Math.max(cx - w / 2, 0), 1 - w), t = Math.min(Math.max(cy - w / 2, 0), 1 - w);
+            const c = document.createElement('canvas'); c.width = c.height = px;
+            const g = c.getContext('2d');
+            g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+            g.drawImage(bmp, l * bmp.width, t * bmp.height, w * bmp.width, w * bmp.height, 0, 0, px, px);
+            c.toBlob(b => res(b), 'image/webp', 0.92);
+        });
+        const keyOf = (big, px) => 'tthumb:' + String(big).split('/').pop() + ':' + px;
+        return {
+            get(big, px, urgent) {
+                const k = big + '|' + px;
+                let e = made.get(k);
+                if (e) {
+                    if (urgent && !e.urgent) {   // (now on screen: ahead of the rest)
+                        e.urgent = true;
+                        const i = cold.findIndex(j => j.k === k);
+                        if (i >= 0) hot.push(cold.splice(i, 1)[0]);
+                    }
+                    return e.p;
+                }
+                let resolve;
+                e = { urgent: !!urgent, p: new Promise(r => { resolve = r; }) };
+                made.set(k, e);
+                e.p.then(u => { if (!u) made.delete(k); });   // (couldn't: asked again another time)
+                DTICache.get(keyOf(big, px)).then(kept => {
+                    if (kept === 'none') return resolve('');   // (itemdb has no picture of it: the token)
+                    if (kept instanceof Blob && kept.size) return resolve(URL.createObjectURL(kept));
+                    const job = { k, run: () => new Promise(fin => GM_xmlhttpRequest({
+                        method: 'GET', url: big, responseType: 'blob', timeout: 20000,
+                        onload: async r => {
+                            let url = '';
+                            if (r.status === 404) DTICache.set(keyOf(big, px), 'none');
+                            try {
+                                if (r.status === 200 && r.response) {
+                                    const bmp = await createImageBitmap(r.response);
+                                    let crop = TokCrop.get(big);
+                                    if (crop === undefined) { crop = TokCrop.cropOf(bmp); TokCrop.put(big, crop); }
+                                    const blob = await draw(bmp, crop, px);
+                                    bmp.close?.();
+                                    if (blob) { url = URL.createObjectURL(blob); DTICache.set(keyOf(big, px), blob); }
+                                }
+                            } catch (_) {}
+                            resolve(url); fin();
+                        },
+                        onerror: () => { resolve(''); fin(); }, ontimeout: () => { resolve(''); fin(); },
+                    })) };
+                    (e.urgent ? hot : cold).push(job);
+                    pump();
+                });
+                return e.p;
+            },
+        };
+    })();
     function tokImg(base) { return base ? (/^https?:/.test(base) ? base : `https://images.neopets.com/items/${base}`) : ''; }
     const TOK_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="6.1"/><path d="M8 4.6l1 2.05 2.25.33-1.63 1.58.39 2.24L8 9.74l-2.01 1.06.39-2.24L4.75 6.98 7 6.65z" fill="currentColor" stroke="none"/></svg>';
     const TOK_SORT_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v10M2.5 10.5 5 13l2.5-2.5M11 13V3M8.5 5.5 11 3l2.5 2.5"/></svg>';
@@ -11581,6 +11660,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['2.2', [
+            'Customs: the Styles pictures are smoother (no jagged edges) and a little closer in, and they no longer flicker as they appear — a tile shows its picture once it’s ready, with a soft pulse while it loads',
+            'Customs: the Styles pictures load much faster — the whole list starts loading as soon as you open Styles (what’s on screen first), and each picture is remembered, so the next time they’re all there at once',
+        ]],
         ['2.1', [
             'Color filter (My Items and Customs): a new look — the button names the color you picked, and the palette shows every color as a named swatch in a clear shade',
             'Customs: Styles opens as a grid of sharp pictures — each style worn on a pet, not the small blurry token (List is still a click away, and remembered)',
@@ -25093,42 +25176,62 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             pop.querySelectorAll('.chakra-tabs__tab-panel form label:not([title])').forEach(l => { l.title = l.textContent.trim(); });
             if (on) sharpenStyles();
         };
-        // The grid's pictures: each style worn on a pet at 600px (itemdb's preview, as My Tokens' big tiles), cropped to the
-        // pet — not Neopets' 80px token (blurry blown up, with its hanger in the corner). Swapped in as they scroll into view,
-        // once the crop is known (so it doesn't jump); one that won't load goes back to the token picture.
-        const CAN_CROP = CSS.supports('object-view-box', 'inset(10%)');
-        let hqObs = null, srcObs = null;
-        const unsharpen = img => { img.removeAttribute('srcset'); img.removeAttribute('sizes'); img.style.removeProperty('object-view-box'); };
-        const sharpen = img => {
+        // The grid's pictures: each style worn on a pet (itemdb's 600px preview, as My Tokens' big tiles) cropped to the pet
+        // and drawn at the tile's size (TokThumb) — not Neopets' 80px token (blurry blown up, with its hanger in the
+        // corner). All of them are asked for as soon as the grid shows, the ones on screen first, so they're ready before
+        // they're scrolled to. A tile stays empty until its picture is ready, then fades in (no token first, then a swap);
+        // one that can't be made — or is still missing after 6s on screen — shows the token.
+        let srcObs = null;
+        const hqObs = new WeakMap();   // (the scrolling form → its IntersectionObserver)
+        const unsharpen = img => { img.removeAttribute('srcset'); img.removeAttribute('sizes'); delete img.dataset.dtiHqDone; };
+        const thumbOf = img => {
             const src = img.getAttribute('src') || '', big = tokBigSrc(src);
+            // (screen pixels, rounded up to 16; the layout width too, as the popover is still growing in while it opens)
+            const css = Math.max(img.getBoundingClientRect().width, img.offsetWidth) || 112, px = Math.min(600, Math.ceil(css * (window.devicePixelRatio || 1) / 16) * 16);
+            return { src, big, css, px };
+        };
+        const sharpen = img => {
+            const { src, big, css, px } = thumbOf(img);
             img.dataset.dtiHq = src;
-            if (!big) return;
-            const swap = c => {
-                if (!img.isConnected || img.dataset.dtiHq !== src) return;
-                img.addEventListener('error', () => { if (img.dataset.dtiHq === src) unsharpen(img); }, { once: true });
-                img.sizes = '120px'; img.srcset = big + ' 600w';
-                if (!c || !CAN_CROP) return;
-                const [z, cx, cy] = c, w = 1 / z, l = Math.min(Math.max(cx - w / 2, 0), 1 - w), t = Math.min(Math.max(cy - w / 2, 0), 1 - w);
-                const pc = v => (v * 100).toFixed(2) + '%';
-                img.style.setProperty('object-view-box', `inset(${pc(t)} ${pc(1 - l - w)} ${pc(1 - t - w)} ${pc(l)})`);
-            };
-            const c = TokCrop.get(big);
-            if (c !== undefined) swap(c); else TokCrop.of(big).then(swap);
+            const show = () => { if (img.dataset.dtiHq === src) img.dataset.dtiHqDone = '1'; };
+            if (!big) return show();
+            TokThumb.get(big, px).then(url => {
+                if (!url) return show();
+                const pre = new Image(); pre.src = url;   // (decoded first, so it shows the moment it's put in)
+                pre.decode().catch(() => {}).then(() => {
+                    if (!img.isConnected || img.dataset.dtiHq !== src) return;
+                    img.sizes = Math.round(css) + 'px'; img.srcset = `${url} ${px}w`;
+                    show();
+                });
+            });
+        };
+        const watch = img => {   // (on screen, or a couple of rows from it: to the front of the line)
+            const root = img.closest('form');
+            let io = hqObs.get(root);
+            if (!io) {
+                io = new IntersectionObserver(es => es.forEach(e => {
+                    if (!e.isIntersecting) return;
+                    const img = e.target, { src, big, px } = thumbOf(img);
+                    io.unobserve(img);
+                    if (big) TokThumb.get(big, px, true);
+                    setTimeout(() => { if (img.dataset.dtiHq === src && !img.dataset.dtiHqDone) img.dataset.dtiHqDone = '1'; }, 6000);   // (a slow connection: the token meanwhile)
+                }), { root, rootMargin: '0px 0px 260px 0px' });
+                hqObs.set(root, io);
+            }
+            io.observe(img);
         };
         const sharpenStyles = () => {
             const panel = pop.querySelectorAll('.chakra-tabs__tab-panel')[1];
             const imgs = panel ? panel.querySelectorAll('form img[src*="images.neopets.com/items/"]:not([data-dti-hq-watch])') : [];
             if (!imgs.length) return;
-            if (!hqObs) {
-                hqObs = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { hqObs.unobserve(e.target); sharpen(e.target); } }));
-                // (DTI showing another style in the same picture: the token again, then that style's big one)
-                srcObs = new MutationObserver(ms => ms.forEach(m => {
-                    const img = m.target;
-                    if (img.dataset.dtiHq === undefined || img.dataset.dtiHq === img.getAttribute('src')) return;
-                    unsharpen(img); delete img.dataset.dtiHq; hqObs.observe(img);
-                }));
-            }
-            imgs.forEach(img => { img.dataset.dtiHqWatch = '1'; hqObs.observe(img); srcObs.observe(img, { attributes: true, attributeFilter: ['src'] }); });
+            // (DTI showing another style in the same picture: that style's picture instead)
+            if (!srcObs) srcObs = new MutationObserver(ms => ms.forEach(m => {
+                const img = m.target;
+                if (img.dataset.dtiHq === undefined || img.dataset.dtiHq === img.getAttribute('src')) return;
+                unsharpen(img); watch(img); sharpen(img);
+            }));
+            imgs.forEach(img => { img.dataset.dtiHqWatch = '1'; watch(img); srcObs.observe(img, { attributes: true, attributeFilter: ['src'] }); });
+            imgs.forEach(sharpen);   // (all of them, top to bottom; the observer then moves the ones on screen ahead)
         };
         const tryAddToggle = () => {
             const stylesPanel = pop.querySelectorAll('.chakra-tabs__tab-panel')[1];
@@ -26482,6 +26585,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 padding: 6px !important; font-size: 0 !important; background: #fff !important;
             }
             .chakra-popover__content[data-dti-grid="1"] form label > div > img { width: 100% !important; height: 100% !important; box-shadow: none !important; border-radius: 8px !important; }
+            /* a picture waiting for its sharp version stays hidden, then fades in (no token first, then a swap) */
+            .chakra-popover__content[data-dti-grid="1"] form label > div > img[data-dti-hq-watch]:not([data-dti-hq-done]) { opacity: 0 !important; }
+            .chakra-popover__content[data-dti-grid="1"] form label > div > img[data-dti-hq-done] { animation: dti-hq-in .22s ease-out; }
+            @keyframes dti-hq-in { from { opacity: 0; } }
+            /* (still loading: a soft pulse where the picture will be — the tile's own background is fixed) */
+            .chakra-popover__content[data-dti-grid="1"] form label > div:has(> img[data-dti-hq-watch]:not([data-dti-hq-done]))::before {
+                content: ''; position: absolute; inset: 6px; border-radius: 8px; background: var(--surface-2); pointer-events: none;
+                animation: dti-hq-wait 1.1s ease-in-out infinite alternate;
+            }
+            @keyframes dti-hq-wait { from { opacity: .3; } to { opacity: 1; } }
             .chakra-popover__content[data-dti-grid="1"] form label > div:not(:has(img)) { font-size: 12px !important; font-weight: 700 !important; color: var(--text-muted) !important; background: var(--surface-2) !important; }
             .chakra-popover__content[data-dti-grid="1"] form label > div > div:first-child { display: none !important; }
             .chakra-popover__content[data-dti-grid="1"] form label:hover > div { background: #fff !important; }
