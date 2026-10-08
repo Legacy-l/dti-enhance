@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      2.2
+// @version      2.3
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -426,6 +426,25 @@
         };
     })();
     function tokImg(base) { return base ? (/^https?:/.test(base) ? base : `https://images.neopets.com/items/${base}`) : ''; }
+    // A style token in a trade report (DTI has no tokens): id 'tok:' + the token's key (its name in lower case), its name and
+    // picture — its cap value comes by name, like any item's
+    const TOK_TRADE_ID = 'tok:';
+    const isTokTrade = x => String(x?.id || '').startsWith(TOK_TRADE_ID);
+    const tokTradeItem = t => ({ id: TOK_TRADE_ID + t.key, name: t.name, img: tokImg(/^mall_bg_circle/i.test(t.img || '') && t.art ? t.art : t.img) });
+    // The catalog's tokens with every word typed at the start of a word of their name: the full name first, then the ones
+    // starting with what's typed, then the rest — shortest first. → [{ t, rank }]
+    function tokSearch(cat, q, limit = 6) {
+        const s = tokNorm(q), words = s.split(/[\s:]+/).filter(Boolean);
+        if (!cat || !words.length) return [];
+        const out = [];
+        for (const t of cat.byKey.values()) {
+            const ws = t.key.split(/[\s:]+/);
+            if (words.every(w => ws.some(x => x.startsWith(w)))) out.push({ t, rank: t.key === s ? 0 : t.key.startsWith(s) ? 1 : 2 });
+        }
+        return out.sort((a, b) => a.rank - b.rank || a.t.key.length - b.t.key.length || a.t.key.localeCompare(b.t.key)).slice(0, limit);
+    }
+    // A gift's item that's a token (its name, else its picture) → its trade entry; null if it isn't one
+    const tokTradeFor = (it, cat) => { const t = cat && (cat.byKey.get(tokNorm(it.name)) || cat.byImg.get(tokBase(it.img))); return t ? { ...tokTradeItem(t), qty: 1 } : null; };
     const TOK_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="6.1"/><path d="M8 4.6l1 2.05 2.25.33-1.63 1.58.39 2.24L8 9.74l-2.01 1.06.39-2.24L4.75 6.98 7 6.65z" fill="currentColor" stroke="none"/></svg>';
     const TOK_SORT_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v10M2.5 10.5 5 13l2.5-2.5M11 13V3M8.5 5.5 11 3l2.5 2.5"/></svg>';
     const TOK_SOURCES = [   // (icons: the same Neopets ones as the import panel / the DTI button's Pages)
@@ -562,9 +581,10 @@
         const r = anchor.getBoundingClientRect();
         menu.style.left = Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8)) + 'px';
         menu.style.top = (r.bottom + 6 + menu.offsetHeight > innerHeight ? Math.max(8, r.top - menu.offsetHeight - 6) : r.bottom + 6) + 'px';
-        const out = e => { if (!menu.contains(e.target) && !anchor.contains(e.target)) close(); };
-        const key = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
-        const scr = e => { if (!menu.contains(e.target)) close(); };
+        const above = () => !!document.getElementById('dti-tkpub-dlg');   // (the popup over it — Share › "Share on my DTI page…": it stays open, and updates after)
+        const out = e => { if (!above() && !menu.contains(e.target) && !anchor.contains(e.target)) close(); };
+        const key = e => { if (e.key === 'Escape' && !above()) { e.preventDefault(); e.stopPropagation(); close(); } };
+        const scr = e => { if (!above() && !menu.contains(e.target)) close(); };
         function close() {
             menu.remove();
             document.removeEventListener('mousedown', out, true); document.removeEventListener('keydown', key, true); window.removeEventListener('scroll', scr, true);
@@ -2177,6 +2197,35 @@
             : `<span class="${cls} dti-nt-ico">${info.type === 'user' ? NOTE_USER : info.type === 'trade' ? NOTE_TRADE : NOTE_DOC}</span>`;
     }
     // A general note or trade with nothing in it isn't worth keeping
+    // ── NC gifts → trade reports: one trade is often several gifts each way ──
+    // Your other gifts with the same person (on the same account) that still have items to put in a report — not "just a
+    // gift" — from two weeks either side, the closest first; `near` = within two days of this one (ticked to go in with it)
+    function giftSiblings(all, g) {
+        const who = String(g?.who || '').toLowerCase();
+        if (!who) return [];
+        const gap = x => Math.abs((x.at || 0) - (g.at || 0));
+        return (all || []).filter(x => x && x.uid !== g.uid && !x.gift && String(x.who || '').toLowerCase() === who && (x.np || '') === (g.np || '')
+                && (x.items || []).some((_, i) => !(x.used || []).includes(i)) && gap(x) < 14 * 864e5)
+            .sort((a, b) => gap(a) - gap(b)).map(x => ({ g: x, near: gap(x) <= 2 * 864e5 }));
+    }
+    // Trade reports with them that gifts can go into: still open, or completed within a week of the gift (a trade's last
+    // gifts can come after it's been marked complete) — not ones that fell through; the latest first
+    function giftTargets(notes, who, at) {
+        const w = String(who || '').toLowerCase();
+        if (!w) return [];
+        const recent = n => Math.max(n.updated || 0, Date.parse((n.trade?.date || '') + 'T12:00:00') || 0) >= (at || Date.now()) - 7 * 864e5;
+        return (notes || []).filter(n => n?.trade && String(n.trade.partner?.name || '').toLowerCase() === w && n.trade.status !== 'off' && (n.trade.status !== 'done' || recent(n)))
+            .sort((a, b) => (b.updated || 0) - (a.updated || 0));
+    }
+    // A trade report in a few words — what each side has ("Eerie Ghost Kougra +1 ⇄ Acorn Hat") — so two with the same
+    // person can be told apart
+    function tradeSummary(t) {
+        const side = list => !list?.length ? 'nothing yet' : list[0].name + (list.length > 1 ? ` +${list.length - 1}` : '');
+        return `${side(t?.give)} \u21c4 ${side(t?.get)}`;
+    }
+    // The report a gift most likely goes in: the one with them last changed within two days of it (gifts accepted one at a
+    // time) — else a new one (two trades with someone at once: you pick, and Undo is there)
+    function giftDefaultTarget(targets, g) { return (targets || []).find(n => (n.updated || 0) >= (g.at || Date.now()) - 2 * 864e5)?.key || 'new'; }
     function noteIsBlank(n) {
         if (!n || n.title || String(n.text || '').trim()) return false;
         if (n.type === 'general') return true;
@@ -2456,7 +2505,7 @@
                 const unlisted = /^quantity\[(true|false)\]$/.test(inp.name);
                 const orig = Math.max(0, parseInt(inp.value, 10) || 0);
                 return { key: inp.name, orig, cur: orig, unlisted, want, label: unlisted ? 'Not in a list' : (li.querySelector('label')?.textContent.trim() || 'List') };
-            }).filter(r => r && !(r.label === TOK_PUB_NAME && !r.orig)) };
+            }).filter(r => r && !((r.label === TOK_PUB_NAME || r.key === tokPubDedicatedKey()) && !r.orig)) };
         }).filter(g => g.rows.length).sort((a, b) => wantFirst ? b.want - a.want : a.want - b.want);
         const rows = groups.flatMap(g => g.rows);
         foot.innerHTML = (mine ? `<a class="dti-lp-mine" target="_blank" title="Open Your Items" href="${noteEsc(form.querySelector('h3 a')?.getAttribute('href') || '/users/current-user/closet')}">Your Items \u2197</a>` : '')
@@ -2967,6 +3016,7 @@
         // (side accounts: the picked account's — gifts know which Neopets account got or sent them)
         const giftsAll = () => (GM_getValue('dti_np_gifts', []) || []).filter(g => acctActive() === 'all' || acctOfNp(g.np) === acctActive());
         const saveGifts = list => GM_setValue('dti_np_gifts', list);
+        const giftsRaw = () => GM_getValue('dti_np_gifts', []) || [];   // (every account's — what's saved back)
         const giftWho = g => g.who || 'someone';
         function renderGiftList() {
             const listEl = $('.dti-nx-list'), on = GM_getValue('dti_track_gifts', false), q = st.q;
@@ -2988,12 +3038,16 @@
         }
         // The gift's items as trade entries: DTI's own item when it has one (exact name), else a plain entry
         async function giftItemsForTrade(list) {
+            let cat = tokenCatalogIfCached();
             return Promise.all(list.map(async it => {
+                const tok = tokTradeFor(it, cat);   // (a style token: DTI doesn't have it)
+                if (tok) return tok;
                 try {
                     const d = await fetch('/items.json?per_page=10&q=' + encodeURIComponent('"' + it.name + '"'), { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
                     const hit = (d?.items || []).find(x => x.name.toLowerCase() === it.name.toLowerCase());
                     if (hit) return { id: String(hit.id), name: hit.name, img: hit.thumbnail_url || it.img || '', qty: 1 };
                 } catch (_) {}
+                if (!cat) { cat = await loadTokenCatalog().catch(() => null); const tk = tokTradeFor(it, cat); if (tk) return tk; }   // (not on DTI: a token after all?)
                 return { id: 'np-' + it.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60), name: it.name, img: it.img || '', qty: 1 };
             }));
         }
@@ -3003,11 +3057,20 @@
         function renderGiftDetail(d, uid) {
             const g = giftsAll().find(x => x.uid === uid);
             if (!g) { d.innerHTML = `<div class="dti-nx-placeholder">${NOTE_GIFT}<b>That gift isn\u2019t here any more</b></div>`; return; }
-            const who = (g.who || '').toLowerCase(), used = new Set(g.used || []), state = giftState(g);
-            const openTrades = who ? DTINotes.all().filter(n => n.type === 'trade' && (n.trade?.partner?.name || '').toLowerCase() === who && !['done', 'off'].includes(n.trade?.status)).sort((a, b) => b.updated - a.updated) : [];
+            const used = new Set(g.used || []), state = giftState(g);
+            // the reports with them it can go into, and their other gifts that may be from the same trade
+            const targets = giftTargets(DTINotes.all().filter(n => n.type === 'trade'), g.who, g.at).slice(0, 4);
+            const dest0 = giftDefaultTarget(targets, g);
+            const sibs = g.gift ? [] : giftSiblings(giftsAll(), g);
+            const destRow = n => {
+                const t = cleanTrade(n.trade), stl = (TRADE_STATUS.find(([v]) => v === t.status) || TRADE_STATUS[0])[1];
+                return `<label class="dti-gift-dest"><input type="radio" name="dti-gdest" value="${noteEsc(n.key)}"${n.key === dest0 ? ' checked' : ''}><span><b>${noteEsc(noteInfo(n.key).title)}</b>
+                    <small>${noteEsc(tradeSummary(t))} \u00b7 ${stl}${t.date ? ' \u00b7 ' + noteEsc(noteDate(Date.parse(t.date + 'T12:00:00'))) : ''}</small></span></label>`;
+            };
             const reports = [...new Set(g.notes || (g.note ? [g.note] : []))].filter(k => DTINotes.get(k));
             const when = g.date ? noteDate(Date.parse(g.date + 'T12:00:00')) : noteDate(g.at);
             const left = g.items.map((_, i) => i).filter(i => !used.has(i));
+            const pic = it => it.img ? `<img src="${noteEsc(it.img)}" alt="">` : `<span class="dti-gift-noimg">${NOTE_GIFT}</span>`;
             d.classList.add('is-gift');
             d.innerHTML = `
                 <div class="dti-nx-dhead">
@@ -3021,44 +3084,76 @@
                 ${g.gift ? '' : left.length ? `<div class="dti-gift-pick">${left.length > 1 ? 'Tick the items that were part of a trade:' : 'This item:'}</div>` : ''}
                 <div class="dti-gift-items">${g.items.map((it, i) => `<label class="dti-gift-item${used.has(i) ? ' used' : ''}${g.gift ? ' gift' : ''}">
                         ${!g.gift && !used.has(i) ? `<input type="checkbox" data-i="${i}" checked>` : ''}
-                        ${it.img ? `<img src="${noteEsc(it.img)}" alt="">` : `<span class="dti-gift-noimg">${NOTE_GIFT}</span>`}
+                        ${pic(it)}
                         <b>${noteEsc(it.name)}</b>${used.has(i) ? '<i>In a report</i>' : ''}</label>`).join('')}</div>
+                ${sibs.length && left.length ? `<div class="dti-gift-pick">Your other gifts with ${noteEsc(giftWho(g))} \u2014 tick the ones from this same trade <button type="button" class="dti-gift-tickall">Tick all</button></div>
+                <div class="dti-gift-items">${sibs.map(({ g: x }) => x.items.map((it, i) => (x.used || []).includes(i) ? '' : `<label class="dti-gift-item sib">
+                        <input type="checkbox" data-g="${noteEsc(x.uid)}" data-i="${i}">
+                        ${pic(it)}
+                        <b>${noteEsc(it.name)}</b><i class="${x.dir}">${x.dir === 'in' ? '\u2193 Received' : '\u2191 Sent'} \u00b7 ${noteEsc(noteAgo(x.at))}</i></label>`).join('')).join('')}</div>` : ''}
+                ${!g.gift && left.length ? `<div class="dti-gift-pick">Put them in:</div>
+                <div class="dti-gift-dests">${targets.map(destRow).join('')}<label class="dti-gift-dest"><input type="radio" name="dti-gdest" value="new"${dest0 === 'new' ? ' checked' : ''}><span><b>A new trade report</b><small>with ${noteEsc(giftWho(g))}</small></span></label></div>` : ''}
                 <div class="dti-gift-acts">
                     ${g.gift ? '<button type="button" class="dti-gift-btn" data-a="ungift">It was part of a trade after all</button>'
-                        : left.length ? `${openTrades.length ? `<button type="button" class="dti-gift-btn primary" data-a="add" data-key="${noteEsc(openTrades[0].key)}">Add to \u201c${noteEsc(noteInfo(openTrades[0].key).title)}\u201d</button><button type="button" class="dti-gift-btn" data-a="new">New trade report</button>`
-                            : '<button type="button" class="dti-gift-btn primary" data-a="new">Make a trade report</button>'}${!(g.used || []).length ? '<button type="button" class="dti-gift-btn" data-a="gift" title="Not part of a trade \u2014 it stops counting as new">Just a gift</button>' : ''}` : ''}
+                        : left.length ? `<button type="button" class="dti-gift-btn primary" data-a="put">${dest0 === 'new' ? 'Make the trade report' : 'Add them to it'}</button>${!(g.used || []).length ? '<button type="button" class="dti-gift-btn" data-a="gift" title="Not part of a trade \u2014 it stops counting as new">Just a gift</button>' : ''}` : ''}
                     ${reports.map(k => `<button type="button" class="dti-gift-btn" data-a="open" data-key="${noteEsc(k)}">Open \u201c${noteEsc(noteInfo(k).title)}\u201d</button>`).join('')}
                     <button type="button" class="dti-gift-btn subtle" data-a="del">Remove from this list</button>
                 </div>
                 <p class="dti-gift-hint">${g.gift ? 'Marked as just a gift \u2014 not part of a trade.'
-                    : left.length ? `The ticked items go on the \u201c${g.dir === 'in' ? 'You get' : 'You give'}\u201d side, with ${noteEsc(giftWho(g))} as the trader.${openTrades.length ? ' You have an open trade with them, so they can go straight into that one.' : ''}`
+                    : left.length ? `Ticked items go on \u201cYou get\u201d when you received them and \u201cYou give\u201d when you sent them, with ${noteEsc(giftWho(g))} as the trader.`
                     : 'All of its items are in a trade report.'}</p>`;
+            d.querySelector('.dti-gift-tickall')?.addEventListener('click', e => {
+                const boxes = [...d.querySelectorAll('.dti-gift-item.sib input')], all = boxes.every(c => c.checked);
+                boxes.forEach(c => { c.checked = !all; });
+                e.currentTarget.textContent = all ? 'Tick all' : 'Untick all';
+            });
+            d.querySelector('.dti-gift-dests')?.addEventListener('change', () => {
+                const put = d.querySelector('.dti-gift-btn[data-a="put"]');
+                if (put) put.textContent = d.querySelector('input[name="dti-gdest"]:checked')?.value === 'new' ? 'Make the trade report' : 'Add them to it';
+            });
             d.querySelector('.dti-gift-acts').addEventListener('click', async e => {
                 const b = e.target.closest('button[data-a]');
                 if (!b) return;
                 const a = b.dataset.a;
-                const update = patch => saveGifts(giftsAll().map(x => x.uid === uid ? Object.assign({}, x, patch) : x));
+                // (saved back to the full list: with one account picked, giftsAll() is only that account's)
+                const update = patch => saveGifts(giftsRaw().map(x => x.uid === uid ? Object.assign({}, x, patch) : x));
                 if (a === 'del') {
-                    saveGifts(giftsAll().filter(x => x.uid !== uid));
+                    saveGifts(giftsRaw().filter(x => x.uid !== uid));
                     st.sel = null; setHash('#notes'); renderSide(); renderList(); renderDetail();
                     return;
                 }
                 if (a === 'open') return select(b.dataset.key);
                 if (a === 'gift' || a === 'ungift') { update({ gift: a === 'gift' }); renderSide(); renderList(); renderDetail(); return; }
-                const pick = [...d.querySelectorAll('.dti-gift-item input[type="checkbox"]:checked')].map(c => +c.dataset.i);
-                if (!pick.length) { dtiToast('Tick at least one item for the trade report', { duration: 2000 }); return; }
+                // every ticked item, this gift's and the other gifts', on the side its gift went
+                const byUid = new Map(giftsRaw().map(x => [x.uid, x]));
+                const picks = [...d.querySelectorAll('.dti-gift-item input[type="checkbox"]:checked')].map(c => ({ uid: c.dataset.g || uid, i: +c.dataset.i }))
+                    .map(p => ({ ...p, gift: byUid.get(p.uid) })).filter(p => p.gift?.items?.[p.i]);
+                if (!picks.length) { dtiToast('Tick at least one item for the trade report', { duration: 2000 }); return; }
                 d.querySelectorAll('.dti-gift-btn').forEach(x => { x.disabled = true; });
                 b.textContent = 'Finding the items on DTI\u2026';
-                const items = await giftItemsForTrade(pick.map(i => g.items[i]));
-                const side = g.dir === 'in' ? 'get' : 'give';
-                const key = a === 'add' ? b.dataset.key : newNoteKey('trade');
-                const t = a === 'add' ? cleanTrade(DTINotes.get(key)?.trade) : { partner: g.who ? { name: g.who } : null, give: [], get: [], status: 'pending', date: g.date || noteToday(), acct: acctMany() ? acctOfNp(g.np) : '' };
-                items.forEach(it => { const ex = t[side].find(x => x.id === it.id); if (ex) ex.qty += it.qty; else t[side].push(it); });
+                const items = await giftItemsForTrade(picks.map(p => p.gift.items[p.i]));
+                const dest = d.querySelector('input[name="dti-gdest"]:checked')?.value || 'new';
+                const key = dest === 'new' ? newNoteKey('trade') : dest, prev = dest === 'new' ? null : DTINotes.get(key);
+                const before = { trade: prev ? cleanTrade(prev.trade) : null, gifts: giftsRaw() };   // (for Undo)
+                const t = prev ? cleanTrade(prev.trade) : { partner: g.who ? { name: g.who } : null, give: [], get: [], status: 'pending', date: g.date || noteToday(), acct: acctMany() ? acctOfNp(g.np) : '' };
+                picks.forEach((p, k) => {
+                    const side = p.gift.dir === 'in' ? 'get' : 'give', it = items[k], ex = t[side].find(x => x.id === it.id);
+                    if (ex) ex.qty += it.qty; else t[side].push(it);
+                });
                 t.status = t.give.length && t.get.length ? 'done' : 'pending';   // both ways done: the trade is complete
                 DTINotes.save(key, { trade: t });
-                update({ used: [...used, ...pick], notes: [...new Set([...(g.notes || (g.note ? [g.note] : [])), key])], gift: false });
+                const per = new Map();
+                picks.forEach(p => per.set(p.uid, [...(per.get(p.uid) || []), p.i]));
+                saveGifts(giftsRaw().map(x => per.has(x.uid) ? Object.assign({}, x, { used: [...new Set([...(x.used || []), ...per.get(x.uid)])],
+                    notes: [...new Set([...(x.notes || (x.note ? [x.note] : [])), key])], gift: false }) : x));
                 st.f = 'trade'; st.q = ''; $('.dti-nx-search').value = '';
                 renderSide(); renderList(); select(key);
+                // (the wrong report — two trades with them at once? — Undo puts everything back)
+                dtiToast(`${picks.length} item${picks.length === 1 ? '' : 's'} put in \u201c${noteInfo(key).title}\u201d`, { duration: 8000, undo: () => {
+                    if (before.trade) DTINotes.save(key, { trade: before.trade }); else DTINotes.remove(key);
+                    saveGifts(before.gifts);
+                    st.f = 'gifts'; renderSide(); renderList(); select('gift:' + uid);
+                } });
             });
         }
         // Gifts recorded in another tab (on Neopets) show up here as they happen
@@ -3179,7 +3274,7 @@
                         <div class="dti-tr-sidehead"><span>${side === 'give' ? 'You give' : 'You get'}</span><span class="dti-tr-count"></span></div>
                         <div class="dti-tr-items"></div>
                         <div class="dti-tr-addwrap">
-                            <input type="search" class="dti-nx-pick-inp dti-tr-add" placeholder="＋ Add an item…" autocomplete="off">
+                            <input type="search" class="dti-nx-pick-inp dti-tr-add" placeholder="＋ Add an item or style token…" autocomplete="off">
                             <div class="dti-tr-res" hidden></div>
                         </div>
                         <div class="dti-tr-quick">
@@ -3254,9 +3349,10 @@
                             ${g ? `<span class="dti-tr-gbcico">${NOTE_GIFT}</span>` : x.img ? `<img src="${noteEsc(x.img)}" alt="" loading="lazy">` : `<span class="dti-tr-gbcico">${NOTE_ITEM}</span>`}
                             <span class="dti-tr-iwrap">
                                 ${g ? `<span class="dti-tr-iname" title="${noteEsc(g.full)}">${g.name}</span>`
+                                    : isTokTrade(x) ? `<span class="dti-tr-iname dti-tr-tok" role="button" tabindex="0" data-tok="${noteEsc(x.id.slice(TOK_TRADE_ID.length))}" title="${noteEsc(x.name)} \u2014 a style token (click to see it)">${noteEsc(x.name)}</span>`
                                     : x.id.startsWith('np-') ? `<span class="dti-tr-iname" title="${noteEsc(x.name)}">${noteEsc(x.name)}</span>`
                                     : `<a class="dti-tr-iname" href="/items/${noteEsc(x.id)}" title="${noteEsc(x.name)}">${noteEsc(x.name)}</a>`}
-                                <span class="dti-tr-isub">${g ? `<span class="dti-tr-gfull">${noteEsc(g.full)}</span>` : ''}<span class="dti-tr-ival" title="Cap value each">…</span></span>
+                                <span class="dti-tr-isub">${g ? `<span class="dti-tr-gfull">${noteEsc(g.full)}</span>` : ''}${isTokTrade(x) ? `<span class="dti-tr-gfull dti-tr-toktag">${TOK_ICO}Token</span>` : ''}<span class="dti-tr-ival" title="Cap value each">…</span></span>
                             </span>
                             <span class="dti-tr-qty"><button type="button" data-d="-1" title="Fewer"${x.qty > 1 ? '' : ' disabled'}>−</button><span>${x.qty}</span><button type="button" data-d="1" title="More">+</button></span>
                             <button type="button" class="dti-tr-irm" title="Remove">✕</button>
@@ -3307,6 +3403,12 @@
                 paintSides();
             }
             d.querySelector('.dti-tr-sides').addEventListener('click', e => {
+                const tk = e.target.closest('.dti-tr-tok');
+                if (tk) {   // (a token: its big picture, as in My Tokens)
+                    const cat = tokenCatalogIfCached(), key = tk.dataset.tok, it = T()[tk.closest('.dti-tr-side').dataset.side][+tk.closest('.dti-tr-item').dataset.i];
+                    const info = cat?.byKey.has(key) ? tokInfo(key, cat, DTITokens.read().mine, tokImported(cat)) : null;
+                    return openTokenPreview(info || { key, name: it?.name || key, img: it?.img || '' });
+                }
                 const row = e.target.closest('.dti-tr-item');
                 if (!row) return;
                 const side = row.closest('.dti-tr-side').dataset.side, i = +row.dataset.i;
@@ -3324,7 +3426,7 @@
                     addToSide(side, it);
                     inp.value = '';
                     inp.focus();
-                }, { dropdown: true, limit: 8, gbc: true });
+                }, { dropdown: true, limit: 8, gbc: true, tokens: true });
                 box.querySelector('.dti-tr-quick').addEventListener('click', e => {
                     const b = e.target.closest('[data-q]');
                     if (b) addToSide(side, { id: b.dataset.q });
@@ -3343,27 +3445,32 @@
 
         // Live item search (DTI's /items.json) — the item picker and the trade sides both use it.
         // dropdown: results float under the box and close when it's empty or loses focus.
-        function attachItemSearch(inp, res, onPick, { dropdown = false, limit = 30, gbc = false } = {}) {
-            let timer = 0, gen = 0, items = [];
+        function attachItemSearch(inp, res, onPick, { dropdown = false, limit = 30, gbc = false, tokens = false } = {}) {
+            let timer = 0, gen = 0, items = [], catAsked = false;
             const show = html => { res.innerHTML = html; if (dropdown) res.hidden = !html; };
             const msg = t => show(`<div class="dti-nx-pick-msg">${t}</div>`);
             async function run(q) {
                 const my = ++gen;
                 msg('Searching…');
+                // (style tokens too, from My Tokens' list of them — read once if this browser hasn't got it yet; then asked again)
+                const cat = tokens ? tokenCatalogIfCached() : null;
+                if (tokens && !cat && !catAsked) { catAsked = true; loadTokenCatalog().then(() => { if (inp.isConnected && inp.value.trim() === q) run(q); }).catch(() => {}); }
                 try {
                     const r = await fetch('/items.json?q=' + encodeURIComponent(q), { credentials: 'same-origin', headers: { Accept: 'application/json' } });
                     const data = await r.json();
                     if (my !== gen) return;
                     const generic = gbc && /\b(bf)?gbcs?\b|gift ?box|black friday/i.test(q)
                         ? Object.entries(GBC_KINDS).map(([id, g]) => ({ id, name: `${g.name} — ${g.full.replace(/ — .*$/, '')}`, generic: true })) : [];
-                    items = [...generic, ...(data.items || []).slice(0, limit)];
+                    // (a token named just that, or starting with it: above DTI's items; one that only has the words: after them)
+                    const toks = tokSearch(cat, q, 5).map(({ t, rank }) => { const e = tokTradeItem(t); return { id: e.id, name: e.name, thumbnail_url: e.img, token: true, rank }; });
+                    items = [...generic, ...toks.filter(x => x.rank < 2), ...(data.items || []).slice(0, limit), ...toks.filter(x => x.rank === 2)];
                     if (!items.length) return msg('No items found');
                     show(items.map((it, i) => `
                         <button type="button" class="dti-nx-pick-row" data-i="${i}">
                             ${it.generic ? `<span class="dti-tr-gbcico">${NOTE_GIFT}</span>` : `<img src="${noteEsc(it.thumbnail_url)}" alt="" loading="lazy">`}
                             <span class="dti-nx-pick-name">${noteEsc(it.name)}</span>
-                            ${!dropdown && DTINotes.get('item:' + it.id) ? '<span class="dti-nx-pick-tag">Has note</span>' : ''}
-                            ${it['nc?'] ? '<span class="dti-nx-pick-tag nc">NC</span>' : ''}
+                            ${!dropdown && !it.token && DTINotes.get('item:' + it.id) ? '<span class="dti-nx-pick-tag">Has note</span>' : ''}
+                            ${it.token ? '<span class="dti-nx-pick-tag tok">Token</span>' : it['nc?'] ? '<span class="dti-nx-pick-tag nc">NC</span>' : ''}
                         </button>`).join(''));
                 } catch (_) { if (my === gen) msg('Search failed — try again'); }
             }
@@ -3914,16 +4021,32 @@
     // DTI Enhance can open to look at (nothing is sent anywhere: the part after # stays in the browser). The code: JSON
     // { v: 1, n: name, d: when, l: [[list name, color]…], t: [[style id | [name, picture], own, want, list? (-1: none), uft? (1)]…] }, deflated, base64url.
     async function tokShareEncode(obj) {
-        const z = new Blob([JSON.stringify(obj)]).stream().pipeThrough(new CompressionStream('deflate-raw'));
-        const bytes = new Uint8Array(await new Response(z).arrayBuffer());
-        let bin = '';
-        bytes.forEach(b => { bin += String.fromCharCode(b); });
-        return btoa(bin).replace(/\+/g, '-').replace(/\//g, '.').replace(/=+$/, '');
+        const enc = async o => {
+            const z = new Blob([JSON.stringify(o)]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+            const bytes = new Uint8Array(await new Response(z).arrayBuffer());
+            let bin = '';
+            bytes.forEach(b => { bin += String.fromCharCode(b); });
+            return btoa(bin).replace(/\+/g, '-').replace(/\//g, '.').replace(/=+$/, '');
+        };
+        // Never ending in "." or "-": chat apps leave a link's last punctuation out of the link (it reads as the sentence's).
+        // Ends in one? The same share with a filler field (x — ignored when opened) until it doesn't.
+        let code = await enc(obj);
+        for (let x = 1; x < 50 && !/[A-Za-z0-9]$/.test(code); x++) code = await enc({ ...obj, x });
+        return code;
     }
     async function tokShareDecode(code) {
-        const bin = atob(code.replace(/-/g, '+').replace(/[._]/g, '/'));   // (. now; _ in the first links)
-        const z = new Blob([Uint8Array.from(bin, c => c.charCodeAt(0))]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-        return JSON.parse(await new Response(z).text());
+        const one = async c => {
+            const bin = atob(c.replace(/-/g, '+').replace(/[._]/g, '/'));   // (. now; _ in the first links)
+            const z = new Blob([Uint8Array.from(bin, ch => ch.charCodeAt(0))]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+            return JSON.parse(await new Response(z).text());
+        };
+        // (a link sent before codes stopped ending in "." may have lost its last dots in a chat app — or picked up a
+        // sentence's full stop: tried as it is, then with 0–3 dots at the end)
+        const base = code.replace(/\.+$/, '');
+        const tries = [code, ...[0, 1, 2, 3].map(k => base + '.'.repeat(k))].filter((c, i, a) => c && a.indexOf(c) === i);
+        let err;
+        for (const c of tries) { try { return await one(c); } catch (e) { err = e; } }
+        throw err;
     }
     // What a share holds — yours, from the catalog: { v, n, l, t } (t sorted, so the same tokens give the same data)
     function tokShareBuild(cat, o, name, scope) {
@@ -4026,23 +4149,68 @@ function run(){var t=q.value.trim().toLowerCase(),any=0;[].forEach.call(document
 q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click',function(){f=b.dataset.f;bs.forEach(function(x){x.classList.toggle('on',x===b);});run();});});})();
 </script></body></html>`;
     }
-    // Your tokens on your DTI page (Share › "Share on my DTI page"): one public list whose description is "dtie:<code>" — kept up to
-    // date as your tokens change (a few seconds after), so impress.openneo.net/#tk<your DTI number> always shows them, and other
-    // DTI Enhance users see them from your Items page and in Neofriends. GM `dti_tok_pub` = { uid, slug, listId, sig, at }.
+    // Your tokens on your DTI page (Share › "Share on my DTI page"): a hidden code — an empty <abbr title="dtie2:<code>"> — in the
+    // description of one of your lists, kept up to date as your tokens change (a few seconds after), so
+    // impress.openneo.net/#tk<your DTI number> always shows them, and other DTI Enhance users see them from your Items page and
+    // in Neofriends. Either in one of your own lists (public or trading, for others to see it — the code goes after your own
+    // description, which stays as it is) or in a list made just for it ("Tokens" / "Tokens · DTI Enhance": it holds nothing and
+    // shows as a Tokens button, not a list). The list's name doesn't matter — only the code. GM `dti_tok_pub` =
+    // { uid, slug, listId, made, name, mode, sig, at, wasPrivate?, makePublic?, lost?, fresh?, descSet?, renameTo? } (made: a list made for
+    // them — the first shares all were; mode: 'hide' / 'show', see tokPubWith; descSet / renameTo: changes from the popup, written next).
     const TOK_PUB_NAME = 'Tokens \u00b7 DTI Enhance';
-    const TOK_PUB_RE = /\bdtie:([A-Za-z0-9._-]+)/;
-    // The code in a list's description: hidden in an empty <abbr title="dtie:…"> (DTI keeps that title — it strips comments, style,
+    const TOK_PUB_NAMES = ['Tokens', TOK_PUB_NAME];
+    const TOK_PUB_RE = /\bdtie2?:([A-Za-z0-9._-]+)/;
+    // The code in a list's description: hidden in an empty <abbr title="dtie2:…"> (DTI keeps that title — it strips comments, style,
     // hidden and link / picture titles — and shows nothing), or as plain text (the first shares)
     function tokPubCodeIn(el) {
         if (!el) return '';
-        return ((el.querySelector('abbr[title^="dtie:"]')?.getAttribute('title') || el.textContent || '').match(TOK_PUB_RE) || [])[1] || '';
+        return ((el.querySelector('abbr[title^="dtie2:"], abbr[title^="dtie:"]')?.getAttribute('title') || el.textContent || '').match(TOK_PUB_RE) || [])[1] || '';
+    }
+    // (dtie2: from 2.3 on — 2.2 wrote dtie:, still read. 2.2 doesn't see dtie2:, which matters: it hid every list holding a code
+    // (items and all) and, its own list gone, took over the first one with a code — writing over its description, and deleting
+    // it when you stopped. So a share in one of your lists stays out of its way.)
+    // (the code in a description as DTI keeps it — the raw text: taken out, or put after your own text)
+    const TOK_PUB_MARK_RE = /\s*(?:<abbr title="dtie(?:2?:[A-Za-z0-9._-]*|-hide|-show)"\s*><\/abbr>|\bdtie2?:[A-Za-z0-9._-]+)\s*/g;
+    const tokPubStrip = d => String(d || '').replace(TOK_PUB_MARK_RE, '\n\n').replace(/\n{3,}/g, '\n\n').trim();
+    // (mode: how DTI Enhance shows the list — 'hide': a Tokens button, not a list; 'show': a list like any other, marked —
+    // said by a second empty abbr, so it's the same for everyone who looks)
+    const tokPubWith = (d, code, mode) => { const rest = tokPubStrip(d); return (rest ? rest + '\n\n' : '') + `<abbr title="dtie2:${code}"></abbr>` + (mode ? `<abbr title="dtie-${mode}"></abbr>` : ''); };
+    // A list holding a share is a Tokens button instead of a list when it holds no items and says so — or is only the code (the
+    // first shares); with items it's always a list
+    function tokPubHidden(contentEl, hasItems) {
+        if (!contentEl || hasItems || contentEl.querySelector('abbr[title="dtie-show"]')) return false;
+        return !!contentEl.querySelector('abbr[title="dtie-hide"]') || ![...contentEl.children].some(p => p.tagName === 'P' && p.textContent.trim());
     }
     const tokPubLink = uid => `impress.openneo.net/#tk${uid}`;
-    async function tokPubFind(slug) {   // your list that holds it, if there is one → its id
-        const doc = new DOMParser().parseFromString(await fetch(`/user/${slug}/closet`, { credentials: 'include' }).then(r => r.text()), 'text/html');
-        const l = [...doc.querySelectorAll('div.closet-list[data-id]')].find(x => tokPubCodeIn(x.querySelector('.closet-list-content')));
-        return l?.dataset.id || '';
+    const tokPubMade = pub => !!pub && pub.made !== false;
+    // (the list made just for it, as an item page's list box names its row — not a list for items)
+    const tokPubDedicatedKey = () => { const p = GM_getValue('dti_tok_pub', null); return tokPubMade(p) && p.mode !== 'show' && p.listId ? `quantity[${p.listId}]` : ''; };
+    // Your lists on your Items page (not "Not in a list"): [{ id, name, owned, vis ('0' private, '1' public, '2' trading), n (items),
+    // code (the share it holds, or ''), hide (it holds one as a Tokens button, not a list — a list made for them) }]
+    async function tokPubMyLists(slug) {
+        const doc = new DOMParser().parseFromString(await fetch(`/user/${slug}/closet`, { credentials: 'include' }).then(r => r.ok ? r.text() : ''), 'text/html');
+        return [...doc.querySelectorAll('div.closet-list[data-id]')].filter(l => l.dataset.id && !l.classList.contains('unlisted')).map(l => {
+            const content = l.querySelector('.closet-list-content'), n = parseInt(l.dataset.hangersCount || '0', 10) || l.querySelectorAll('div.object').length, code = tokPubCodeIn(content);
+            return {
+                id: l.dataset.id,
+                name: l.querySelector(':scope > header h4, :scope > header h3')?.textContent.trim() || 'List',
+                owned: l.closest('[data-owned]')?.dataset.owned === 'true',
+                vis: l.querySelector('form.visibility-form select, select[name*="visibility"]')?.value || '1',
+                n, code, hide: !!code && tokPubHidden(content, n > 0),
+            };
+        });
     }
+    // One of your lists as DTI keeps it (its edit form): { name, desc, vis } — null if it isn't there
+    async function tokPubListForm(uid, id) {
+        const r = await fetch(`/user/${uid}/closet/lists/${id}/edit`, { credentials: 'include' });
+        if (!r.ok) return null;
+        const f = new DOMParser().parseFromString(await r.text(), 'text/html').querySelector('form[action*="/closet/lists/"]');
+        return f ? { name: f.querySelector('[name="closet_list[name]"]')?.value || '', desc: f.querySelector('[name="closet_list[description]"]')?.value || '',
+            vis: f.querySelector('[name="closet_list[visibility]"]')?.value || '0' } : null;
+    }
+    const tokPubPatch = (uid, id, csrf, desc, vis, name) => fetch(`/user/${uid}/closet/lists/${id}`, { method: 'POST', credentials: 'same-origin', redirect: 'manual',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': csrf },
+        body: `_method=patch${name ? `&closet_list%5Bname%5D=${encodeURIComponent(name)}` : ''}${vis != null ? `&closet_list%5Bvisibility%5D=${vis}` : ''}&closet_list%5Bdescription%5D=${encodeURIComponent(desc)}` });
     async function tokPubWrite(force) {
         const pub = GM_getValue('dti_tok_pub', null), csrf = document.querySelector('meta[name="csrf-token"]')?.content;
         const slug = GM_getValue('dti_user_slug', '') || pub?.slug || '', uid = slug.match(/^\d+/)?.[0] || '';
@@ -4050,43 +4218,241 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         if (!pub || !csrf || !uid || !cat || !GM_getValue('dti_user_name', '')) return false;   // (logged out: DTI would only send it to the login page)
         const data = tokShareBuild(cat, Object.assign({ own: true, want: true, lists: true }, GM_getValue('dti_tok_share_opts', {}) || {}), GM_getValue('dti_tok_share_name', '') || GM_getValue('dti_user_name', ''), 'all');
         const sig = JSON.stringify(data);
-        if (!force && pub.listId && pub.sig === sig && pub.uid === uid) return true;   // (nothing changed)
-        const desc = `<abbr title="dtie:${await tokShareEncode({ ...data, d: Date.now() })}"></abbr>`;   // (nothing to see on the list)
-        const patch = id => fetch(`/user/${uid}/closet/lists/${id}`, { method: 'POST', credentials: 'same-origin', redirect: 'manual',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': csrf },
-            body: `_method=patch&closet_list%5Bvisibility%5D=1&closet_list%5Bdescription%5D=${encodeURIComponent(desc)}` });
+        if (!force && pub.listId && pub.sig === sig && pub.uid === uid && !pub.lost) return true;   // (nothing changed)
+        const code = await tokShareEncode({ ...data, d: Date.now() });
+        let made = tokPubMade(pub), mode = pub.mode || (made ? 'hide' : 'show');
+        // (into the description as DTI has it now — your own text stays — private to public only for a list made for it, or the
+        // once when you picked a private list of yours to keep it in)
+        const writeTo = async id => {   // (descSet / renameTo: what you just wrote in the popup, for a list made for it)
+            const f = await tokPubListForm(uid, id);
+            if (!f) return false;
+            return dtiOk(await tokPubPatch(uid, id, csrf, tokPubWith(pub.descSet != null ? pub.descSet : f.desc, code, mode), f.vis === '0' && (made || pub.makePublic) ? '1' : null, pub.renameTo || null));
+        };
         let listId = pub.uid === uid ? pub.listId : '';
-        if (listId) {
-            const r = await patch(listId);
-            if (!dtiOk(r)) listId = '';   // (deleted on DTI: made again)
-        }
+        if (listId && !(await writeTo(listId))) listId = '';
         if (!listId) {
-            listId = await tokPubFind(slug);   // (one there already — from another browser, or before a reinstall)
-            if (listId) { if (!dtiOk(await patch(listId))) throw new Error('save'); }
+            // (one there already — from another browser, or before a reinstall; not when a new list was just asked for): taken as it
+            // is — a list made for them stays one, your own list stays yours (shown, and never deleted); the popup's changes were
+            // for the list that's gone
+            const found = pub.fresh ? null : (await tokPubMyLists(slug)).find(l => l.code);
+            if (found) {
+                listId = found.id; made = found.hide; mode = found.hide ? 'hide' : 'show';
+                Object.assign(pub, { descSet: null, renameTo: null, makePublic: false, wasPrivate: false });
+                if (!(await writeTo(listId))) throw new Error('save');
+            }
+            else if (!made) { GM_setValue('dti_tok_pub', { ...pub, listId: '', lost: true }); return false; }   // (your list that held it is gone: the Share panel asks where to keep it now)
             else {
                 const fd = new FormData();
                 fd.append('authenticity_token', csrf);
-                fd.append('closet_list[name]', TOK_PUB_NAME);
+                fd.append('closet_list[name]', pub.name || TOK_PUB_NAME);
                 fd.append('closet_list[hangers_owned]', 'true');
                 fd.append('closet_list[visibility]', '1');
-                fd.append('closet_list[description]', desc);
+                fd.append('closet_list[description]', tokPubWith(pub.descSet || '', code, mode));
                 const r = await fetch(`/user/${slug}/closet/lists`, { method: 'POST', credentials: 'include', body: fd });
                 if (!r.ok) throw new Error('create');
-                listId = await tokPubFind(slug);
+                listId = (await tokPubMyLists(slug)).find(l => l.code === code)?.id || '';   // (the one just made: it holds this code)
                 if (!listId) throw new Error('find');
             }
         }
-        GM_setValue('dti_tok_pub', { uid, slug, listId, sig, at: Date.now() });
+        GM_setValue('dti_tok_pub', { ...pub, uid, slug, listId, made, mode, sig, at: Date.now(), lost: false, makePublic: false, fresh: false, descSet: null, renameTo: null });
         return true;
     }
-    async function tokPubStop() {   // its list off your DTI page
+    // The code off your DTI page: a list made for it goes too (unless something else got into it); your own list keeps
+    // everything else, and is private again if it was made public for this. keep: the share's details stay (moving it).
+    async function tokPubStop(keep) {
         const pub = GM_getValue('dti_tok_pub', null), csrf = document.querySelector('meta[name="csrf-token"]')?.content;
         if (pub?.listId && pub.uid && csrf) {
-            const r = await fetch(`/user/${pub.uid}/closet/lists/${pub.listId}`, { method: 'POST', credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': csrf }, body: '_method=delete' });
-            if (!r.ok && r.status !== 404) throw new Error('delete');
+            const f = await tokPubListForm(pub.uid, pub.listId);
+            if (f) {
+                const rest = tokPubStrip(f.desc);
+                const n = (await tokPubMyLists(pub.slug || pub.uid).catch(() => [])).find(l => l.id === String(pub.listId))?.n || 0;
+                if (tokPubMade(pub) && !rest && !n) {
+                    const r = await fetch(`/user/${pub.uid}/closet/lists/${pub.listId}`, { method: 'POST', credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': csrf }, body: '_method=delete' });
+                    if (!r.ok && r.status !== 404) throw new Error('delete');
+                    if (!keep) GM_setValue('dti_tok_pub', null);
+                    return 'deleted';
+                } else if (!dtiOk(await tokPubPatch(pub.uid, pub.listId, csrf, rest, pub.wasPrivate ? '0' : null))) throw new Error('save');
+            }
         }
-        GM_setValue('dti_tok_pub', null);
+        if (!keep) GM_setValue('dti_tok_pub', null);
+        return 'kept';
+    }
+    // Where your tokens live on DTI — the popup from Share › "Share on my DTI page…" / "Change where". How it works (folded
+    // away once you share); where: one of your lists (nothing new on your page) or a list made just for them (its name, a
+    // description for everyone on DTI, and whether DTI Enhance shows it among your lists or as a Tokens button); and what
+    // that will do, list by list, just above the button. Again for a list made for them: its name, description and showing,
+    // changed in place.
+    async function tokPubSetup(uid, slug, onDone) {
+        injectTokensCSS();
+        document.getElementById('dti-tkpub-dlg')?.remove();
+        const pub = GM_getValue('dti_tok_pub', null), curId = pub?.listId ? String(pub.listId) : '', on = !!pub && !pub.lost;
+        const ICO = {
+            hidden: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2l12 12"/><path d="M6.5 3.7A6.6 6.6 0 0 1 8 3.5c4 0 6.5 4.5 6.5 4.5a11.5 11.5 0 0 1-1.9 2.4M10.2 11.9a6.3 6.3 0 0 1-2.2.6C4 12.5 1.5 8 1.5 8a11.4 11.4 0 0 1 2.7-3"/><path d="M6.6 6.6a2 2 0 0 0 2.8 2.8"/></svg>',
+            sync: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 0 1-9.7 3.6M2.5 8a5.5 5.5 0 0 1 9.7-3.6"/><path d="M12.6 1.9v2.6H10M3.4 14.1v-2.6H6"/></svg>',
+            link: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6.7 9.3a3 3 0 0 0 4.2 0l2.2-2.2a3 3 0 0 0-4.2-4.2l-.8.8"/><path d="M9.3 6.7a3 3 0 0 0-4.2 0L2.9 8.9a3 3 0 0 0 4.2 4.2l.8-.8"/></svg>',
+            lists: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 4h7.5M6 8h7.5M6 12h7.5"/><circle cx="2.8" cy="4" r="1" fill="currentColor" stroke="none"/><circle cx="2.8" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="2.8" cy="12" r="1" fill="currentColor" stroke="none"/></svg>',
+            v0: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="10" height="7" rx="1.6"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>',
+            v1: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c1.7 1.7 2.5 3.7 2.5 6S9.7 12.3 8 14M8 2C6.3 3.7 5.5 5.7 5.5 8s.8 4.3 2.5 6"/></svg>',
+            v2: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5h10M10 3l2.5 2.5L10 8M13.5 10.5h-10M6 8l-2.5 2.5L6 13"/></svg>',
+            chev: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5 6 7.5l3-3"/></svg>',
+        };
+        const ov = document.createElement('div');
+        ov.id = 'dti-tkpub-dlg';
+        ov.innerHTML = `<div class="dti-tkpd-box" role="dialog" aria-modal="true" aria-labelledby="dti-tkpd-t" tabindex="-1">
+                <header class="dti-tkpd-head"><span class="dti-tkpd-ico">${TOK_ICO}</span>
+                    <div class="dti-tkpd-ttl"><b id="dti-tkpd-t">${on ? 'Your tokens on your DTI page' : 'Share your tokens on your DTI page'}</b><small>So anyone with DTI Enhance can see them, any time</small></div>
+                    <button type="button" class="dti-tkpd-x" title="Close (Esc)" aria-label="Close">${POP_ICO.close}</button></header>
+                <div class="dti-tkpd-main">
+                    <details class="dti-tkpd-how"${on ? '' : ' open'}><summary>How it works${ICO.chev}</summary><ul>
+                        <li>${ICO.hidden}<span><b>Hidden in one of your lists</b> \u2014 a code in its description that doesn\u2019t show on DTI. The list has to be public.</span></li>
+                        <li>${ICO.sync}<span><b>Always up to date</b> \u2014 it changes by itself as your tokens do.</span></li>
+                        <li>${ICO.link}<span><b>Seen with DTI Enhance</b> \u2014 on your Items page, in their Neofriends, and at <code>${noteEsc(tokPubLink(uid))}</code></span></li></ul></details>
+                    <div class="dti-tkpd-body"><div class="dti-tkpd-msg">Loading your lists\u2026</div></div>
+                </div>
+                <footer class="dti-tkpd-foot"><div class="dti-tkpd-what" aria-live="polite" hidden><b>What happens</b><ul></ul></div>
+                    <div class="dti-tkpd-btns"><span>You can change this or stop any time from Share.</span><button type="button" class="dti-tkpd-cancel">Cancel</button><button type="button" class="dti-tkpd-go" disabled>${on ? 'Save' : 'Share'}</button></div></footer>
+            </div>`;
+        document.body.appendChild(ov);
+        const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
+        const close = () => { ov.remove(); document.removeEventListener('keydown', onKey, true); };
+        document.addEventListener('keydown', onKey, true);
+        ov.addEventListener('click', e => { if (!e.target.closest('.dti-tkpd-box') || e.target.closest('.dti-tkpd-x, .dti-tkpd-cancel')) close(); });
+        ov.querySelector('.dti-tkpd-box').focus();
+        let lists = null, made = null;
+        try { lists = await tokPubMyLists(slug); } catch (_) {}
+        const gone = !!pub && !(lists || []).some(l => l.id === curId);   // (the list they were in isn't on DTI any more)
+        const fresh = !pub || gone, isMade = tokPubMade(pub) && !fresh;
+        if (lists && isMade) made = await tokPubListForm(uid, curId).catch(() => null);   // (its name and description as they are now)
+        if (!ov.isConnected) return;
+        const body = ov.querySelector('.dti-tkpd-body'), go = ov.querySelector('.dti-tkpd-go');
+        if (!lists || (isMade && !made)) { body.innerHTML = '<div class="dti-tkpd-msg">Couldn\u2019t read your lists on DTI \u2014 try again in a moment.</div>'; return; }
+        const q = s => `\u201c${noteEsc(s)}\u201d`;
+        const cur = lists.find(l => l.id === curId);   // (where they are now)
+        // (yours to pick from — not the one made for them; public and trading first, as only those can be seen)
+        const mine = lists.filter(l => !(isMade && l.id === curId)).sort((a, b) => (a.vis === '0') - (b.vis === '0'));
+        // (picked: where they are — or a list holding a share already, from another browser or an earlier one, so there's one)
+        const pick0 = !fresh && !isMade ? curId : mine.find(l => l.code)?.id || '';
+        const curName = made?.name || pub?.name || TOK_PUB_NAME;
+        const names = [...new Set([...TOK_PUB_NAMES, ...(isMade ? [curName] : [])])];
+        const name0 = isMade ? curName : TOK_PUB_NAMES[0];
+        const desc0 = made ? tokPubStrip(made.desc) : '', show0 = !!made && /dtie-show/.test(made.desc);
+        const visTxt = { 0: 'Private', 1: 'Public', 2: 'Trading' };
+        const row = l => `<label class="dti-tkpd-row"><input type="radio" name="dti-tkpd-list" value="${noteEsc(l.id)}"${l.id === pick0 ? ' checked' : ''}>
+            <span class="dti-tkpd-rn"><b>${noteEsc(l.name)}</b><small>${l.n} item${l.n === 1 ? '' : 's'}${l.code ? `<em>${TOK_ICO}${l.id === curId ? 'Your tokens are here' : 'Holds a token share'}</em>` : ''}</small></span>
+            <span class="dti-tkpd-vis v${noteEsc(l.vis)}">${ICO['v' + l.vis] || ''}${visTxt[l.vis] || ''}</span></label>`;
+        const group = (title, ls) => ls.length ? `<div class="dti-tkpd-grp">${title}</div>${ls.map(row).join('')}` : '';
+        const mode0 = isMade ? 'new' : !fresh || mine.length ? 'list' : 'new';
+        body.innerHTML = `${gone ? '<p class="dti-tkpd-banner">The list your tokens were kept in isn\u2019t on DTI any more \u2014 pick where to keep them now.</p>' : ''}
+            <div class="dti-tkpd-step">Where should your tokens go?</div>
+            <div class="dti-tkpd-modes">
+                <label class="dti-tkpd-mode"><input type="radio" name="dti-tkpd" value="list"${mode0 === 'list' ? ' checked' : ''}${mine.length ? '' : ' disabled'}><span class="dti-tkpd-mi">${ICO.lists}</span>
+                    <span><b>One of my lists</b><small>${mine.length ? 'A list you already have' : 'You don\u2019t have any lists yet'}</small></span></label>
+                <label class="dti-tkpd-mode"><input type="radio" name="dti-tkpd" value="new"${mode0 === 'new' ? ' checked' : ''}><span class="dti-tkpd-mi">${LIST_ADD_ICO}</span>
+                    <span><b>${isMade ? 'Their own list' : 'A new list'}</b><small>${isMade ? `${q(curName)}, made for them` : 'Made just for your tokens'}</small></span></label>
+            </div>
+            <div class="dti-tkpd-pane" data-pane="list"><div class="dti-tkpd-lists">${group('Lists of items you own', mine.filter(l => l.owned))}${group('Lists of items you want', mine.filter(l => !l.owned))}</div></div>
+            <div class="dti-tkpd-pane" data-pane="new">
+                <div class="dti-tkpd-f"><span class="dti-tkpd-lbl">Name</span>
+                    <div class="dti-tkpd-chips">${names.map(n => `<label><input type="radio" name="dti-tkpd-name" value="${noteEsc(n)}"${n === name0 ? ' checked' : ''}>${noteEsc(n)}</label>`).join('')}</div></div>
+                <label class="dti-tkpd-f"><span class="dti-tkpd-lbl">Description<i>optional</i></span>
+                    <textarea class="dti-tkpd-desc" rows="3" maxlength="2000" placeholder="e.g. Tokens I have up for trade \u2014 Neomail me!">${noteEsc(desc0)}</textarea>
+                    <small>Everyone sees it on your DTI page \u2014 handy if you use the list for trading too.</small></label>
+                <div class="dti-tkpd-f"><span class="dti-tkpd-lbl">On your Items page</span>
+                    <div class="dti-tkpd-seg">
+                        <label><input type="radio" name="dti-tkpd-show" value="hide"${show0 ? '' : ' checked'}><span><b>A Tokens button</b><small>Instead of the list</small></span></label>
+                        <label><input type="radio" name="dti-tkpd-show" value="show"${show0 ? ' checked' : ''}><span><b>The list</b><small>With your other lists</small></span></label></div>
+                    <small>How DTI Enhance users see it. Without DTI Enhance, it\u2019s a normal list on DTI.</small></div>
+            </div>`;
+        const val = n => body.querySelector(`input[name="${n}"]:checked`)?.value || '';
+        const choice = () => {
+            const mode = val('dti-tkpd'), target = mode === 'list' ? mine.find(l => l.id === val('dti-tkpd-list')) || null : null;
+            return { mode, target, name: mode === 'new' ? val('dti-tkpd-name') || TOK_PUB_NAMES[0] : target?.name || '',
+                desc: body.querySelector('.dti-tkpd-desc').value.trim(), show: val('dti-tkpd-show') === 'show' };
+        };
+        // (what the choice will do, line by line — [text, '' | 'ok' | 'warn' | 'idle'] — and whether it changes nothing, or nothing's picked)
+        const plan = c => {
+            const L = [], add = (t, k = '') => L.push([t, k]);
+            const showLine = s => s ? 'DTI Enhance users see it with your other lists, with the Tokens mark.' : 'DTI Enhance users see a Tokens button on your Items page instead of the list.';
+            const leave = () => {   // (out of where they are now — as Stop sharing does)
+                if (fresh || !cur) return;
+                if (isMade && !tokPubStrip(made.desc) && !cur.n) add(`${q(cur.name)}, the list made for your tokens, is deleted.`);
+                else add(`Your tokens come out of ${q(cur.name)}${!isMade && pub.wasPrivate ? ', which goes back to private' : ''} \u2014 nothing else about it changes.`);
+            };
+            let same = false;
+            if (c.mode === 'list') {
+                const t = c.target;
+                if (!t) return { lines: [['Pick one of your lists above.', 'idle']], none: true };
+                if (t.id === curId) { same = true; add(`Your tokens are in ${q(t.name)} already \u2014 nothing changes.`, 'ok'); }
+                else {
+                    leave();
+                    if (t.code) add(`${q(t.name)} already holds a token share${fresh ? ' (from another browser, or an earlier one)' : ''}. It stays as it is, but shows the tokens in this browser from now on.`);
+                    else {
+                        add(`${q(t.name)} gets a hidden code at the end of its description \u2014 its name, items and description stay as they are.`);
+                        add('On your Items page, it\u2019s marked with the Tokens icon.');
+                    }
+                    if (t.vis === '0') add('It\u2019s private, so it\u2019s made public \u2014 and private again if you stop sharing.', 'warn');
+                }
+            } else if (isMade) {
+                if (c.name !== curName) add(`It\u2019s renamed from ${q(curName)} to ${q(c.name)}.`);
+                if (c.desc !== desc0) add(!c.desc ? 'Its description is removed.' : `${desc0 ? 'Its description is updated' : 'It gets your description'} \u2014 everyone sees it on your DTI page.`);
+                if (c.show !== show0) add(showLine(c.show));
+                if (!L.length) { same = true; add(`Your tokens are in ${q(curName)} \u2014 nothing changes.`, 'ok'); }
+            } else {
+                leave();
+                add(`A new public list, ${q(c.name)}, is made for your tokens${c.desc ? ', with your description' : ''}.`);
+                add(showLine(c.show));
+                add(`Without DTI Enhance, people see it on DTI as a normal${c.desc ? '' : ', empty'} list.`);
+            }
+            const others = lists.filter(l => l.code && l.id !== curId && l.id !== c.target?.id);   // (a share left in another list: two on your page)
+            if (others.length) add(`${others.map(l => q(l.name)).join(' and ')} also hold${others.length === 1 ? 's' : ''} a token share, and DTI Enhance users only see the first one on your page \u2014 pick ${others.length === 1 ? 'it' : 'one'} under \u201cOne of my lists\u201d to keep just one.`, 'warn');
+            return { lines: L, same };
+        };
+        const what = ov.querySelector('.dti-tkpd-what ul');
+        what.parentElement.hidden = false;
+        let shown = '';
+        const paint = () => {
+            const c = choice(), p = plan(c);
+            body.querySelectorAll('.dti-tkpd-pane').forEach(x => { x.hidden = x.dataset.pane !== c.mode; });
+            if (c.mode === 'list' && shown !== 'list') {   // (the picked list in sight)
+                const r = body.querySelector('.dti-tkpd-row input:checked')?.closest('.dti-tkpd-row'), box = r?.parentElement;
+                if (r) box.scrollTop = Math.max(0, r.offsetTop - (box.clientHeight - r.offsetHeight) / 2);
+            }
+            shown = c.mode;
+            what.innerHTML = p.lines.map(([t, k]) => `<li${k ? ` class="${k}"` : ''}>${t}</li>`).join('');
+            go.disabled = !!p.none;
+            go.textContent = p.same ? 'Done' : fresh ? 'Share' : c.mode === 'new' && isMade ? 'Save' : 'Move them here';
+        };
+        body.addEventListener('change', paint);
+        body.addEventListener('input', paint);
+        paint();
+        go.addEventListener('click', async () => {
+            const c = choice(), p = plan(c), t = c.target, name = t ? t.name : c.name;
+            if (p.none) return;
+            if (p.same) return close();
+            go.disabled = true; go.textContent = fresh ? 'Putting them on DTI\u2026' : 'Saving\u2026';
+            try {
+                if (c.mode === 'new' && isMade) {   // (the list made for them: its name, description and showing, changed in place)
+                    GM_setValue('dti_tok_pub', { ...pub, name, mode: c.show ? 'show' : 'hide', descSet: c.desc, renameTo: name !== curName ? name : null });
+                } else {
+                    if (!fresh) await tokPubStop(true);   // (out of where they were first)
+                    GM_setValue('dti_tok_pub', !t ? { uid, slug, listId: '', made: true, name, mode: c.show ? 'show' : 'hide', descSet: c.desc, sig: '', at: 0, fresh: true }
+                        : t.code && t.hide ? { uid, slug, listId: t.id, made: true, name, mode: 'hide', sig: '', at: 0 }   // (a list made for them already — from another browser: it stays as it is)
+                        : { uid, slug, listId: t.id, made: false, name, mode: 'show', sig: '', at: 0, makePublic: t.vis === '0', wasPrivate: t.vis === '0' });
+                }
+                if (!(await tokPubWrite(true))) throw new Error('write');
+                tokPubWire();   // (kept up to date from now on)
+                close();
+                const said = `Your tokens are in \u201c${name}\u201d on DTI`;   // (the link copied too, when the browser lets it — it's in Share either way)
+                if (fresh) navigator.clipboard.writeText('https://' + tokPubLink(uid)).then(() => dtiToast(said + ' \u2014 short link copied', { variant: 'success' }), () => dtiToast(said, { variant: 'success' }));
+                else dtiToast(c.mode === 'new' && isMade ? `Saved \u2014 \u201c${name}\u201d is updated` : `Moved \u2014 your tokens are in \u201c${name}\u201d now`, { variant: 'success' });
+            } catch (_) {
+                if (fresh) GM_setValue('dti_tok_pub', pub);   // (as it was)
+                go.disabled = false; paint();
+                dtiToast('Couldn\u2019t reach DTI \u2014 try again in a moment', { variant: 'error' });
+            }
+            onDone?.();
+        });
     }
     // Kept up to date: a few seconds after your tokens, want lists or share settings change (one tab does it), and on DTI pages
     let _tokPubT = 0, _tokPubBusy = false;
@@ -5116,7 +5482,9 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             const paintPub = () => {
                 const pub = GM_getValue('dti_tok_pub', null);
                 pubBox.innerHTML = !uid ? '<span>Log in to DTI to share from your DTI page.</span>'
-                    : pub ? `<span>On your DTI page (a public list, \u201c${TOK_PUB_NAME}\u201d) \u2014 updated as your tokens change.</span>
+                    : pub?.lost ? `<span>The list your tokens were kept in isn\u2019t on DTI any more.</span>
+                        <div class="dti-tk-shrow"><button type="button" class="dti-tk-shwhere">Choose where to keep them</button><button type="button" class="dti-tk-shoff">Stop sharing on DTI</button></div>`
+                    : pub ? `<span>On your DTI page, as a hidden code in ${tokPubMade(pub) ? `a list made for it, \u201c${noteEsc(pub.name || TOK_PUB_NAME)}\u201d${pub.mode === 'show' ? ' (shown among your lists)' : ''}` : `your list \u201c${noteEsc(pub.name || 'List')}\u201d`} \u2014 updated as your tokens change.</span>
                         ${(() => {   // (the same thing it'd put there now — is that what's there?)
                             let cur = '';
                             try { cur = JSON.stringify(tokShareBuild(cat, Object.assign({ own: true, want: true, lists: true }, GM_getValue('dti_tok_share_opts', {}) || {}), GM_getValue('dti_tok_share_name', '') || GM_getValue('dti_user_name', ''), 'all')); } catch (_) {}
@@ -5124,9 +5492,9 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                             return `<div class="dti-tk-shstat${ok ? '' : ' stale'}"><span>${ok ? `Up to date${pub.at ? ` \u00b7 updated ${noteAgo(pub.at)}` : ''}` : 'Not up to date yet'}</span><button type="button" class="dti-tk-shnow">Update now</button></div>`;
                         })()}
                         <div class="dti-tk-shlink"><code>${noteEsc(tokPubLink(uid))}</code><button type="button" class="dti-tk-shcopy">Copy</button></div>
-                        <button type="button" class="dti-tk-shoff">Stop sharing on DTI</button>`
-                    : `<span>Keeps your list on your DTI page (one public list) so a short link always shows it \u2014 and DTI Enhance users see it from your Items page and in Neofriends.</span>
-                        <button type="button" class="dti-tk-shon">Share on my DTI page</button>`;
+                        <div class="dti-tk-shrow"><button type="button" class="dti-tk-shwhere">Change where</button><button type="button" class="dti-tk-shoff">Stop sharing on DTI</button></div>`
+                    : `<span>Keeps your list on your DTI page \u2014 as a hidden code in one of your lists \u2014 so a short link always shows it, and DTI Enhance users see it from your Items page and in Neofriends.</span>
+                        <button type="button" class="dti-tk-shon">Share on my DTI page\u2026</button>`;
             };
             paintPub();
             pubBox.addEventListener('click', async e => {
@@ -5142,20 +5510,15 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                     return;
                 }
                 const { o } = read();
-                if (b.classList.contains('dti-tk-shon') && !o.own && !o.want) return dtiToast('Pick what to share', { variant: 'error' });
-                b.disabled = true; b.textContent = b.classList.contains('dti-tk-shon') ? 'Putting it on DTI\u2026' : 'Taking it off\u2026';
+                if (b.classList.contains('dti-tk-shon') || b.classList.contains('dti-tk-shwhere')) {   // (where it's kept: the popup, which says what happens)
+                    if (!o.own && !o.want) return dtiToast('Pick what to share', { variant: 'error' });
+                    return tokPubSetup(uid, slug, () => { if (menu.isConnected) paintPub(); paintShareBtn(); });
+                }
+                b.disabled = true; b.textContent = 'Taking it off\u2026';
                 try {
-                    if (b.classList.contains('dti-tk-shon')) {
-                        GM_setValue('dti_tok_pub', { uid, slug, listId: '', sig: '', at: 0 });
-                        await tokPubWrite(true);
-                        tokPubWire();   // (kept up to date from now on)
-                        dtiCopyText('https://' + tokPubLink(uid), () => dtiToast('On your DTI page \u2014 short link copied', { variant: 'success' }));
-                    } else {
-                        await tokPubStop();
-                        dtiToast('Your tokens are off your DTI page');
-                    }
+                    const was = GM_getValue('dti_tok_pub', null), r = await tokPubStop();
+                    dtiToast(r === 'deleted' ? 'Your tokens are off your DTI page \u2014 the list made for them is gone' : `Your tokens are off your DTI page \u2014 \u201c${was?.name || 'the list'}\u201d is otherwise as it was`);
                 } catch (_) {
-                    if (b.classList.contains('dti-tk-shon')) GM_setValue('dti_tok_pub', null);
                     dtiToast('Couldn\u2019t reach DTI \u2014 try again in a moment', { variant: 'error' });
                 }
                 if (menu.isConnected) paintPub();
@@ -5421,6 +5784,105 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-tk-shsec > b { font-size: 10.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); }
             .dti-tk-shsec span { font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
             .dti-tk-shpub { display: flex; flex-direction: column; gap: 7px; }
+            .dti-tk-shrow { display: flex; gap: 6px; }
+            .dti-tk-shrow > button { flex: 1; }
+            /* Where your tokens are kept on DTI: the popup — how it works, where (one of your lists / a list of their own), what that will do */
+            #dti-tkpub-dlg { position: fixed; inset: 0; z-index: 100000; display: grid; place-items: center; padding: 16px; box-sizing: border-box; background: rgba(12, 12, 18, .5); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); animation: dti-tkpd-in .14s ease-out; }
+            @keyframes dti-tkpd-in { from { opacity: 0; } }
+            @keyframes dti-tkpd-up { from { opacity: 0; transform: translateY(10px) scale(.985); } }
+            .dti-tkpd-box { width: 540px; max-width: 100%; max-height: min(calc(100vh - 32px), 880px); display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; border-radius: 18px;
+                background: var(--surface); border: 1px solid var(--border); box-shadow: 0 28px 80px rgba(0,0,0,.3); font-family: 'Poppins', system-ui, sans-serif; color: var(--text); text-align: left; animation: dti-tkpd-up .18s ease-out; }
+            .dti-tkpd-box:focus { outline: none; }
+            .dti-tkpd-head { flex: none; display: flex; align-items: center; gap: 11px; padding: 12px 12px 12px 16px; border-bottom: 1px solid var(--border); }
+            .dti-tkpd-ico { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 10px; background: var(--accent-glow); color: var(--accent-text, var(--accent)); }
+            .dti-tkpd-ico svg { width: 18px; height: 18px; }
+            .dti-tkpd-ttl { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+            .dti-tkpd-ttl b { font-size: 15.5px; font-weight: 800; letter-spacing: -.2px; line-height: 1.3; }
+            .dti-tkpd-ttl small { font-size: 12px; line-height: 1.4; color: var(--text-muted); }
+            .dti-tkpd-x { width: 34px; height: 34px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 10px; background: none; color: var(--text-muted); cursor: pointer; }
+            .dti-tkpd-x:hover { background: var(--surface-2); color: var(--text); }
+            .dti-tkpd-x svg { width: 14px; height: 14px; }
+            .dti-tkpd-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 14px 16px 16px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+            .dti-tkpd-how { flex: none; border-radius: 12px; background: var(--surface-2); }
+            .dti-tkpd-how summary { display: flex; align-items: center; gap: 6px; padding: 9px 12px; list-style: none; cursor: pointer; user-select: none; font-size: 12px; font-weight: 700; color: var(--text-muted); }
+            .dti-tkpd-how summary::-webkit-details-marker { display: none; }
+            .dti-tkpd-how summary:hover { color: var(--text); }
+            .dti-tkpd-how summary svg { width: 11px; height: 11px; transition: transform .15s; }
+            .dti-tkpd-how[open] summary svg { transform: rotate(180deg); }
+            .dti-tkpd-how ul { list-style: none; margin: 0; padding: 0 12px 11px; display: flex; flex-direction: column; gap: 7px; }
+            .dti-tkpd-how li { display: flex; align-items: flex-start; gap: 10px; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+            .dti-tkpd-how li > svg { width: 15px; height: 15px; flex: none; margin-top: 1px; color: var(--accent-text, var(--accent)); }
+            .dti-tkpd-how li b { font-weight: 700; color: var(--text); }
+            .dti-tkpd-how code { padding: 1px 5px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--text); white-space: nowrap; }
+            .dti-tkpd-body { display: flex; flex-direction: column; gap: 10px; }
+            .dti-tkpd-msg { padding: 18px 0; font-size: 13px; color: var(--text-muted); text-align: center; }
+            .dti-tkpd-banner { margin: 0; padding: 9px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.45; background: color-mix(in srgb, var(--nc) 14%, var(--surface)); }
+            .dti-tkpd-step { margin-top: 2px; font-size: 10.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+            .dti-tkpd-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+            .dti-tkpd-mode { position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; border: 1.5px solid var(--border); background: var(--surface); cursor: pointer; transition: border-color .12s, background .12s; }
+            .dti-tkpd-mode:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+            .dti-tkpd-mode:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+            .dti-tkpd-mode:has(input:disabled) { opacity: .55; cursor: default; border-color: var(--border); }
+            .dti-tkpd-mode:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+            .dti-tkpd-mode input { position: absolute; opacity: 0; pointer-events: none; }
+            .dti-tkpd-mi { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 9px; background: var(--surface-2); color: var(--text-muted); transition: background .12s, color .12s; }
+            .dti-tkpd-mode:has(input:checked) .dti-tkpd-mi { background: var(--accent); color: var(--accent-fg, #fff); }
+            .dti-tkpd-mi svg { width: 16px; height: 16px; }
+            .dti-tkpd-mode b { display: block; font-size: 13px; font-weight: 700; line-height: 1.3; }
+            .dti-tkpd-mode small { display: block; font-size: 11.5px; line-height: 1.35; color: var(--text-muted); }
+            .dti-tkpd-pane { display: flex; flex-direction: column; gap: 12px; }
+            .dti-tkpd-pane[hidden] { display: none; }
+            .dti-tkpd-lists { position: relative; max-height: 236px; overflow-y: auto; padding: 4px; border-radius: 12px; border: 1px solid var(--border); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+            .dti-tkpd-grp { padding: 8px 9px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); }
+            .dti-tkpd-row { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border-radius: 9px; cursor: pointer; }
+            .dti-tkpd-row:hover { background: var(--surface-2); }
+            .dti-tkpd-row:has(input:checked) { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+            .dti-tkpd-row input, .dti-tkpd-chips input, .dti-tkpd-seg input { flex: none; margin: 0; accent-color: var(--accent); cursor: pointer; box-shadow: none !important; }
+            .dti-tkpd-rn { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+            .dti-tkpd-rn b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; line-height: 1.35; }
+            .dti-tkpd-rn small { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted); }
+            .dti-tkpd-rn em { display: inline-flex; align-items: center; gap: 4px; font-style: normal; font-weight: 700; color: var(--accent-text, var(--accent)); }
+            .dti-tkpd-rn em svg { width: 11px; height: 11px; }
+            .dti-tkpd-vis { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 6px; font-size: 10.5px; font-weight: 700; }
+            .dti-tkpd-vis svg { width: 11px; height: 11px; }
+            .dti-tkpd-vis.v1 { background: rgba(22, 163, 74, .12); color: var(--success); }
+            .dti-tkpd-vis.v2 { background: var(--accent-glow); color: var(--accent-text, var(--accent)); }
+            .dti-tkpd-vis.v0 { background: var(--surface-2); color: var(--text-muted); }
+            .dti-tkpd-f { display: flex; flex-direction: column; gap: 6px; }
+            .dti-tkpd-lbl { font-size: 12.5px; font-weight: 700; }
+            .dti-tkpd-lbl i { margin-left: 6px; font-style: normal; font-weight: 500; color: var(--text-muted); }
+            .dti-tkpd-f > small { font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+            .dti-tkpd-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+            .dti-tkpd-chips label { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; box-sizing: border-box; border-radius: 9px; border: 1.5px solid var(--border); background: var(--surface); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+            .dti-tkpd-chips label:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); color: var(--accent-text, var(--accent)); }
+            .dti-tkpd-desc { width: 100%; box-sizing: border-box; min-height: 64px; padding: 8px 10px; border-radius: 10px; border: 1.5px solid var(--border); background: var(--surface); color: var(--text); font-family: inherit; font-size: 12.5px; line-height: 1.45; resize: vertical; }
+            .dti-tkpd-desc:focus { outline: none; border-color: var(--accent); }
+            .dti-tkpd-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+            .dti-tkpd-seg label { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 10px; border: 1.5px solid var(--border); background: var(--surface); cursor: pointer; }
+            .dti-tkpd-seg label:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+            .dti-tkpd-seg input { margin-top: 3px; }
+            .dti-tkpd-seg b { display: block; font-size: 12.5px; font-weight: 700; line-height: 1.35; }
+            .dti-tkpd-seg small { display: block; font-size: 11px; line-height: 1.35; color: var(--text-muted); }
+            .dti-tkpd-what[hidden] { display: none; }
+            .dti-tkpd-what { padding: 9px 12px 10px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+            .dti-tkpd-what > b { display: block; margin-bottom: 6px; font-size: 10.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text, var(--accent)); }
+            .dti-tkpd-what ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+            .dti-tkpd-what li { position: relative; padding-left: 15px; font-size: 12.5px; line-height: 1.5; color: var(--text); }
+            .dti-tkpd-what li::before { content: ''; position: absolute; left: 3px; top: .62em; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+            .dti-tkpd-what li.ok::before { background: var(--success, #16a34a); }
+            .dti-tkpd-what li.warn { font-weight: 600; }
+            .dti-tkpd-what li.warn::before { background: var(--nc, #f59e0b); }
+            .dti-tkpd-what li.idle { padding-left: 0; color: var(--text-muted); }
+            .dti-tkpd-what li.idle::before { display: none; }
+            .dti-tkpd-foot { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 45%, var(--surface)); }
+            .dti-tkpd-btns { display: flex; align-items: center; gap: 8px; }
+            .dti-tkpd-btns > span { flex: 1; min-width: 0; font-size: 11.5px; line-height: 1.4; color: var(--text-muted); }
+            .dti-tkpd-foot button { flex: none; height: 36px; padding: 0 16px; border-radius: 10px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; border: 1.5px solid var(--border); background: var(--surface); color: var(--text); }
+            .dti-tkpd-foot .dti-tkpd-cancel:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-tkpd-go { min-width: 96px; border: 0 !important; background: var(--accent) !important; color: var(--accent-fg, #fff) !important; }
+            .dti-tkpd-go:hover:not(:disabled) { filter: brightness(1.08); }
+            .dti-tkpd-go:disabled { opacity: .5; cursor: default; }
+            @media (max-width: 540px) { .dti-tkpd-modes, .dti-tkpd-seg { grid-template-columns: 1fr; } .dti-tkpd-btns > span { display: none; } }
             .dti-tk-shlink { display: flex; align-items: center; gap: 6px; }
             .dti-tk-shstat { display: flex; align-items: center; gap: 8px; font-size: 11.5px; font-weight: 700; color: var(--success, #16a34a); }
             .dti-tk-shstat.stale { color: #b45309; }
@@ -6054,7 +6516,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 if (unlisted && !its.length) return;
                 const desc = [...(l.querySelector('.closet-list-content')?.children || [])].filter(p => p.tagName === 'P')
                     .map(p => p.textContent.trim()).filter(Boolean).join('\n').slice(0, 600);
-                lists.push({ id: l.dataset.id || '', owned, unlisted, desc, items: its, ...(tokPubCodeIn(l.querySelector('.closet-list-content')) ? { tok: 1 } : {}),
+                const cont = l.querySelector('.closet-list-content');
+                lists.push({ id: l.dataset.id || '', owned, unlisted, desc, items: its, ...(tokPubCodeIn(cont) ? { tok: 1, ...(tokPubHidden(cont, its.length > 0) ? { tokHide: 1 } : {}) } : {}),
                     name: unlisted ? 'Not in a list' : (l.querySelector(':scope > header h4, :scope > header h3, :scope > header h2')?.textContent.trim() || 'List') });
             });
         });
@@ -6072,7 +6535,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 its.push([+id, it.qty || 1]);
             });
             if (l.isUnlisted && !its.length) return;
-            lists.push({ id: l.listId || '', owned, unlisted: !!l.isUnlisted, items: its, ...(l.tokShare ? { tok: 1 } : {}), name: l.isUnlisted ? 'Not in a list' : l.listName,
+            lists.push({ id: l.listId || '', owned, unlisted: !!l.isUnlisted, items: its, ...(l.tokShare || l.tokLinked ? { tok: 1 } : {}), name: l.isUnlisted ? 'Not in a list' : l.listName,
                 desc: String(l.description || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim().slice(0, 600) });
         }));
         return { lists, items };
@@ -7692,7 +8155,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                     return `<div class="dti-nf-lgroup"><div class="dti-nf-lghead">${owned ? 'Items they have' : 'Items they want'}<i>${ls.length} list${ls.length === 1 ? '' : 's'}</i></div>
                         ${ls.length ? ls.map(l => `<details class="dti-nf-lst" data-k="${s.lists.indexOf(l)}"><summary><span class="dti-nf-lchev"></span><span class="dti-nf-lname">${noteEsc(l.name)}</span><span class="dti-nf-lcount">${l.items.length}</span>
                             ${l.id ? `<span class="dti-nf-lacts"><button type="button" class="dti-nf-lopen" data-pop="${noteEsc(l.id)}" title="Open this list in a popup">${POP_ICO.window}</button><a class="dti-nf-lopen" href="${nfItemsHref(f, l.id)}" target="_blank" rel="noopener" title="Open this list as a full page (new tab)">${NF_ICO.ext}</a></span>` : ''}</summary>
-                            ${l.tok || /^dtie:/.test(l.desc || '') ? `<p class="dti-nf-ldesc">Their token list, shared with DTI Enhance \u2014 <a href="/items?q=dti-enhance#tokens=@${encodeURIComponent(f.id)}">View tokens</a></p>` : l.desc ? `<p class="dti-nf-ldesc">${noteEsc(l.desc)}</p>` : ''}<div class="dti-nf-grid"></div></details>`).join('')
+                            ${l.desc && !/^dtie2?:/.test(l.desc) && !l.tokHide ? `<p class="dti-nf-ldesc">${noteEsc(l.desc)}</p>` : ''}${l.tok || /^dtie2?:/.test(l.desc || '') ? `<p class="dti-nf-ldesc">${l.tokHide || (!l.items.length && !(l.desc && !/^dtie:/.test(l.desc))) ? 'Their token list, shared with DTI Enhance' : 'Their tokens are shared from this list'} \u2014 <a href="/items?q=dti-enhance#tokens=@${encodeURIComponent(f.id)}">View tokens</a></p>` : ''}<div class="dti-nf-grid"></div></details>`).join('')
                         : '<div class="dti-nf-msg small">Nothing they share here.</div>'}</div>`;
                 };
                 panel.innerHTML = `<label class="dti-nf-isearch">${NF_ICO.search}<input type="search" placeholder="Search everything ${name} shares…" autocomplete="off" spellcheck="false"></label>
@@ -10280,6 +10743,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 padding: 2px 7px; border-radius: 6px; background: var(--accent-glow); color: var(--accent-text, var(--accent));
             }
             .dti-nx-pick-tag.nc { background: color-mix(in srgb, var(--nc) 14%, transparent); color: var(--nc); }
+            .dti-nx-pick-tag.tok { background: var(--surface-2); color: var(--text-muted); }
             .dti-nx-pick-msg { padding: 10px 4px; font-size: 12.5px; color: var(--text-muted); }
             .dti-nx-pick-user { display: flex; gap: 8px; }
             .dti-nx-pick-user button {
@@ -10315,6 +10779,16 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-gift-item.used, .dti-gift-item.gift { cursor: default; }
             .dti-gift-item.used { opacity: .7; }
             .dti-gift-item i { font-style: normal; font-size: 9.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--success); }
+            .dti-gift-item.sib i { text-transform: none; letter-spacing: 0; font-size: 10.5px; font-weight: 700; }
+            .dti-gift-item.sib i.out { color: #d97706; }
+            .dti-gift-tickall { margin-left: 8px; height: 22px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--accent-text, var(--accent)); font-family: inherit; font-size: 11px; font-weight: 700; cursor: pointer; vertical-align: 1px; }
+            .dti-gift-dests { display: flex; flex-direction: column; gap: 6px; }
+            .dti-gift-dest { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; border: 1.5px solid var(--border); background: var(--surface); cursor: pointer; }
+            .dti-gift-dest:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+            .dti-gift-dest input { margin: 0; flex: none; accent-color: var(--accent); cursor: pointer; }
+            .dti-gift-dest span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+            .dti-gift-dest b { font-size: 13px; color: var(--text); }
+            .dti-gift-dest small { font-size: 11.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .dti-nx-giftin { flex-shrink: 0; padding: 0 6px; border-radius: 4px; font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; background: color-mix(in srgb, var(--success) 16%, transparent); color: var(--success); }
             .dti-nx-giftoff { margin: 10px; padding: 8px 10px; border-radius: 10px; font-size: 12px; color: var(--text-muted); background: var(--surface-2); border: 1px solid var(--border); }
             .dti-nx-gifton { margin-top: 10px; height: 32px; padding: 0 14px; border: none; border-radius: 9px; cursor: pointer; background: var(--accent); color: var(--accent-fg, #fff); font-family: inherit; font-size: 12.5px; font-weight: 700; }
@@ -10532,6 +11006,11 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             }
             .dti-tr-res .dti-tr-gbcico { width: 34px; height: 34px; }
             .dti-tr-item.gbc .dti-tr-iname { font-weight: 800; }
+            /* a style token: its name opens it; a Token tag under it */
+            .dti-tr-tok { cursor: pointer; }
+            .dti-tr-toktag { display: inline-flex; align-items: center; gap: 3px; flex: none; font-weight: 700; color: var(--accent-text, var(--accent)); }
+            .dti-tr-toktag svg { width: 10px; height: 10px; flex: none; }
+            .dti-tr-toktag + .dti-tr-ival::before { content: '· '; font-weight: 400; }
             .dti-tr-quick { display: flex; gap: 6px; }
             .dti-tr-quick button {
                 flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 32px; padding: 0 8px;
@@ -11660,6 +12139,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['2.3', [
+            'My Tokens: “Share on my DTI page” lets you choose where your tokens live — in one of your own lists (a hidden code at the end of its description; the list doesn’t change, and a private list is made public only while it’s shared) or in a new list just for them (named “Tokens” or “Tokens · DTI Enhance”, with an optional description, shown as a Tokens button or as a list). It says exactly what will happen before you save, and “Change where” moves or edits it later',
+            'My Items: the list your tokens are shared from gets the Tokens icon, with “View tokens” under its description',
+            'Friends need 2.3 to see token shares made with 2.3 (on 2.2 they’ll see them once they update)',
+            'My Tokens: share links no longer break when a chat app leaves the last character out of the link (and ones that already did still open)',
+            'Trade reports: add style tokens and essences — search them by name next to DTI’s items, with their cap values; NC gifts that are tokens go in as tokens',
+            'NC gifts → trade reports: put several gifts in one report at once (your other gifts from that person are listed to tick), add later gifts to a report even after it’s completed, keep separate trades with the same person apart (each report shows what’s in it), and Undo',
+            'Capsule pages show the capsule’s own picture (one could show its LE instead)',
+            'Customs in dark mode: the item you clicked last no longer turns white with unreadable text',
+        ]],
         ['2.2', [
             'Customs: the Styles pictures are smoother (no jagged edges) and a little closer in, and they no longer flicker as they appear — a tile shows its picture once it’s ready, with a soft pulse while it loads',
             'Customs: the Styles pictures load much faster — the whole list starts loading as soon as you open Styles (what’s on screen first), and each picture is remembered, so the next time they’re all there at once',
@@ -17159,6 +17648,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #dti-closet-center-header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-bottom: 12px; }
             .dti-tkpub-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 13px; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
             .dti-tkpub-card > svg { flex: none; width: 26px; height: 26px; color: var(--accent-text, var(--accent)); }
+            .dti-list-tok { display: inline-grid; place-items: center; width: 15px; height: 15px; margin-right: 4px; vertical-align: -2px; color: var(--accent-text, var(--accent)); }
+            .dti-list-tok svg { width: 13px; height: 13px; }
+            .dti-tkpub-line { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+            .dti-tkpub-line svg { width: 13px; height: 13px; flex: none; color: var(--accent-text, var(--accent)); }
+            .dti-tkpub-line a { font-weight: 700; color: var(--accent-text, var(--accent)); }
             .dti-tkpub-card > div { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; text-align: left; }
             .dti-tkpub-card b { font-size: 13.5px; color: var(--text); }
             .dti-tkpub-card span { font-size: 12px; color: var(--text-muted); }
@@ -17990,7 +18484,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
         const sections = { owned: [], wanted: [] };
         let addOwnedHref = '#', addWantedHref = '#';
-        let tokSharePage = false;   // (they share their tokens with DTI Enhance: a Tokens button by the title, not a list)
+        let tokSharePage = false;
+        // A list's description, and — for a list that holds a token share — a line saying so
+        const listDescHtml = lst => (lst.description || '') + (lst.tokLinked ? `<div class="dti-tkpub-line">${TOK_ICO}<span>${isOwnPage ? 'Your tokens are shared from this list' : 'Their tokens are shared from this list'} \u2014 <a href="/items?q=dti-enhance#tokens=@${noteEsc(userId)}">View tokens</a></span></div>` : '');   // (they share their tokens with DTI Enhance: a Tokens button by the title, not a list)
 
         const isOwnPage = !!srcEl.querySelector('select[name*="visibility"]');
 
@@ -18086,20 +18582,21 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 });
                 // Description: <p> children of .closet-list-content (before the hangers grid)
                 const contentEl = listEl.querySelector('.closet-list-content');
-                const tokShare = !!tokPubCodeIn(contentEl);   // (a DTI Enhance token share)
-                const description = tokShare
+                const tokShare = !!tokPubCodeIn(contentEl);   // (holds a DTI Enhance token share)
+                const descPs = contentEl ? [...contentEl.children].filter(el => el.tagName === 'P' && !el.closest('.closet-list-hangers')) : [];
+                // (a list that holds it shows as usual, marked — unless it holds no items and says it's a Tokens button instead, or is only the code)
+                const tokLinked = tokShare && !tokPubHidden(contentEl, items.length > 0 || count > 0);
+                const description = tokShare && !tokLinked
                     ? `<div class="dti-tkpub-card">${TOK_ICO}<div><b>${isOwnPage ? 'Your tokens, shared' : 'Their tokens'}</b><span>${isOwnPage ? 'Kept up to date by DTI Enhance as your tokens change' : 'A token list shared with DTI Enhance'}</span></div><a class="dti-tkpub-view" href="/items?q=dti-enhance#tokens=@${noteEsc(userId)}">View tokens</a></div>`
-                    : contentEl
-                    ? [...contentEl.children]
-                        .filter(el => el.tagName === 'P' && !el.closest('.closet-list-hangers'))
-                        .map(p => p.innerHTML.trim()).filter(Boolean).join('<br><br>')
-                    : '';
+                    : descPs.filter(p => p.textContent.trim() || !p.querySelector('abbr[title^="dtie"]'))
+                        .map(p => p.innerHTML.trim()).filter(Boolean).join('<br><br>');
 
                 const thumbnails = items.filter(i => i.imgSrc).slice(0, 3).map(i => i.imgSrc);
-                if (tokShare) { tokSharePage = true; return; }
+                if (tokShare) tokSharePage = true;
+                if (tokShare && !tokLinked) return;
                 (isOwned ? sections.owned : sections.wanted).push({
                     listName, count: items.length || count, listId, isUnlisted, isOwned,
-                    visVal, visOpts, deleteListUrl, editHref, items, thumbnails, description, tokShare,
+                    visVal, visOpts, deleteListUrl, editHref, items, thumbnails, description, tokShare: false, tokLinked,
                 });
             });
         });
@@ -18669,7 +19166,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 card.innerHTML = `
                     <span class="dti-list-check" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.3 5 8.7l4.6-5"/></svg></span>
                     <div class="dti-list-drag-handle" title="Drag to reorder"><svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor"><circle cx="2" cy="2" r="1.2"/><circle cx="6" cy="2" r="1.2"/><circle cx="2" cy="6" r="1.2"/><circle cx="6" cy="6" r="1.2"/><circle cx="2" cy="10" r="1.2"/><circle cx="6" cy="10" r="1.2"/></svg></div>
-                    <span class="dti-list-name">${isOwnPage && acctMany() ? (() => { const a = acctGet(acctOfList(lst)); return `<button type="button" class="dti-list-acct" style="--ac:${noteEsc(a.color)}" title="${noteEsc(acctName(a))}\u2019s list \u2014 click to change"></button>`; })() : ''}${lst.listName}</span>
+                    <span class="dti-list-name">${isOwnPage && acctMany() ? (() => { const a = acctGet(acctOfList(lst)); return `<button type="button" class="dti-list-acct" style="--ac:${noteEsc(a.color)}" title="${noteEsc(acctName(a))}\u2019s list \u2014 click to change"></button>`; })() : ''}${lst.tokLinked ? `<span class="dti-list-tok" title="${isOwnPage ? 'Your tokens are shared from this list (a hidden code in its description)' : 'Their tokens are shared from this list'}">${TOK_ICO}</span>` : ''}${lst.listName}</span>
                     <div class="dti-list-bottom">
                         ${thumbBlock}
                         <span class="dti-list-meta">${lst.count} item${lst.count !== 1 ? 's' : ''}</span>
@@ -20205,7 +20702,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             // Description shows for a single list only
             const descEl = document.getElementById('dti-list-description');
             if (descEl) {
-                const singleDesc = activeLists.length === 1 && activeLists[0].lst.description;
+                const singleDesc = activeLists.length === 1 && listDescHtml(activeLists[0].lst);
                 if (singleDesc) { descEl.innerHTML = singleDesc; descEl.hidden = false; }
                 else { descEl.innerHTML = ''; descEl.hidden = true; }
             }
@@ -20264,9 +20761,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     hdr.innerHTML = `<span class="dti-grid-group-name">${al.lst.listName}</span><span class="dti-grid-group-count">${items.length} item${items.length !== 1 ? 's' : ''}</span><span class="dti-grid-group-caps dti-caps-total"></span>${addBtn}<button class="dti-group-pick" type="button" title="Pick items one by one">Select</button><button class="dti-group-sel" type="button" title="Select all of this list\u2019s items">All</button><button class="dti-group-collapse-btn" title="Collapse/expand list"><svg class="dti-group-collapse-icon${collapsed ? ' collapsed' : ''}" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,5 7,10 12,5"/></svg></button>`;
                     gridFrag.appendChild(hdr);
                     fillCaps(hdr.querySelector('.dti-grid-group-caps'), items);
-                    if (al.lst.description && !collapsed) {
+                    if (listDescHtml(al.lst) && !collapsed) {
                         const desc = document.createElement('div'); desc.className = 'dti-grid-group-desc';
-                        desc.innerHTML = al.lst.description; gridFrag.appendChild(desc);
+                        desc.innerHTML = listDescHtml(al.lst); gridFrag.appendChild(desc);
                     }
                 }
 
@@ -22743,20 +23240,24 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (!header) return;
                 // Check localStorage pool-item cache; for pool-item pages keyed by _poolIid
                 let _piCache = null;
-                try { const _c = localStorage.getItem('dti_pi_' + (_poolIid || id)); if (_c) _piCache = JSON.parse(_c); } catch(_) {}
+                // (written when a capsule's prize is clicked — by itemdb's id for it, so only a prize's page reads it: a DTI item
+                // id can be the same number as some other prize's itemdb id)
+                if (_poolIid) try { const _c = localStorage.getItem('dti_pi_' + _poolIid); if (_c) _piCache = JSON.parse(_c); } catch(_) {}
                 const name       = src?.name || json?.name || _piCache?.name || ('Item #' + (_poolIid || id));
                 document.title = 'DTI | ' + name;
                 const slug       = src?.slug || '';
                 const desc       = json?.description || '';
-                const feedRow    = !src?.mall && Array.isArray(feed) ? feed.find(r => String(r.item_id) === String(src?.item_id || (_poolIid ? '' : id))) : null;
-                const mall       = src?.mall || (feedRow ? { ...feedRow, saleStart: feedRow.saleBegin || feedRow.addedAt } : null);
+                const feedRow    = Array.isArray(feed) ? feed.find(r => String(r.item_id) === String(src?.item_id || (_poolIid ? '' : id))) : null;
+                // (itemdb's mall details have no picture: the NC Mall list's)
+                const mall       = src?.mall ? { ...src.mall, image: src.mall.image || feedRow?.image || '' } : (feedRow ? { ...feedRow, saleStart: feedRow.saleBegin || feedRow.addedAt } : null);
                 // parentImg only makes sense for capsule pages where the bundle parent shares art.
                 // For pool items (_poolIid set), the parent IS the capsule — its image is wrong for the main display.
                 const parentImg  = _poolIid ? null : (src?.parents?.find(p => p.image)?.image || null);
                 const imgSrcNeo  = slug ? 'https://images.neopets.com/items/' + slug.replace(/-/g, '_') + '.gif' : '';
                 const hasPool = !!(pool && pool.found && pool.items && pool.items.length);
-                // Pool fallback: use first guaranteed pool item's image if the main image fails (e.g. gift box capsules)
-                const poolFallbackImg = hasPool ? ((pool.items.find(x => x.rate != null && x.rate >= 100) || pool.items[0])?.image || null) : null;
+                // Pool fallback: the guaranteed prize's picture if the main one fails (e.g. gift box capsules) — never just the first
+                // prize (often the LE: it would look like the capsule's own picture)
+                const poolFallbackImg = hasPool ? (pool.items.find(x => x.rate != null && x.rate >= 100)?.image || null) : null;
                 // _piCache.image has priority over parentImg (piCache = actual item; parent = the capsule it came from)
                 const _stk       = stickerPackOf(name);   // (a Neoboard sticker pack: its stickers, from JellyNeo)
                 const imgSrc     = json?.thumbnail_url || src?.image || _piCache?.image || _stk?.img || mall?.image || parentImg || imgSrcNeo;
@@ -23041,7 +23542,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             listsForm.style.removeProperty('display');
             listsForm.querySelectorAll('li').forEach(li => {   // (your token list on DTI: not a list for items)
                 const inp = li.querySelector('input[type="number"]');
-                if (inp && li.querySelector('label')?.textContent.trim() === TOK_PUB_NAME && !(parseInt(inp.value, 10) > 0)) li.style.setProperty('display', 'none', 'important');
+                if (inp && (li.querySelector('label')?.textContent.trim() === TOK_PUB_NAME || inp.name === tokPubDedicatedKey()) && !(parseInt(inp.value, 10) > 0)) li.style.setProperty('display', 'none', 'important');
             });
             const ownershipGroups = listsForm.querySelector('.closet-hangers-ownership-groups');
             if (ownershipGroups) ownershipGroups.style.removeProperty('display');
@@ -26362,8 +26863,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
 
             /* ── Item hover — prevent Chakra white flash ────────────────── */
+            /* (and the item clicked last: DTI gives the row its light-mode hover color while its checkbox has focus) */
             #wardrobe-2020-root .item-container { position: relative !important; }
-            #wardrobe-2020-root .item-container:hover {
+            #wardrobe-2020-root .item-container:hover,
+            #wardrobe-2020-root input:focus + .item-container {
                 background: var(--surface-2) !important;
                 background-color: var(--surface-2) !important;
             }
@@ -27316,9 +27819,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const npId = name => 'np-' + String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
         // gift items as trade entries: DTI's own item when there's one by that exact name, else a plain entry
         const asTradeItems = list => Promise.all(list.map(async it => {
+            let cat = tkCat || tokenCatalogIfCached();
+            const tok = tokTradeFor(it, cat);   // (a style token: DTI doesn't have it)
+            if (tok) return tok;
             const d = await dtiJSON('/items.json?per_page=10&q=' + encodeURIComponent('"' + it.name + '"'));
             const hit = (d?.items || []).find(x => x.name.toLowerCase() === it.name.toLowerCase());
-            return hit ? { id: String(hit.id), name: hit.name, img: hit.thumbnail_url || it.img || '', qty: 1 } : { id: npId(it.name), name: it.name, img: it.img || '', qty: 1 };
+            if (hit) return { id: String(hit.id), name: hit.name, img: hit.thumbnail_url || it.img || '', qty: 1 };
+            if (!cat) { cat = await loadTokenCatalog().catch(() => null); if (cat) tkCat = cat; const tk = tokTradeFor(it, cat); if (tk) return tk; }   // (not on DTI: a token after all?)
+            return { id: npId(it.name), name: it.name, img: it.img || '', qty: 1 };
         }));
 
         const host = document.createElement('div');
@@ -27453,6 +27961,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .gi input { margin: 0; accent-color: ${A}; }
             .gacts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
             .gnote { font-size: 11px; color: ${M}; }
+            .gsib { margin-top: 4px; font-size: 11px; font-weight: 700; color: ${M}; }
+            .gi .gside { margin-left: auto; flex: none; font-style: normal; font-size: 10px; font-weight: 700; color: ${OK}; }
+            .gi .gside.out { color: ${NC}; }
+            .tickall { margin-left: 4px; height: 20px; padding: 0 7px; border-radius: 6px; border: 1px solid ${B}; background: ${S}; color: ${AT}; font-size: 10.5px; font-weight: 700; cursor: pointer; }
+            .gdestw { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; font-size: 11px; font-weight: 700; color: ${M}; }
+            .gdestw .gdest { height: 32px; padding: 0 8px; font-size: 12px; }
+            .undobar { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 6px 6px 6px 10px; border-radius: 9px; background: ${S2}; font-size: 12px; color: ${T}; }
+            .undobar .btn { margin-left: auto; height: 26px; }
             /* One trade report */
             .edhead { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
             .iconbtn { width: 30px; height: 30px; flex: none; padding: 0; border: 1px solid ${B}; border-radius: 9px; background: ${S}; color: ${T}; cursor: pointer;
@@ -27736,7 +28252,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             </div>`;
         }
         function giftRow(g) {
-            const left = giftLeft(g), open = ui.openGift === g.uid, ot = openTradeWith(g.who);
+            const left = giftLeft(g), open = ui.openGift === g.uid;
+            // (open: the reports with them it can go into, and their other gifts that may be from the same trade)
+            const targets = open ? giftTargets(trades(), g.who, g.at).slice(0, 4) : [];
+            const dest0 = open ? giftDefaultTarget(targets, g) : 'new';
+            const sibs = open ? giftSiblings(gifts().filter(o => inMine(acctOfNp(o.np))), g) : [];
+            const gi = (x, i, attrs, side) => `<label class="gi"><input type="checkbox" ${attrs}>${x.items[i].img ? `<img src="${esc(x.items[i].img)}" alt="">` : '<span class="noimg"></span>'}<span>${esc(x.items[i].name)}</span>${side || ''}</label>`;
             return `<div class="gift">
                 <button type="button" class="gmain" data-g="${esc(g.uid)}" aria-expanded="${open}">
                     <span class="gdir ${g.dir === 'in' ? 'in' : 'out'}">${ICO.gift}</span>
@@ -27744,13 +28265,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     <span class="caret">${open ? '▴' : '▾'}</span>
                 </button>
                 ${open ? `<div class="gbody">
-                    ${left.map(i => `<label class="gi"><input type="checkbox" data-gi="${i}" checked>${g.items[i].img ? `<img src="${esc(g.items[i].img)}" alt="">` : '<span class="noimg"></span>'}<span>${esc(g.items[i].name)}</span></label>`).join('')}
+                    ${left.map(i => gi(g, i, `data-gi="${i}" checked`)).join('')}
+                    ${sibs.length ? `<div class="gsib">Also with ${esc(g.who)} \u2014 tick the ones from this same trade <button type="button" class="tickall" data-gtickall>Tick all</button></div>${sibs.map(({ g: x }) => giftLeft(x).map(i => gi(x, i, `data-gs="${esc(x.uid)}" data-gi="${i}"`, `<i class="gside ${x.dir === 'in' ? 'in' : 'out'}">${x.dir === 'in' ? '\u2193 got' : '\u2191 sent'} ${esc(ago(x.at))}</i>`)).join('')).join('')}` : ''}
+                    <label class="gdestw"><span>Put them in</span><select class="txt gdest">${targets.map(n => `<option value="${esc(n.key)}"${n.key === dest0 ? ' selected' : ''}>${esc(titleOf(n))} \u2014 ${esc(tradeSummary(cleanTrade(n.trade)))} \u00b7 ${esc(stLabel(cleanTrade(n.trade).status))}</option>`).join('')}<option value="new"${dest0 === 'new' ? ' selected' : ''}>A new trade report</option></select></label>
                     <div class="gacts">
-                        ${ot ? `<button type="button" class="btn pri" data-gact="add" data-key="${esc(ot.key)}">Add to “${esc(titleOf(ot))}”</button>` : ''}
-                        <button type="button" class="btn${ot ? '' : ' pri'}" data-gact="new">${ot ? 'New report' : 'Make a trade report'}</button>
+                        <button type="button" class="btn pri" data-gact="put">Put them in</button>
                         ${(g.used || []).length ? '' : '<button type="button" class="btn" data-gact="gift" title="It wasn’t part of a trade">Just a gift</button>'}
                     </div>
-                    <span class="gnote">The ticked items go on “${g.dir === 'in' ? 'You get' : 'You give'}”${g.who ? `, with ${esc(g.who)} as the trader` : ''}.</span>
+                    <span class="gnote">Ticked items go on “You get” when you received them and “You give” when you sent them${g.who ? `, with ${esc(g.who)} as the trader` : ''}.</span>
                 </div>` : ''}
             </div>`;
         }
@@ -27785,13 +28307,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     <b class="edtitle">${esc(saved ? titleOf(n) : 'New trade report')}</b>
                     ${saved ? `<a class="iconbtn" href="${D}/items?q=dti-enhance#notes/${esc(ui.key)}" target="_blank" rel="noopener" title="Open it in DTI’s Notes">${ICO.ext}</a>` : ''}
                 </div>
+                ${ui.undo?.key === ui.key && Date.now() - ui.undo.at < 120e3 ? `<div class="undobar"><span>${ui.undo.n} item${ui.undo.n === 1 ? '' : 's'} put in from your NC gifts</span><button type="button" class="btn" data-undo>Undo</button></div>` : ''}
                 ${(() => { const got = t.status === 'done' ? t.get.filter(it => seekHas(it.id)) : []; return got.length ? `<div class="seekgot"><span>\u25ce You got ${esc(got.map(it => it.name).join(', '))} \u2014 still on your Seeking list.</span><button type="button" class="seekoff" data-ids="${esc(got.map(it => it.id).join(','))}">Take ${got.length === 1 ? 'it' : 'them'} off</button></div>` : ''; })()}
                 <label class="fld"><span>Trading with</span><input class="txt partner" list="partners" placeholder="Their Neopets username" autocomplete="off" spellcheck="false" value="${esc(t.partner?.name || '')}"></label>
                 <div class="seg">${STATUS.map(([v, l]) => `<button type="button" data-seg="${v}" class="${v === t.status ? 'on s-' + v : ''}">${l}</button>`).join('')}</div>
                 ${['give', 'get'].map(side => `<div class="side">
                     <div class="shd">${side === 'give' ? 'You give' : 'You get'}<b>${t[side].reduce((s, it) => s + it.qty, 0) || ''}</b></div>
                     ${t[side].map((it, i) => itemRow(it, side, i)).join('')}
-                    <div class="add"><input class="txt" data-add="${side}" placeholder="＋ Add an item…" autocomplete="off" spellcheck="false"><div class="drop" hidden></div></div>
+                    <div class="add"><input class="txt" data-add="${side}" placeholder="＋ Add an item or style token…" autocomplete="off" spellcheck="false"><div class="drop" hidden></div></div>
                     <div class="quick">${Object.entries(GBC_KINDS).map(([id, g]) => `<button type="button" data-gbc="${id}" data-side="${side}" title="Add a ${g.name} (${esc(g.full)}) \u2014 ${gbcCaps(id)}">${ICO.gift}+ ${g.name}</button>`).join('')}</div>
                 </div>`).join('')}
                 <label class="fld"><span>Notes</span><textarea class="txt text" placeholder="Anything to remember about this trade">${esc(n.text || '')}</textarea></label>
@@ -27828,7 +28351,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 let timer = 0, gen = 0, results = [], hl = 0;
                 const show = html => { drop.innerHTML = html; drop.hidden = !html; };
                 const paint = () => show(results.map((it, i) => `<button type="button" class="opt${i === hl ? ' hl' : ''}" data-pick="${i}">
-                    ${itemPic(it)}<span>${esc(it.name)}</span>${it.nc ? '<i class="tag">NC</i>' : ''}${it.typed ? '<i class="tag typed">as typed</i>' : ''}</button>`).join(''));
+                    ${itemPic(it)}<span>${esc(it.name)}</span>${it.nc ? '<i class="tag">NC</i>' : ''}${it.tok ? '<i class="tag typed">Token</i>' : ''}${it.typed ? '<i class="tag typed">as typed</i>' : ''}</button>`).join(''));
                 const pick = it => {
                     if (!it) return;
                     patchTrade(t => { const ex = t[side].find(o => o.id === it.id); if (ex) ex.qty++; else t[side].push({ id: it.id, name: GBC_KINDS[it.id]?.name || it.name, img: it.img, qty: 1 }); });
@@ -27843,6 +28366,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         const my = ++gen, d = await dtiJSON('/items.json?q=' + encodeURIComponent(q));
                         if (my !== gen || !inp.isConnected) return;
                         results = (d?.items || []).slice(0, 8).map(it => ({ id: String(it.id), name: it.name, img: it.thumbnail_url || '', nc: !!it['nc?'] }));
+                        // style tokens too (DTI has none): a name that's just that, or starts with it, above DTI's items; the rest after
+                        const cat = tkCat || tokenCatalogIfCached();
+                        if (!cat) loadTokenCatalog().then(c => { tkCat = c; if (inp.isConnected && inp.value.trim() === q) inp.dispatchEvent(new Event('input')); }).catch(() => {});
+                        const toks = tokSearch(cat, q, 5).map(({ t, rank }) => ({ ...tokTradeItem(t), tok: true, rank }));
+                        results = [...toks.filter(x => x.rank < 2), ...results, ...toks.filter(x => x.rank === 2)];
                         if (/\b(bf)?gbcs?\b|gift ?box|black friday/i.test(q)) results.unshift(...Object.entries(GBC_KINDS).map(([id, g]) => ({ id, name: `${g.name} \u2014 ${g.full.replace(/ \u2014 .*$/, '')}`, img: '' })));   // (any GBC, as Notes has it)
                         if (!results.some(it => it.name.toLowerCase() === q.toLowerCase())) results.push({ id: npId(q), name: q, img: '', typed: true });
                         hl = 0;
@@ -28322,10 +28850,27 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         $('.brand').addEventListener('click', () => showMenu(menu.hidden));
         panel.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.menu, .brand')) showMenu(false); });
         body.addEventListener('click', async e => {
-            const b = e.target.closest('[data-open], [data-st], [data-set], [data-g], [data-gact], [data-seg], [data-q], [data-gbc], [data-rm], [data-skrm], .newbtn, .morebtn, .acctall, .seekoff, .back, .del');
+            const b = e.target.closest('[data-open], [data-st], [data-set], [data-g], [data-gact], [data-seg], [data-q], [data-gbc], [data-rm], [data-skrm], [data-gtickall], [data-undo], .newbtn, .morebtn, .acctall, .seekoff, .back, .del');
             if (ui.stFor && !e.target.closest('.stmenu, [data-st]')) { ui.stFor = ''; if (!b) render(); }
             if (!b) return;
             const d = b.dataset;
+            if ('gtickall' in d) {   // (a gift's other gifts with them: tick or untick them all)
+                const boxes = [...body.querySelectorAll('.gift .gbody input[data-gs]')], all = boxes.every(c => c.checked);
+                boxes.forEach(c => { c.checked = !all; });
+                b.textContent = all ? 'Tick all' : 'Untick all';
+                return;
+            }
+            if ('undo' in d) {   // (gifts put in the wrong report: everything back as it was, and the gift open again)
+                const u = ui.undo;
+                ui.undo = null;
+                if (u) {
+                    if (u.trade) saveNote(u.key, { trade: u.trade }); else removeNote(u.key);
+                    GM_setValue('dti_np_gifts', u.gifts);
+                    ui.view = 'list'; ui.key = ''; ui.openGift = u.uid;
+                }
+                render();
+                return;
+            }
             if (b.matches('.newbtn')) { ui.view = 'edit'; ui.key = newKey(); ui.draft = null; render(); body.querySelector('.partner')?.focus(); return; }
             if (d.open) { ui.tab = 'trades'; ui.item = null; ui.view = 'edit'; ui.key = d.open; render(); body.scrollTop = 0; return; }   // (from Trades, or On this page)
             if (d.st) { ui.stFor = ui.stFor === d.st ? '' : d.st; render(); return; }
@@ -28362,25 +28907,36 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 render();
             }
         });
-        // A gift's ticked items into a trade report: one with them that's still open, or a new one
+        // A gift's ticked items — and its other gifts' with them — into a trade report: one with them (open, or completed in
+        // the last week), or a new one
         async function giftAct(b) {
             const uid = ui.openGift, g = gifts().find(o => o.uid === uid);
             if (!g) return render();
             if (b.dataset.gact === 'gift') { saveGift(uid, { gift: true }); ui.openGift = ''; return render(); }
-            const pick = [...body.querySelectorAll('.gift input[data-gi]:checked')].map(c => +c.dataset.gi);
-            if (!pick.length) { b.textContent = 'Tick an item first'; return; }
+            const byUid = new Map(gifts().map(o => [o.uid, o]));
+            const picks = [...body.querySelectorAll('.gift .gbody input[data-gi]:checked')].map(c => ({ uid: c.dataset.gs || uid, i: +c.dataset.gi }))
+                .map(p => ({ ...p, gift: byUid.get(p.uid) })).filter(p => p.gift?.items?.[p.i]);
+            if (!picks.length) { b.textContent = 'Tick an item first'; return; }
             body.querySelectorAll('.gacts .btn').forEach(o => { o.disabled = true; });
             b.textContent = 'Finding the items on DTI…';
-            const items = await asTradeItems(pick.map(i => g.items[i]));
-            const side = g.dir === 'in' ? 'get' : 'give';
-            const key = b.dataset.gact === 'add' ? b.dataset.key : newKey(), prev = tradeOf(key);
+            const items = await asTradeItems(picks.map(p => p.gift.items[p.i]));
+            const dest = body.querySelector('.gift .gbody .gdest')?.value || 'new';
+            const key = dest === 'new' ? newKey() : dest, prev = dest === 'new' ? null : tradeOf(key);
+            const undo = { key, uid, n: picks.length, at: Date.now(), trade: prev ? cleanTrade(prev.trade) : null, gifts: gifts() };   // (for Undo)
             const t = prev ? cleanTrade(prev.trade) : { partner: g.who ? { name: g.who } : null, give: [], get: [], status: 'pending', date: g.date || today(), acct: acctMany() ? acctOfNp(g.np) : '' };
-            items.forEach(it => { const ex = t[side].find(o => o.id === it.id); if (ex) ex.qty += it.qty; else t[side].push(it); });
+            picks.forEach((p, k) => {
+                const side = p.gift.dir === 'in' ? 'get' : 'give', it = items[k], ex = t[side].find(o => o.id === it.id);
+                if (ex) ex.qty += it.qty; else t[side].push(it);
+            });
             t.status = t.give.length && t.get.length ? 'done' : 'pending';   // (both ways done: the trade is complete — as in Notes)
             saveNote(key, { trade: t });
-            const now = gifts().find(o => o.uid === uid) || g;
-            saveGift(uid, { used: [...new Set([...(now.used || []), ...pick])], notes: [...new Set([...(now.notes || []), key])], gift: false });
-            ui.openGift = ''; ui.view = 'edit'; ui.key = key;
+            const per = new Map();
+            picks.forEach(p => per.set(p.uid, [...(per.get(p.uid) || []), p.i]));
+            per.forEach((idx, u) => {
+                const now = gifts().find(o => o.uid === u);
+                if (now) saveGift(u, { used: [...new Set([...(now.used || []), ...idx])], notes: [...new Set([...(now.notes || []), key])], gift: false });
+            });
+            ui.openGift = ''; ui.view = 'edit'; ui.key = key; ui.undo = undo;
             if (!panel.hidden) render();
         }
 
