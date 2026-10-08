@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      2.3
+// @version      2.4
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -1323,6 +1323,18 @@
             b.title = on ? 'On your Seeking list \u2014 click to take it off' : 'Seeking now: add it to your short list of items you want ASAP';
         });
     }
+
+    // Alternate outfits inside one custom (DTI Enhance's strip in the editor): GM `dti_outfit_alts` = { v, outfits: { [outfit id]:
+    // { on (the one on screen), savedOn (the one the custom is saved with on DTI), alts: [{ id, name, speciesId, colorId, pose,
+    // appearanceId, altStyleId, worn: [item ids] }] } } } — DTI has nowhere to keep them; every alternate's items also stay in the
+    // saved custom (worn, or in its closet). Two or more, or none at all.
+    const ALT_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M8 2 1.8 5.2 8 8.4l6.2-3.2z"/><path d="M1.8 8 8 11.2 14.2 8"/><path d="M1.8 10.8 8 14l6.2-3.2"/></svg>';
+    const DTIAlts = {
+        raw() { const d = GM_getValue('dti_outfit_alts', null); return d && d.outfits ? d : { v: 1, outfits: {} }; },
+        of(id) { const e = this.raw().outfits[String(id)]; return e && Array.isArray(e.alts) && e.alts.length > 1 ? e : null; },
+        put(id, e) { const d = this.raw(); if (e && e.alts?.length > 1) d.outfits[String(id)] = e; else delete d.outfits[String(id)]; GM_setValue('dti_outfit_alts', d); },
+        count(id) { return this.of(id)?.alts.length || 0; },
+    };
 
     async function cacheGet(key, legacyLs) {
         const v = await DTICache.get(key);
@@ -4319,6 +4331,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         document.addEventListener('keydown', onKey, true);
         ov.addEventListener('click', e => { if (!e.target.closest('.dti-tkpd-box') || e.target.closest('.dti-tkpd-x, .dti-tkpd-cancel')) close(); });
         ov.querySelector('.dti-tkpd-box').focus();
+        if (!GM_getValue('dti_user_name', '')) { ov.querySelector('.dti-tkpd-body').innerHTML = '<div class="dti-tkpd-msg">Log in to DTI first \u2014 then you can choose where your tokens go.</div>'; return; }
         let lists = null, made = null;
         try { lists = await tokPubMyLists(slug); } catch (_) {}
         const gone = !!pub && !(lists || []).some(l => l.id === curId);   // (the list they were in isn't on DTI any more)
@@ -4356,13 +4369,13 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 <div class="dti-tkpd-f"><span class="dti-tkpd-lbl">Name</span>
                     <div class="dti-tkpd-chips">${names.map(n => `<label><input type="radio" name="dti-tkpd-name" value="${noteEsc(n)}"${n === name0 ? ' checked' : ''}>${noteEsc(n)}</label>`).join('')}</div></div>
                 <label class="dti-tkpd-f"><span class="dti-tkpd-lbl">Description<i>optional</i></span>
-                    <textarea class="dti-tkpd-desc" rows="3" maxlength="2000" placeholder="e.g. Tokens I have up for trade \u2014 Neomail me!">${noteEsc(desc0)}</textarea>
-                    <small>Everyone sees it on your DTI page \u2014 handy if you use the list for trading too.</small></label>
+                    <textarea class="dti-tkpd-desc" rows="3" maxlength="2000" placeholder="e.g. Have: \u2026  Want: \u2026 \u2014 Neomail me to trade!">${noteEsc(desc0)}</textarea>
+                    <small>Shown on your DTI page, for people without DTI Enhance \u2014 e.g. your tokens written out.</small></label>
                 <div class="dti-tkpd-f"><span class="dti-tkpd-lbl">On your Items page</span>
                     <div class="dti-tkpd-seg">
-                        <label><input type="radio" name="dti-tkpd-show" value="hide"${show0 ? '' : ' checked'}><span><b>A Tokens button</b><small>Instead of the list</small></span></label>
-                        <label><input type="radio" name="dti-tkpd-show" value="show"${show0 ? ' checked' : ''}><span><b>The list</b><small>With your other lists</small></span></label></div>
-                    <small>How DTI Enhance users see it. Without DTI Enhance, it\u2019s a normal list on DTI.</small></div>
+                        <label><input type="radio" name="dti-tkpd-show" value="hide"${show0 ? '' : ' checked'}><span><b>Hide the list</b><small>Just the Tokens button</small></span></label>
+                        <label><input type="radio" name="dti-tkpd-show" value="show"${show0 ? ' checked' : ''}><span><b>Show the list</b><small>To edit it like your other lists</small></span></label></div>
+                    <small>The Tokens button is there either way. Show the list to edit it from your Items page \u2014 e.g. to write your tokens out for people without DTI Enhance.</small></div>
             </div>`;
         const val = n => body.querySelector(`input[name="${n}"]:checked`)?.value || '';
         const choice = () => {
@@ -4373,7 +4386,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         // (what the choice will do, line by line — [text, '' | 'ok' | 'warn' | 'idle'] — and whether it changes nothing, or nothing's picked)
         const plan = c => {
             const L = [], add = (t, k = '') => L.push([t, k]);
-            const showLine = s => s ? 'DTI Enhance users see it with your other lists, with the Tokens mark.' : 'DTI Enhance users see a Tokens button on your Items page instead of the list.';
+            const showLine = s => s ? 'With DTI Enhance, the list shows with your other lists (edit it there like any list), next to the Tokens button.' : 'With DTI Enhance, your Items page shows just the Tokens button \u2014 the list itself stays hidden.';
             const leave = () => {   // (out of where they are now — as Stop sharing does)
                 if (fresh || !cur) return;
                 if (isMade && !tokPubStrip(made.desc) && !cur.n) add(`${q(cur.name)}, the list made for your tokens, is deleted.`);
@@ -4432,15 +4445,17 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             if (p.same) return close();
             go.disabled = true; go.textContent = fresh ? 'Putting them on DTI\u2026' : 'Saving\u2026';
             try {
-                if (c.mode === 'new' && isMade) {   // (the list made for them: its name, description and showing, changed in place)
-                    GM_setValue('dti_tok_pub', { ...pub, name, mode: c.show ? 'show' : 'hide', descSet: c.desc, renameTo: name !== curName ? name : null });
-                } else {
-                    if (!fresh) await tokPubStop(true);   // (out of where they were first)
-                    GM_setValue('dti_tok_pub', !t ? { uid, slug, listId: '', made: true, name, mode: c.show ? 'show' : 'hide', descSet: c.desc, sig: '', at: 0, fresh: true }
-                        : t.code && t.hide ? { uid, slug, listId: t.id, made: true, name, mode: 'hide', sig: '', at: 0 }   // (a list made for them already — from another browser: it stays as it is)
-                        : { uid, slug, listId: t.id, made: false, name, mode: 'show', sig: '', at: 0, makePublic: t.vis === '0', wasPrivate: t.vis === '0' });
-                }
-                if (!(await tokPubWrite(true))) throw new Error('write');
+                await tokPubOne(async () => {   // (the move and the write as one step — nothing else lands in between)
+                    if (c.mode === 'new' && isMade) {   // (the list made for them: its name, description and showing, changed in place)
+                        GM_setValue('dti_tok_pub', { ...pub, name, mode: c.show ? 'show' : 'hide', descSet: c.desc, renameTo: name !== curName ? name : null });
+                    } else {
+                        if (!fresh) await tokPubStop(true);   // (out of where they were first)
+                        GM_setValue('dti_tok_pub', !t ? { uid, slug, listId: '', made: true, name, mode: c.show ? 'show' : 'hide', descSet: c.desc, sig: '', at: 0, fresh: true }
+                            : t.code && t.hide ? { uid, slug, listId: t.id, made: true, name, mode: 'hide', sig: '', at: 0 }   // (a list made for them already — from another browser: it stays as it is)
+                            : { uid, slug, listId: t.id, made: false, name, mode: 'show', sig: '', at: 0, makePublic: t.vis === '0', wasPrivate: t.vis === '0' });
+                    }
+                    if (!(await tokPubWrite(true))) throw new Error('write');
+                });
                 tokPubWire();   // (kept up to date from now on)
                 close();
                 const said = `Your tokens are in \u201c${name}\u201d on DTI`;   // (the link copied too, when the browser lets it — it's in Share either way)
@@ -4456,15 +4471,27 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
     }
     // Kept up to date: a few seconds after your tokens, want lists or share settings change (one tab does it), and on DTI pages
     let _tokPubT = 0, _tokPubBusy = false;
+    // One at a time: a save from the popup, "Update now", Stop sharing and the timer wait for each other in this tab (two at once
+    // could each make a list for a new share, or put the code back into a list being emptied) and after another tab's, holding the
+    // lock other tabs check
+    let _tokPubQ = Promise.resolve();
+    function tokPubOne(fn) {
+        const run = async () => {
+            for (let i = 0; i < 60 && Date.now() - GM_getValue('dti_tok_pub_lock', 0) < 30000; i++) await new Promise(r => setTimeout(r, 500));   // (another tab's)
+            _tokPubBusy = true; GM_setValue('dti_tok_pub_lock', Date.now());
+            try { return await fn(); }
+            finally { _tokPubBusy = false; GM_setValue('dti_tok_pub_lock', 0); }
+        };
+        const p = _tokPubQ.then(run);
+        _tokPubQ = p.catch(() => {});
+        return p;
+    }
     function tokPubSoon(delay = 6000) {
         if (!GM_getValue('dti_tok_pub', null) || window.top !== window || location.hostname !== 'impress.openneo.net') return;
         clearTimeout(_tokPubT);
         _tokPubT = setTimeout(async () => {
-            if (_tokPubBusy || Date.now() - GM_getValue('dti_tok_pub_lock', 0) < 30000) return tokPubSoon(delay);   // (another tab is on it)
-            _tokPubBusy = true;
-            GM_setValue('dti_tok_pub_lock', Date.now());
-            try { await tokPubWrite(false); } catch (_) {}
-            finally { _tokPubBusy = false; GM_setValue('dti_tok_pub_lock', 0); }
+            if (_tokPubBusy || Date.now() - GM_getValue('dti_tok_pub_lock', 0) < 30000) return tokPubSoon(delay);   // (this tab or another is on it)
+            try { await tokPubOne(() => tokPubWrite(false)); } catch (_) {}
         }, delay);
     }
     function tokPubWire() {
@@ -5504,7 +5531,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 if (b.classList.contains('dti-tk-shnow')) {
                     b.disabled = true; b.textContent = 'Updating\u2026';
                     let ok = false;
-                    try { ok = await tokPubWrite(true); } catch (_) {}
+                    try { ok = await tokPubOne(() => tokPubWrite(true)); } catch (_) {}
                     dtiToast(ok ? 'Your tokens on DTI are up to date' : 'Couldn\u2019t update it \u2014 try again in a moment', { variant: ok ? 'success' : 'error' });
                     if (menu.isConnected) paintPub();
                     return;
@@ -5516,7 +5543,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 }
                 b.disabled = true; b.textContent = 'Taking it off\u2026';
                 try {
-                    const was = GM_getValue('dti_tok_pub', null), r = await tokPubStop();
+                    const was = GM_getValue('dti_tok_pub', null), r = await tokPubOne(() => tokPubStop());
                     dtiToast(r === 'deleted' ? 'Your tokens are off your DTI page \u2014 the list made for them is gone' : `Your tokens are off your DTI page \u2014 \u201c${was?.name || 'the list'}\u201d is otherwise as it was`);
                 } catch (_) {
                     dtiToast('Couldn\u2019t reach DTI \u2014 try again in a moment', { variant: 'error' });
@@ -9642,7 +9669,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             const title = mi.trinket ? 'Comes with' : mi.kind === 'capsule' ? 'Inside this capsule' : 'What you can get';
             host.innerHTML = `<div class="dti-ip-section">${title}</div><div class="dti-mg-loading small"><span class="dti-mg-spin"></span>Looking inside…</div>`;
             let pool = null;
-            try { pool = r.iid ? await fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + r.iid).then(x => x.ok ? x.json() : null) : null; } catch (_) {}
+            try { pool = r.iid ? await fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + r.iid).then(x => x.ok ? x.json() : null).then(poolClean) : null; } catch (_) {}
             const its = pool?.items || [];
             if (!alive()) return;
             if (!its.length) { host.innerHTML = mi.kind === 'capsule' ? `<div class="dti-ip-section">${title}</div><div class="dti-mg-loading small">What’s inside isn’t known yet.</div>` : ''; return; }
@@ -11180,6 +11207,27 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         const random = (items || []).filter(x => !(x.rate != null && x.rate >= 100)), le = random.filter(x => x.isLE);
         return le.length > 0 && pct(le) >= 90 && pct(random.filter(x => !x.isLE)) >= 90;
     }
+    // A capsule's contents as itemdb has them from people opening it — less the strays: on a capsule that's just come out, single
+    // reports of things that can't be in it (NP items, food, codestones…) sit at a sliver of a percent each, far below everything
+    // really in it. So at the biggest drop in the odds, if the next item down is under a tenth of the one above it, everything from
+    // there down goes (a big retired capsule's odds slope down with no such cliff; guaranteed prizes and the LE bonus drop are
+    // weighed on their own; an item itemdb lists that nobody has reported yet stays). When the rest are a "one of these" draw,
+    // they share the odds the strays took (back to 100%).
+    function poolClean(pool) {
+        if (!pool?.items?.length) return pool;
+        const sure = x => x.rate != null && x.rate >= 100, sum = a => a.reduce((t, x) => t + (x.rate || 0), 0);
+        const drop = new Set();
+        for (const grp of [pool.items.filter(x => !sure(x) && !x.isLE), pool.items.filter(x => !sure(x) && x.isLE)]) {
+            const seen = grp.filter(x => x.rate > 0).sort((p, q) => q.rate - p.rate);
+            let at = -1, cliff = 10;
+            for (let i = 0; i + 1 < seen.length; i++) { const r = seen[i].rate / seen[i + 1].rate; if (r >= cliff) { cliff = r; at = i; } }
+            if (at >= 0) seen.slice(at + 1).forEach(x => drop.add(x));
+        }
+        if (!drop.size) return pool;
+        const main = pool.items.filter(x => !sure(x) && !x.isLE), kept = new Set(main.filter(x => !drop.has(x) && x.rate > 0));
+        const after = sum([...kept]), k = sum(main) >= 90 && after > 0 ? 100 / after : 1;
+        return { ...pool, items: pool.items.filter(x => !drop.has(x)).map(x => k !== 1 && kept.has(x) ? { ...x, rate: x.rate * k } : x) };
+    }
     // A value, for showing: "4-6 caps" (an amount), the list's note as it is, or '' (nothing — "-" on a list is no value)
     function capsLabel(val) {
         const v = String(val ?? '').trim();
@@ -11443,7 +11491,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             _dtiSrcFetch(id)
         ]).then(([data, src]) => {
             const _poolP = src?.iid
-                ? fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + src.iid).then(r => r.ok ? r.json() : null).catch(() => null)
+                ? fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + src.iid).then(r => r.ok ? r.json() : null).then(poolClean).catch(() => null)
                 : Promise.resolve(null);
             return _poolP.then(pool => [data, src, pool]);
         }).then(([data, src, pool]) => {
@@ -12139,6 +12187,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['2.4', [
+            'Customs: keep alternate outfits in one custom — each with its own items, color, pose and style. “Alternate outfits” by a custom’s name in the editor starts them; switch with the tabs under the name, double-click one to rename it (Customs shows how many a custom has)',
+            'Shopping list: an outfit’s NC Style is on it too when you don’t have its token (with its value and a Want button), and each item has a Seek button',
+            'Capsules: items wrongly reported from a capsule (common on brand-new ones — NP items, food…) are left out, so it shows just what’s really inside',
+            'Share on my DTI page: clearer choices for a list made for your tokens (the Tokens button is there either way — show the list to edit it yourself), and saving can no longer make a second list',
+        ]],
         ['2.3', [
             'My Tokens: “Share on my DTI page” lets you choose where your tokens live — in one of your own lists (a hidden code at the end of its description; the list doesn’t change, and a private list is made public only while it’s shared) or in a new list just for them (named “Tokens” or “Tokens · DTI Enhance”, with an optional description, shown as a Tokens button or as a list). It says exactly what will happen before you save, and “Change where” moves or edits it later',
             'My Items: the list your tokens are shared from gets the Tokens icon, with “View tokens” under its description',
@@ -16756,7 +16810,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     _dtiSrcFetch(id)
                 ]).then(([data, src]) => {
                     const _poolP = src?.iid
-                        ? fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + src.iid).then(r => r.ok ? r.json() : null).catch(() => null)
+                        ? fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + src.iid).then(r => r.ok ? r.json() : null).then(poolClean).catch(() => null)
                         : Promise.resolve(null);
                     return _poolP.then(pool => [data, src, pool]);
                 }).then(([data, src, pool]) => {
@@ -22289,6 +22343,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 #dti-os-empty button { height: 32px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-weight: 700; cursor: pointer; }
                 #dti-os-empty button:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
                 .dti-oc-acts svg { width: clamp(11px, 6cqi, 14px); height: clamp(11px, 6cqi, 14px); }
+                .dti-oc-alts { display: inline-flex; align-items: center; gap: 4px; flex: none; margin-left: 6px; padding: 2px 8px; border-radius: 99px; background: var(--accent-glow); color: var(--accent-text, var(--accent)); font-size: clamp(10px, 5.5cqi, 12px); font-weight: 800; line-height: 1.4; }
+                .dti-oc-alts svg { width: 1.1em; height: 1.1em; }
                 .dti-oc-acts .dti-oc-ok { background: var(--success); }
                 ul#outfits .button_to { display: contents; }
                 @container (max-width: 170px) {
@@ -22370,6 +22426,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // ── Cards ──
         items.forEach(li => {
             const id = outfitId(li);
+            const altsN = id ? DTIAlts.count(id) : 0;   // (alternate outfits kept in it — switched between in the editor)
+            if (altsN) li.querySelector('header')?.insertAdjacentHTML('beforeend', `<span class="dti-oc-alts" title="${altsN} outfits in this custom \u2014 switch between them in the editor">${ALT_ICO}${altsN}</span>`);
             // Sharper thumbnails
             const img = li.querySelector(':scope > a img');
             if (img?.src.includes('/150.png')) img.src = img.src.replace('/150.png', '/600.png');
@@ -22425,10 +22483,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 shop.addEventListener('click', async e => {
                     e.preventDefault(); e.stopPropagation();
                     const name = li.querySelector('.outfit-name')?.textContent?.trim() || '';
-                    let worn = [];
-                    try { worn = (await fetch(`/outfits/${id}.json`, { credentials: 'include' }).then(r => r.json()))?.item_ids?.worn || []; } catch (_) {}
+                    let worn = [], style = null;
+                    try { const j = await fetch(`/outfits/${id}.json`, { credentials: 'include' }).then(r => r.json()); worn = j?.item_ids?.worn || []; style = j?.alt_style_id || null; } catch (_) {}
                     if (!worn.length) { shop.title = 'This outfit isn\u2019t wearing any items'; return; }
-                    _openFramedPageModal(`Shopping list${name ? ' \u2014 ' + name : ''}`, `/items/sources/${worn.join(',')}?for=${encodeURIComponent(name)}`,
+                    _openFramedPageModal(`Shopping list${name ? ' \u2014 ' + name : ''}`, `/items/sources/${worn.join(',')}?for=${encodeURIComponent(name)}${style ? `&style=${style}` : ''}`,
                         { icon: BAG_ICO, cls: 'dti-pm-shop', css: '#dti-haul-wrap { display: none !important; }', loading: 'Opening the shopping list\u2026' });
                 });
                 acts.appendChild(shop);
@@ -22436,6 +22494,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const del = footer?.querySelector('form.button_to');
             const delBtn = del?.querySelector('.outfit-delete-button');
             if (delBtn) { delBtn.innerHTML = NOTE_TRASH; delBtn.title = 'Delete'; delBtn.setAttribute('aria-label', 'Delete'); acts.appendChild(del); }
+            if (id) del?.addEventListener('submit', () => { if (DTIAlts.count(id)) DTIAlts.put(id, null); });   // (its alternate outfits go with it)
             li.appendChild(acts);
             footer?.remove();
             // Double-click the name to rename. The name is a link, so its click waits a moment for a second one
@@ -23233,7 +23292,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 return Promise.all([
                     fetch(`/items/${realId}.json`, { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
                     mallFeed(false).catch(() => null),   // (the NC Mall list: its own picture, price and dates when the lookup has none)
-                    iid ? fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + iid).then(r => r.ok ? r.json() : null).catch(() => null) : Promise.resolve(null)
+                    iid ? fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + iid).then(r => r.ok ? r.json() : null).then(poolClean).catch(() => null) : Promise.resolve(null)
                 ]).then(([json, feed, pool]) => [src, json, pool, feed]);
             }).then(([src, json, pool, feed]) => {
                 const header = document.getElementById('dti-nf-header');
@@ -24701,13 +24760,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const sum = document.createElement('div');
         sum.className = 'dti-sl-sum';
         head.after(sum);
-        // each item: what you have / want, its value, and Add to your lists
+        let tok = null;   // (the outfit's style token, when it's missing: { cap })
+        // each item: what you have / want, its value, Seek and Add to your lists
         items.forEach(it => {
             const td = document.createElement('td');
             td.className = 'dti-sl-meta';
             it.tr.querySelector('td.name-cell')?.after(td);
             it.meta = td;
-            it.tr.querySelector('td.actions-cell')?.insertAdjacentHTML('afterbegin', listBtnHtml({ id: it.id, name: it.name, img: it.img }, 'inline'));
+            it.tr.querySelector('td.actions-cell')?.insertAdjacentHTML('afterbegin', seekBtnHtml({ id: it.id, name: it.name, img: it.img }, 'dti-sl-seek') + listBtnHtml({ id: it.id, name: it.name, img: it.img }, 'inline'));
             lookupNcValue(it.name, val => {
                 it.cap = capNums(val);
                 if (it.cap) td.insertAdjacentHTML('beforeend', `<span class="dti-sl-cap" title="NC value">${noteEsc(String(val).replace(/\*$/, ''))} caps</span>`);
@@ -24734,11 +24794,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const have = items.filter(it => mineOf(it.id)?.own), wanted = items.filter(it => !mineOf(it.id)?.own && mineOf(it.id)?.want);
             const missing = items.filter(it => !mineOf(it.id)?.own), toAdd = missing.filter(it => !mineOf(it.id)?.want);
             const mt = range(missing), ot = range(items);
+            if (tok) [mt, ot].forEach(t => { if (tok.cap) { t.min += tok.cap[0]; t.max += tok.cap[1]; t.valued++; } else t.unknown++; });   // (the style token too)
             const sel = sum.querySelector('select')?.value;
             sum.innerHTML = `<div class="dti-sl-stats">
-                    <span class="ok"><b>${have.length}</b> of ${items.length} you have</span>
+                    <span class="ok"><b>${have.length}</b> of ${items.length + (tok ? 1 : 0)} you have</span>
                     <span class="wish"><b>${wanted.length}</b> on your wishlist</span>
-                    <span><b>${missing.length}</b> missing${mt.valued ? ` <em title="${noteEsc(capTotalTitle(mt))}">${capTotalText(mt)}</em>` : ''}</span>
+                    <span><b>${missing.length + (tok ? 1 : 0)}</b> missing${mt.valued ? ` <em title="${noteEsc(capTotalTitle(mt))}">${capTotalText(mt)}</em>` : ''}</span>
                     ${ot.valued ? `<span title="${noteEsc(capTotalTitle(ot))}">Whole outfit <em>${capTotalText(ot)}</em></span>` : ''}
                 </div>
                 <div class="dti-sl-act">
@@ -24764,6 +24825,45 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         paintSum();
         mineLoad().then(() => { paintRows(); paintSum(); });
         myWantedLists().then(w => { wishKeys = w; paintSum(); }).catch(() => {});
+        // The outfit's NC Style (?style=<style id> — from the editor's and Customs' shopping-list buttons): its token, when it isn't
+        // in your tokens — its value, counted in the totals, and Want (My Tokens); the name opens the token
+        const styleId = parseInt(new URLSearchParams(location.search).get('style') || '', 10);
+        if (styleId) (async () => {
+            let cat = tokenCatalogIfCached();
+            if (!cat) try { cat = await loadTokenCatalog(); } catch (_) {}
+            const t = cat?.bySid.get(styleId);
+            if (!t) return;
+            const info = () => tokInfo(t.key, cat, DTITokens.read().mine, tokImported(cat));
+            const i0 = info();
+            if (i0.own > 0) return;   // (yours already)
+            tok = { cap: null };
+            const card = document.createElement('section');
+            card.className = 'dti-sl-group';
+            card.innerHTML = `<h2>NC Style token<i class="dti-sl-n">1</i></h2><p>This outfit wears an NC Style, and its token isn\u2019t in your tokens.</p>
+                <table class="item-list"><tbody><tr>
+                    <td class="thumbnail-cell"><img src="${noteEsc(i0.img)}" alt=""></td>
+                    <td class="name-cell"><a href="#" class="dti-sl-tok">${noteEsc(i0.name)}</a><br>Style token</td>
+                    <td class="dti-sl-meta"></td>
+                    <td class="actions-cell"><button type="button" class="dti-sl-tokwant"></button></td>
+                </tr></tbody></table>`;
+            sum.after(card);
+            const meta = card.querySelector('.dti-sl-meta'), want = card.querySelector('.dti-sl-tokwant');
+            const paintWant = () => {
+                const w = info().want > 0;
+                want.classList.toggle('on', w);
+                want.textContent = w ? '\u2665 Wanted' : '\u2665 Want';
+                want.title = w ? 'In the tokens you want \u2014 click to take it off' : 'Add it to the tokens you want (My Tokens)';
+            };
+            paintWant();
+            want.addEventListener('click', () => { const i = info(); DTITokens.bump(t.key, 'want', i.want > 0 ? -i.want : 1, { name: i.name, img: i.img }); paintWant(); });
+            card.querySelector('.dti-sl-tok').addEventListener('click', e => { e.preventDefault(); openTokenPreview(info()); });
+            lookupNcValue(i0.name, val => {
+                tok.cap = capNums(val);
+                if (tok.cap) meta.insertAdjacentHTML('beforeend', `<span class="dti-sl-cap" title="NC value">${noteEsc(String(val).replace(/\*$/, ''))} caps</span>`);
+                paintSum();
+            });
+            paintSum();
+        })();
     }
     function injectSourcesCSS() {
         if (window.__dtiSlCSS) return;
@@ -24814,11 +24914,19 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-sl-mine.want { background: color-mix(in srgb, #ec4899 14%, transparent); color: #db2777; }
             .dti-sl-cap { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--bdg-ncval-fg, var(--accent-text, var(--accent))); }
             body.items-sources td.actions-cell { display: flex; align-items: center; gap: 6px; }
+            body.items-sources .dti-sl-seek { height: 28px; padding: 0 10px; border-radius: 8px; font-size: 11.5px; }
             body.items-sources td.actions-cell a.button {
                 display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border);
                 background: var(--surface); color: var(--text) !important; font-size: 11.5px; font-weight: 700; text-decoration: none !important; white-space: nowrap;
             }
             body.items-sources td.actions-cell a.button:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)) !important; }
+            body.items-sources td.name-cell a.dti-sl-tok { cursor: pointer; }
+            body.items-sources .dti-sl-tokwant {
+                height: 28px; padding: 0 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, #ec4899 45%, var(--border)); background: var(--surface);
+                color: #db2777; font-family: inherit; font-size: 11.5px; font-weight: 800; white-space: nowrap; cursor: pointer; transition: background .12s, color .12s;
+            }
+            body.items-sources .dti-sl-tokwant:hover { background: color-mix(in srgb, #ec4899 10%, var(--surface)); }
+            body.items-sources .dti-sl-tokwant.on { background: #ec4899; border-color: #ec4899; color: #fff; }
         `);
     }
 
@@ -25610,6 +25718,21 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // Zone & color filter bar — waits for first item-container to appear, then injects
         initEditorFilters(root);
 
+        // DTI's shopping-list link: the outfit's name and NC Style along (the list then shows the style's token if it isn't yours)
+        if (!window.__dtiShopLink) {
+            window.__dtiShopLink = true;
+            document.addEventListener('click', e => {
+                const a = e.target.closest?.('#wardrobe-2020-root a[aria-label="Shopping list"][href*="/items/sources/"]');
+                if (!a || e.button !== 0) return;
+                const st = edBridge().get()?.state;
+                if (!st || (!st.altStyleId && !st.name)) return;
+                const u = new URL(a.getAttribute('href'), location.href);
+                if (st.altStyleId) u.searchParams.set('style', st.altStyleId);
+                if (st.name && !u.searchParams.has('for')) u.searchParams.set('for', st.name);
+                e.preventDefault(); e.stopPropagation();
+                window.open(u.href, '_blank');
+            }, true);
+        }
         // Tag Play/Pause buttons with data attrs; directly restyle Shopping list button
         const playTagObs = new MutationObserver(() => {
             root.querySelectorAll('button').forEach(btn => {
@@ -26115,6 +26238,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 }
             }
 
+            mountOutfitAlts(row);   // (alternate outfits in this custom)
+
             // Populate zone list once from what's visible right now
             populateZones();
 
@@ -26311,8 +26436,208 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         }
     }
 
+    // DTI's editor, from the page's own side (React keeps its state on the page's elements, which a userscript may not see): the
+    // look on screen and the one saved, or a look put on screen — DTI's own "load this outfit" step, so its Save lights up as usual.
+    // Asked through an attribute + an event (both sides see those), answered the same way.
+    function edBridge() {
+        if (!document.getElementById('dti-ed-bridge')) {
+            const s = document.createElement('script');
+            s.id = 'dti-ed-bridge';
+            s.textContent = '(' + function () {
+                const ctl = () => {
+                    const root = document.getElementById('wardrobe-2020-root');
+                    if (!root) return null;
+                    for (const el of [...root.querySelectorAll('select'), ...root.querySelectorAll('input, button')]) {
+                        const fk = Object.keys(el).find(k => k.startsWith('__reactFiber$'));
+                        for (let f = fk && el[fk], i = 0; f && i < 300; f = f.return, i++) {
+                            const p = f.memoizedProps;
+                            if (p && p.dispatchToOutfit && p.outfitState) return p;
+                        }
+                    }
+                    return null;
+                };
+                const pick = s => s && { id: s.id, name: s.name, creatorId: s.creator && s.creator.id, speciesId: s.speciesId, colorId: s.colorId, pose: s.pose,
+                    appearanceId: s.appearanceId, altStyleId: s.altStyleId, wornItemIds: Array.from(s.wornItemIds || []), closetedItemIds: Array.from(s.closetedItemIds || []) };
+                document.addEventListener('dti-ed-req', () => {
+                    const h = document.documentElement;
+                    let out = null;
+                    try {
+                        const req = JSON.parse(h.getAttribute('data-dti-ed-req') || '{}'), c = ctl();
+                        if (c && req.op === 'get') out = { state: pick(c.outfitState), saved: pick(c.outfitState.savedOutfitState) };
+                        else if (c && req.op === 'set') { c.dispatchToOutfit({ type: 'resetToSavedOutfitData', savedOutfitData: req.data }); out = { ok: true }; }
+                    } catch (e) { out = { error: String((e && e.message) || e) }; }
+                    h.setAttribute('data-dti-ed-res', JSON.stringify(out));
+                });
+            } + ')();';
+            (document.head || document.documentElement).appendChild(s);
+        }
+        const ask = req => {
+            const h = document.documentElement;
+            h.setAttribute('data-dti-ed-req', JSON.stringify(req));
+            h.removeAttribute('data-dti-ed-res');
+            document.dispatchEvent(new Event('dti-ed-req'));
+            try { return JSON.parse(h.getAttribute('data-dti-ed-res') || 'null'); } catch (_) { return null; }
+        };
+        return { get: () => ask({ op: 'get' }), set: data => ask({ op: 'set', data })?.ok === true };
+    }
+    // Alternate outfits in one custom (user asked: several looks for one pet in one save, not a custom each): a strip under the
+    // custom's name — click one to switch to it (its items, color, pose and style), double-click to rename, × to remove (Undo), + for
+    // another (a copy of the look on screen, to change). The one on screen follows your changes — and DTI saves your customs as you
+    // go, so it's the custom's own look too; the others' items stay in its closet. A custom is saved (and yours) before it can hold them.
+    function mountOutfitAlts(row) {
+        if (document.getElementById('dti-alts')) return;
+        const br = edBridge();
+        const strip = document.createElement('div');
+        strip.id = 'dti-alts';
+        row.appendChild(strip);
+        const me = (GM_getValue('dti_user_slug', '') || '').match(/^\d+/)?.[0] || '';
+        let outfitId = '', busyUntil = 0, painted = null;
+        const ids = a => [...(a || [])].map(String).sort().join();
+        const same = (a, b) => !!a && !!b && String(a.speciesId) === String(b.speciesId) && String(a.colorId) === String(b.colorId) && a.pose === b.pose
+            && String(a.altStyleId ?? '') === String(b.altStyleId ?? '') && ids(a.wornItemIds) === ids(b.wornItemIds) && ids(a.closetedItemIds) === ids(b.closetedItemIds);
+        const look = (s, base) => ({ ...base, speciesId: s.speciesId, colorId: s.colorId, pose: s.pose, appearanceId: s.appearanceId ?? null, altStyleId: s.altStyleId ?? null,
+            worn: s.wornItemIds.map(String) });
+        const newId = () => 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        const nextName = alts => { for (let n = 1; ; n++) if (!alts.some(a => a.name === `Outfit ${n}`)) return `Outfit ${n}`; };
+        const paint = () => {
+            const e = outfitId ? DTIAlts.of(outfitId) : null;
+            const key = JSON.stringify(e ? [e.on, e.alts.map(a => [a.id, a.name])] : outfitId);
+            if (key === painted || strip.querySelector('.dti-alt-in')) return;   // (not while a name is being typed)
+            painted = key;
+            strip.classList.toggle('on', !!e);
+            strip.innerHTML = !outfitId ? ''
+                : !e ? `<button type="button" class="dti-alt-start" title="Keep alternate outfits in this one custom \u2014 each with its own items, color and pose">${ALT_ICO}Alternate outfits</button>`
+                : `<span class="dti-alts-lbl">${ALT_ICO}Outfits</span>${e.alts.map(a => `<span class="dti-alt${a.id === e.on ? ' cur' : ''}" data-alt="${noteEsc(a.id)}" role="button" tabindex="0" title="${a.id === e.on ? 'On screen' : 'Switch to it'} \u00b7 double-click to rename"><span class="n">${noteEsc(a.name)}</span><button type="button" class="x" data-del="${noteEsc(a.id)}" title="Remove it" aria-label="Remove ${noteEsc(a.name)}">${POP_ICO.close}</button></span>`).join('')}<button type="button" class="dti-alt-add" title="Another outfit \u2014 a copy of the one on screen, to change" aria-label="Another outfit">+</button>`;
+        };
+        // the one on screen, kept up to date — and which one the custom is saved with
+        const capture = () => {
+            if (!strip.isConnected) return clearInterval(tick);
+            if (Date.now() < busyUntil) return;
+            const r = br.get(), s = r?.state;
+            if (!s || s.speciesId == null) return;
+            const id = s.id && (!me || !s.creatorId || String(s.creatorId) === me) ? String(s.id) : '';   // (saved, and yours)
+            if (id !== outfitId) {   // (opened — or saved for the first time: it shows what was last saved)
+                outfitId = id;
+                const e = id && DTIAlts.of(id);
+                if (e && e.savedOn && e.on !== e.savedOn && e.alts.some(a => a.id === e.savedOn) && same(s, r.saved)) { e.on = e.savedOn; DTIAlts.put(id, e); }
+            }
+            const e = outfitId && DTIAlts.of(outfitId);
+            if (e) {
+                const cur = e.alts.find(a => a.id === e.on) || e.alts[0], next = look(s, cur);
+                let changed = cur.id !== e.on || JSON.stringify(next) !== JSON.stringify(cur);
+                Object.assign(cur, next); e.on = cur.id;
+                if (same(s, r.saved) && e.savedOn !== cur.id) { e.savedOn = cur.id; changed = true; }
+                if (changed) DTIAlts.put(outfitId, e);
+            }
+            paint();
+        };
+        const tick = setInterval(capture, 1200);
+        const switchTo = id => {
+            const r = br.get(), s = r?.state, e = DTIAlts.of(outfitId);
+            const to = e?.alts.find(a => a.id === id);
+            if (!s || !to) return false;
+            const cur = e.alts.find(a => a.id === e.on);
+            if (cur) Object.assign(cur, look(s, cur));   // (as it is on screen now)
+            const worn = to.worn.map(String), closet = new Set([...s.wornItemIds, ...s.closetedItemIds, ...e.alts.flatMap(a => a.worn)].map(String));
+            worn.forEach(x => closet.delete(x));   // (every outfit's items stay in the custom)
+            busyUntil = Date.now() + 1500;
+            if (!br.set({ id: s.id, name: s.name, speciesId: to.speciesId, colorId: to.colorId, pose: to.pose, appearanceId: to.appearanceId ?? null,
+                altStyleId: to.altStyleId ?? null, wornItemIds: worn, closetedItemIds: [...closet] })) {
+                busyUntil = 0;
+                dtiToast('Couldn\u2019t switch \u2014 DTI\u2019s editor didn\u2019t answer (try reloading the page)', { variant: 'error' });
+                return false;
+            }
+            e.on = to.id;
+            DTIAlts.put(outfitId, e);
+            paint();
+            return true;
+        };
+        const add = () => {
+            const r = br.get(), s = r?.state;
+            if (!s || s.speciesId == null) return;
+            if (!outfitId) return dtiToast(s.id ? 'Only your own customs can hold alternate outfits' : 'Save this custom first \u2014 then it can hold alternate outfits', { variant: 'error' });
+            const e = DTIAlts.of(outfitId) || { on: '', savedOn: '', alts: [] };
+            if (!e.alts.length) {   // (the look on screen is the first)
+                const a = look(s, { id: newId(), name: 'Outfit 1' });
+                e.alts.push(a); e.on = a.id;
+                if (same(s, r.saved)) e.savedOn = a.id;
+            } else { const cur = e.alts.find(a => a.id === e.on); if (cur) Object.assign(cur, look(s, cur)); }
+            const a = look(s, { id: newId(), name: nextName(e.alts) });
+            e.alts.push(a); e.on = a.id;
+            DTIAlts.put(outfitId, e);
+            paint();
+            dtiToast(`${a.name}: a copy of the look on screen \u2014 change it, and switch between them up here`, { duration: 3600 });
+        };
+        const rename = chip => {
+            const a0 = DTIAlts.of(outfitId)?.alts.find(x => x.id === chip.dataset.alt);
+            if (!a0) return;
+            const inp = document.createElement('input');
+            inp.className = 'dti-alt-in'; inp.value = a0.name; inp.maxLength = 30; inp.setAttribute('aria-label', 'Outfit name');
+            chip.replaceWith(inp); inp.focus(); inp.select();
+            let done = false;
+            const fin = keep => {
+                if (done) return;
+                done = true;
+                const v = inp.value.trim(), e = DTIAlts.of(outfitId), a = e?.alts.find(x => x.id === a0.id);
+                if (keep && v && a && v !== a.name) { a.name = v; DTIAlts.put(outfitId, e); }
+                inp.remove(); painted = null; paint();
+            };
+            inp.addEventListener('keydown', ev => { ev.stopPropagation(); if (ev.key === 'Enter') fin(true); else if (ev.key === 'Escape') fin(false); });
+            inp.addEventListener('blur', () => fin(true));
+        };
+        const remove = id => {
+            const e = DTIAlts.of(outfitId), a = e?.alts.find(x => x.id === id);
+            if (!a) return;
+            const before = JSON.parse(JSON.stringify(e));
+            if (e.on === id && !switchTo(e.alts.find(x => x.id !== id).id)) return;   // (another one on screen first)
+            const e2 = DTIAlts.of(outfitId);
+            if (!e2) return;
+            const onNow = e2.on;
+            e2.alts = e2.alts.filter(x => x.id !== id);
+            if (e2.savedOn === id) e2.savedOn = '';
+            DTIAlts.put(outfitId, e2);   // (one left: a plain custom again)
+            painted = null; paint();
+            dtiToast(`${a.name} removed`, { duration: 5000, undo: () => { DTIAlts.put(outfitId, { ...before, on: onNow }); painted = null; paint(); } });
+        };
+        strip.addEventListener('click', ev => {
+            const x = ev.target.closest('[data-del]');
+            if (x) { ev.stopPropagation(); return remove(x.dataset.del); }
+            if (ev.target.closest('.dti-alt-add, .dti-alt-start')) return add();
+            const c = ev.target.closest('.dti-alt[data-alt]');
+            if (c && !c.classList.contains('cur')) switchTo(c.dataset.alt);
+        });
+        strip.addEventListener('dblclick', ev => { const c = ev.target.closest('.dti-alt[data-alt]'); if (c && !ev.target.closest('[data-del]')) rename(c); });
+        strip.addEventListener('keydown', ev => {
+            const c = ev.target.closest('.dti-alt[data-alt]');
+            if (!c || ev.target !== c) return;
+            if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); c.click(); }
+            else if (ev.key === 'F2') { ev.preventDefault(); rename(c); }
+        });
+        addEventListener('pagehide', capture);
+        capture();
+    }
+
     function injectEditorCSS() {
         GM_addStyle(`
+            /* ── Alternate outfits in one custom (#dti-alts): a strip under the name, or a small button beside it ── */
+            #dti-alts { order: 3; flex: 0 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+            #dti-alts:not(.on) { order: 1; flex: 0 0 auto; }
+            #dti-alts:empty { display: none; }
+            #dti-alts svg { width: 13px; height: 13px; flex: none; }
+            .dti-alts-lbl { display: inline-flex; align-items: center; gap: 5px; margin-right: 2px; font-size: 10.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); }
+            .dti-alt { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 12px; box-sizing: border-box; border-radius: 99px; border: 1.5px solid var(--border); background: var(--surface); color: var(--text); font-size: 12.5px; font-weight: 700; cursor: pointer; user-select: none; transition: border-color .12s, background .12s; }
+            .dti-alt:hover { border-color: var(--accent); }
+            .dti-alt.cur { border-color: var(--accent); background: var(--accent); color: var(--accent-fg, #fff); cursor: default; }
+            .dti-alt .n { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            #dti-alts .dti-alt .x { width: 18px; height: 18px; display: grid; place-items: center; padding: 0; border: none; border-radius: 50%; background: none; color: inherit; opacity: 0; cursor: pointer; }
+            #dti-alts .dti-alt:hover .x, #dti-alts .dti-alt:focus-within .x { opacity: .7; }
+            #dti-alts .dti-alt .x:hover { opacity: 1; background: color-mix(in srgb, currentColor 16%, transparent); }
+            #dti-alts .dti-alt .x svg { width: 9px; height: 9px; }
+            #dti-alts .dti-alt-add { width: 28px; height: 28px; padding: 0; border-radius: 99px; border: 1.5px dashed var(--border); background: none; color: var(--text-muted); font-family: inherit; font-size: 17px; line-height: 1; cursor: pointer; }
+            #dti-alts .dti-alt-add:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            #dti-alts .dti-alt-start { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 99px; border: 1px dashed var(--border); background: none; color: var(--text-muted); font-family: inherit; font-size: 11.5px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+            #dti-alts .dti-alt-start:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            #dti-alts .dti-alt-in { height: 28px; width: 130px; padding: 0 12px; box-sizing: border-box; border-radius: 99px; border: 1.5px solid var(--accent); background: var(--surface); color: var(--text); font-family: inherit; font-size: 12.5px; font-weight: 700; outline: none; }
             /* ── Search + Filter row ────────────────────────────────────────── */
             #dti-search-row {
                 display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
