@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      2.7
+// @version      2.8
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -1055,88 +1055,6 @@
     const _svgOf = (w, h, body, attrs = '') => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"${attrs}>${body}</svg>`;
     const _rng = seed => () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
     const _n = v => Math.round(v * 10) / 10;
-    const _curve = (P0, P1, P2) => ({   // (a quadratic curve: a point and the way it's heading, t from 0 to 1)
-        at: t => [0, 1].map(k => (1 - t) ** 2 * P0[k] + 2 * (1 - t) * t * P1[k] + t * t * P2[k]),
-        tan: t => [0, 1].map(k => 2 * (1 - t) * (P1[k] - P0[k]) + 2 * t * (P2[k] - P1[k])),
-        d: `M${P0.map(_n)}Q${P1.map(_n)} ${P2.map(_n)}`,
-    });
-    // Herbarium: a fern frond (leaflets in pairs, smaller toward the tip) and sprigs of round leaves, in fine ink
-    const _frondArt = (P0, P1, P2, n, seed) => {
-        const R = _rng(seed), c = _curve(P0, P1, P2);
-        let s = `<path d="${c.d}" fill="none" stroke-width="1.6"/>`;
-        for (let i = 0; i < n; i++) {
-            const t = .05 + i * (.9 / n), [x, y] = c.at(t), [dx, dy] = c.tan(t), a = Math.atan2(dy, dx) * 180 / Math.PI;
-            const len = (1 - t * .8) * 74 + 10, wd = len * .3;
-            for (const side of [-1, 1]) s += `<g transform="translate(${_n(x)} ${_n(y)}) rotate(${_n(a + side * (52 + R() * 12))})"><path d="M0 0Q${_n(len * .4)} ${_n(-wd)} ${_n(len)} ${_n(-wd * .15)}Q${_n(len * .5)} ${_n(wd * .9)} 0 0Z"/><path d="M2 0H${_n(len * .85)}" fill="none" stroke-width=".5"/></g>`;
-        }
-        return s;
-    };
-    const _sprigArt = (P0, P1, P2, n, seed) => {
-        const R = _rng(seed), c = _curve(P0, P1, P2);
-        let s = `<path d="${c.d}" fill="none" stroke-width="1.4"/>`;
-        for (let i = 0; i < n; i++) {
-            const t = .12 + i * (.84 / n), [x, y] = c.at(t), [dx, dy] = c.tan(t), a = Math.atan2(dy, dx) * 180 / Math.PI;
-            const side = i % 2 ? 1 : -1, r = (1 - t * .7) * 15 + 5, st = 5 + R() * 4;
-            s += `<g transform="translate(${_n(x)} ${_n(y)}) rotate(${_n(a + side * (64 + R() * 14))})"><path d="M0 0H${_n(st)}" fill="none" stroke-width=".8"/><ellipse cx="${_n(st + r)}" cy="0" rx="${_n(r)}" ry="${_n(r * .78)}"/><path d="M${_n(st + 1.5)} 0H${_n(st + r * 1.7)}" fill="none" stroke-width=".45"/></g>`;
-        }
-        return s;
-    };
-    const _HERB_FROND = _svgUrl(_svgOf(460, 600, `<g fill="rgba(61,106,68,.07)" stroke="rgba(53,95,60,.36)" stroke-linejoin="round">${_frondArt([448, 6], [392, 352], [62, 588], 24, 11)}</g>`));
-    const _HERB_SPRIG = _svgUrl(_svgOf(400, 460, `<g fill="rgba(61,106,68,.07)" stroke="rgba(53,95,60,.3)" stroke-linejoin="round">${_sprigArt([10, 456], [64, 160], [374, 24], 15, 5)}${_sprigArt([46, 456], [176, 336], [318, 262], 7, 9)}</g>`));
-    // Mid-Century: atomic starbursts, boomerangs and dots, like a 1950s print
-    const _burst = (cx, cy, r, col, n = 8) => {
-        let s = '';
-        for (let i = 0; i < n * 2; i++) { const a = i * Math.PI / n + .2, q = i % 2 ? r * .45 : r; s += `M${cx} ${cy}L${_n(cx + Math.cos(a) * q)} ${_n(cy + Math.sin(a) * q)}`; }
-        return `<path d="${s}" stroke="${col}" stroke-width="1.5" stroke-linecap="round" fill="none"/><circle cx="${cx}" cy="${cy}" r="${_n(r * .11)}" fill="${col}"/>`;
-    };
-    const _MCM_ATOMIC = _svgUrl(_svgOf(420, 320, _burst(78, 70, 36, 'rgba(208,146,26,.5)') + _burst(300, 168, 24, 'rgba(27,122,112,.45)', 6)
-        + _burst(168, 268, 17, 'rgba(213,97,42,.45)', 6) + _burst(374, 42, 11, 'rgba(208,146,26,.45)', 5)
-        + '<path d="M196 92c30-26 78-28 106-4-30-6-66 2-90 24-6-7-11-13-16-20z" fill="rgba(27,122,112,.16)"/>'
-        + '<path d="M40 214c22-12 52-8 66 10-20-4-42 0-56 12-4-8-7-15-10-22z" fill="rgba(213,97,42,.15)"/>'
-        + [[250, 262], [120, 150], [342, 298], [24, 122], [402, 222], [222, 18]].map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="${i % 2 ? 2.4 : 3.2}" fill="${['rgba(208,146,26,.5)', 'rgba(27,122,112,.45)', 'rgba(213,97,42,.45)'][i % 3]}"/>`).join('')));
-    // Porcelain: a blue-and-white tile (a rosette, rings where the corners meet, little diamonds between) and the bar's scalloped rim
-    const _DELFT = (() => {
-        let p = '';
-        for (let i = 0; i < 8; i++) p += `<ellipse cx="60" cy="45" rx="5" ry="12" transform="rotate(${i * 45} 60 60)"/>`;
-        let c = '';
-        for (const [x, y] of [[0, 0], [120, 0], [0, 120], [120, 120]]) c += `<circle cx="${x}" cy="${y}" r="16"/><circle cx="${x}" cy="${y}" r="9"/>`;
-        let d = '';
-        for (const [x, y] of [[60, 0], [0, 60], [120, 60], [60, 120]]) d += `<path d="M${x - 7} ${y}Q${x} ${y - 7} ${x + 7} ${y}Q${x} ${y + 7} ${x - 7} ${y}Z"/>`;
-        return _svgUrl(_svgOf(120, 120, `<g fill="rgba(29,79,163,.05)" stroke="rgba(29,79,163,.17)" stroke-width="1.1">${p}<circle cx="60" cy="60" r="5"/><circle cx="60" cy="60" r="27" fill="none" stroke-dasharray="2 4"/>${c}${d}</g>`));
-    })();
-    const _SCALLOP = _svgUrl(_svgOf(20, 8, '<path d="M0 0H20V1.5C20 5 15.5 8 10 8S0 5 0 1.5Z" fill="#183f86"/>'));
-    // Kraft: a postmark, its ring of words and the wavy lines that cancel a stamp
-    const _POSTMARK = (() => {
-        let w = '';
-        for (let i = 0; i < 5; i++) { const y = 62 + i * 14; w += `<path d="M178 ${y}c18-9 36-9 54 0s36 9 54 0 36-9 54 0 36 9 54 0"/>`; }
-        return _svgUrl(_svgOf(420, 190, `<g fill="none" stroke="rgba(35,50,75,.26)" stroke-width="2.2"><circle cx="92" cy="92" r="74"/><circle cx="92" cy="92" r="58" stroke-width="1.3"/>`
-            + '<path id="r" d="M38 92a54 54 0 1 1 108 0a54 54 0 1 1-108 0" stroke="none"/><text font-family="Courier New, monospace" font-size="12.5" font-weight="700" letter-spacing="3" fill="rgba(35,50,75,.32)" stroke="none"><textPath href="#r">DRESS TO IMPRESS · AIR MAIL ·</textPath></text>'
-            + `<path d="M60 82h64M60 104h64" stroke-width="1.6"/><text x="92" y="98" text-anchor="middle" font-family="Courier New, monospace" font-size="13" font-weight="700" letter-spacing="2" fill="rgba(35,50,75,.34)" stroke="none">DTI</text>${w}</g>`));
-    })();
-    // Nautical: twisted rope under the bar, and a compass rose
-    const _ROPE = _svgUrl(_svgOf(16, 8, '<rect width="16" height="8" fill="#9c7a48"/><path d="M-4 8L4 0M4 8L12 0M12 8L20 0" stroke="#d8bd8a" stroke-width="3.6"/><path d="M-1.5 8L6.5 0M6.5 8L14.5 0M14.5 8L22.5 0" stroke="rgba(90,65,30,.55)" stroke-width=".9"/>'));
-    const _COMPASS = (() => {
-        const C = 200, pt = (a, r) => `${_n(C + Math.cos(a) * r)} ${_n(C + Math.sin(a) * r)}`;
-        let ticks = '';
-        for (let i = 0; i < 64; i++) { const a = i * Math.PI / 32, r1 = i % 8 ? (i % 2 ? 170 : 165) : 156; ticks += `M${pt(a, r1)}L${pt(a, 176)}`; }
-        let star = '';
-        for (let i = 0; i < 8; i++) {
-            const a = i * Math.PI / 4 - Math.PI / 2, L = i % 2 ? 104 : 150, W = i % 2 ? 13 : 19;
-            star += `<path d="M${C} ${C}L${pt(a, L)}L${pt(a - Math.PI / 2, W)}Z" fill="rgba(20,33,58,.12)"/><path d="M${C} ${C}L${pt(a, L)}L${pt(a + Math.PI / 2, W)}Z" fill="rgba(20,33,58,.04)"/>`;
-        }
-        return _svgUrl(_svgOf(400, 400, `<g stroke="rgba(20,33,58,.2)" stroke-width="1.1" stroke-linejoin="round"><circle cx="200" cy="200" r="182" fill="none"/><circle cx="200" cy="200" r="176" fill="none"/><path d="${ticks}" fill="none"/><circle cx="200" cy="200" r="118" fill="none" stroke-dasharray="1 5"/>${star}<circle cx="200" cy="200" r="8" fill="rgba(184,41,47,.28)"/></g>`));
-    })();
-    // Synthwave: a striped sun, sinking
-    const _SUN = (() => {
-        let m = '';
-        for (let i = 0; i < 9; i++) m += `<rect y="${_n(312 + i * 30 + i * i * .6)}" width="600" height="${_n(3 + i * 2.1)}" fill="#000"/>`;
-        return _svgUrl(_svgOf(600, 600, `<defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe46b"/><stop offset=".5" stop-color="#ff8a4c"/><stop offset="1" stop-color="#ff2d95"/></linearGradient><mask id="m"><rect width="600" height="600" fill="#fff"/>${m}</mask></defs><circle cx="300" cy="300" r="290" fill="url(#s)" mask="url(#m)"/>`));
-    })();
-    // Deco: fans, row on row
-    const _DECO_FAN = (() => {
-        const fan = (cx, cy) => [30, 23, 16, 9].map(r => `M${cx - r} ${cy}A${r} ${r} 0 0 1 ${cx + r} ${cy}`).join('');
-        return _svgUrl(_svgOf(60, 30, `<path d="${fan(30, 30) + fan(0, 15) + fan(60, 15)}" fill="none" stroke="rgba(216,179,106,.16)" stroke-width="1"/>`));
-    })();
     // Verdigris: copper gone green — mottled patina
     const _PATINA = _svgUrl(_svgOf(320, 320, '<filter id="p" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency=".022 .034" numOctaves="4" seed="7" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 .34  0 0 0 0 .74  0 0 0 0 .66  0 0 0 1.25 -.52"/></filter><rect width="320" height="320" filter="url(#p)"/>'));
     // Chalkboard: half-wiped doodles — a circled something with an arrow, a star, a sine wave on its axes, a right triangle, a cloud
@@ -1152,47 +1070,10 @@
             ring(860, 330, 22, 18), ring(892, 344, 16, 16), line([[120, 330], [260, 336]]), line([[124, 344], [232, 349]])].map(p => `<path d="${p}"/>`).join('');
         return _svgUrl(_svgOf(960, 600, `<g fill="none" stroke="rgba(255,255,255,.08)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">${d}</g>`, ' preserveAspectRatio="xMidYMid slice"'));
     })();
-    // Champagne: bubbles, a highlight on each
-    const _BUBBLES = (() => {
-        const R = _rng(31);
-        let b = '';
-        for (let i = 0; i < 11; i++) {
-            const r = 1.6 + R() ** 2 * 8, x = _n(14 + R() * 292), y = _n(14 + R() * 392);
-            b += `<circle cx="${x}" cy="${y}" r="${_n(r)}" fill="rgba(255,255,255,.28)" stroke="rgba(186,146,92,.5)" stroke-width="1"/><circle cx="${_n(x - r * .32)}" cy="${_n(y - r * .34)}" r="${_n(Math.max(.6, r * .26))}" fill="rgba(255,255,255,.85)"/>`;
-        }
-        return _svgUrl(_svgOf(320, 420, b));
-    })();
-    // Kintsugi: cracks mended with gold, across the whole page — and a gold seam under the bar
-    const _KINTSUGI = (() => {
-        const W = 1600, H = 1000, R = _rng(23);
-        let d = '';
-        const walk = (x, y, ang, len, depth) => {
-            let p = `M${_n(x)} ${_n(y)}`;
-            for (let s = 0; s < len; s++) {
-                ang += (R() - .5) * .9;
-                const step = 16 + R() * 26;
-                x += Math.cos(ang) * step; y += Math.sin(ang) * step;
-                p += `L${_n(x)} ${_n(y)}`;
-                if (depth < 2 && R() < .12) walk(x, y, ang + (R() < .5 ? 1 : -1) * (.5 + R() * .7), Math.floor(len * .45), depth + 1);   // (a branch)
-                if (x < -40 || y < -40 || x > W + 40 || y > H + 40) break;
-            }
-            d += `<path d="${p}" stroke-width="${_n(2.4 - depth * .7)}"/>`;
-        };
-        walk(-10, H * .28, .18, 46, 0); walk(W * .62, -10, 1.75, 40, 0); walk(W + 10, H * .72, Math.PI + .12, 42, 0); walk(W * .18, H + 10, -1.45, 30, 0);
-        return _svgUrl(_svgOf(W, H, `<defs><linearGradient id="k" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b88a2f"/><stop offset=".5" stop-color="#f3d892"/><stop offset="1" stop-color="#c69a3e"/></linearGradient><filter id="g" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="2.4"/></filter></defs><g fill="none" stroke="url(#k)" stroke-linejoin="round" stroke-linecap="round"><g filter="url(#g)" opacity=".5">${d}</g>${d}</g>`, ' preserveAspectRatio="xMidYMid slice"'));
-    })();
-    const _SEAM = (() => {
-        const R = _rng(5);
-        let p = 'M0 3';
-        for (let x = 8; x < 240; x += 8) p += `L${x} ${_n(1.2 + R() * 3.6)}`;
-        return _svgUrl(_svgOf(240, 6, `<path d="${p}L240 3" fill="none" stroke="#d9b25c" stroke-width="1.4" stroke-linejoin="round"/>`));
-    })();
     // (the main cards — the home page's, My Items' panels, the customs and item pages' — and the third set of themes)
     const _CARDS = '.dti-section-card, #dti-hero, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar, ul#outfits > li, header.item-header';
-    const _THEMES_3 = ['atelier', 'bauhaus', 'herbarium', 'midcentury', 'porcelain', 'kraft', 'champagne', 'nautical', 'synthwave', 'phosphor', 'deco', 'volt', 'verdigris', 'chalkboard', 'lumen', 'kintsugi'];
+    const _THEMES_3 = ['bauhaus', 'phosphor', 'verdigris', 'chalkboard'];
     const _thm = ids => ids.map(i => `[data-dti-theme="${i}"]`).join(', ');
-    // ── Drawn art for the fourth set (the same way: SVG made here, once, the hand-drawn ones from a fixed seed) ──
-    const _wobble = (R, amt) => ([x, y]) => [x + (R() - .5) * amt, y + (R() - .5) * amt];
     const _poly = pts => 'M' + pts.map(([x, y]) => `${_n(x)} ${_n(y)}`).join('L');
     // Bitmap: a 1-bit desktop's dither, and its icons drawn a pixel at a time ('#' black, '.' white, ' ' see-through), a label under each
     const _DITHER = _svgUrl(_svgOf(4, 4, '<rect width="4" height="4" fill="#fff"/><rect width="1" height="1" fill="#000"/>', ' shape-rendering="crispEdges"'));
@@ -1212,134 +1093,6 @@
         '#..............#', '#.############.#', '#.#..........#.#', '#.#.########.#.#', '#.#..........#.#', '#.#.#####....#.#', '#.#..........#.#', '################'], 'DTI');
     const _BM_TRASH = _bmIcon(['     #####      ', '     #...#      ', '############### ', '#.............# ', '############### ', ' #...........#  ',
         ' #..#..#..#..#  ', ' #..#..#..#..#  ', ' #..#..#..#..#  ', ' #..#..#..#..#  ', ' #..#..#..#..#  ', ' #..#..#..#..#  ', ' #..#..#..#..#  ', ' #...........#  ', ' #...........#  ', '  ###########   '], 'TRASH');
-    // Transit: a subway map — route lines at 45° steps, stations on them — and a station's white tiles, laid like brick
-    const _TRANSIT = (() => {
-        const W = 1600, H = 1000, R = _rng(61), D = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
-        const lines = [['#ee352e', [-20, 180], 0], ['#0039a6', [300, -20], 2], ['#00933c', [W + 20, 640], 4], ['#ff6319', [-20, 820], 7], ['#b933ad', [1180, H + 20], 6], ['#fccc0a', [W + 20, 120], 3]];
-        let s = '', st = '';
-        for (const [col, start, d0] of lines) {
-            let [x, y] = start, d = d0;
-            const pts = [[x, y]];
-            for (let k = 0; k < 9; k++) {
-                const len = 90 + R() * 230, f = D[d][0] && D[d][1] ? .7071 : 1;
-                x += D[d][0] * len * f; y += D[d][1] * len * f;
-                pts.push([x, y]);
-                if (k && R() < .7) st += `<circle cx="${_n(x)}" cy="${_n(y)}" r="7" fill="#fff" stroke="#1a1a1a" stroke-width="3"/>`;
-                d = (d + (R() < .5 ? 1 : 7)) % 8;   // (a 45° turn, one way or the other)
-                if (x < -60 || y < -60 || x > W + 60 || y > H + 60) break;
-            }
-            s += `<path d="${_poly(pts)}" fill="none" stroke="${col}" stroke-width="10" stroke-linejoin="round" stroke-linecap="round"/>`;
-        }
-        return _svgUrl(_svgOf(W, H, `${s}${st}`, ' preserveAspectRatio="xMidYMid slice"'));
-    })();
-    const _SUBWAY = _svgUrl(_svgOf(72, 48, '<path d="M0 .5H72M0 24.5H72M.5 0V24M36.5 24V48" fill="none" stroke="rgba(0,0,0,.055)"/><path d="M0 1.5H72M0 25.5H72M1.5 1V24M37.5 25V48" fill="none" stroke="rgba(255,255,255,.75)"/>'));
-    // Contour: a topographic map — rings round a few summits (every fifth one heavier) and a dashed trail; the bar's edge a ridge
-    const _CONTOUR = (() => {
-        const W = 1600, H = 1000, R = _rng(41);
-        const peaks = [[260, 230, 7], [1230, 300, 8], [770, 830, 7], [1470, 900, 4], [70, 780, 5]];
-        let d = '', di = '';
-        for (const [cx, cy, n] of peaks) {
-            const ph = [R() * 6.28, R() * 6.28, R() * 6.28], amp = [.14, .08, .05].map(a => a * (.7 + R() * .6));
-            for (let k = 1; k <= n; k++) {
-                const base = k * (33 + R() * 5);
-                let p = '';
-                for (let i = 0; i <= 72; i++) {
-                    const a = i / 72 * Math.PI * 2, r = base * (1 + amp[0] * Math.sin(2 * a + ph[0]) + amp[1] * Math.sin(3 * a + ph[1]) + amp[2] * Math.sin(5 * a + ph[2] + k * .3));
-                    p += `${i ? 'L' : 'M'}${_n(cx + Math.cos(a) * r * 1.25)} ${_n(cy + Math.sin(a) * r)}`;
-                }
-                if (k % 5 === 0) di += `<path d="${p}Z"/>`; else d += `<path d="${p}Z"/>`;
-            }
-        }
-        const trail = 'M-20 560C180 520 300 600 470 540S760 420 930 470 1180 600 1360 560 1560 470 1640 500';
-        return _svgUrl(_svgOf(W, H, `<g fill="none" stroke="rgba(140,98,58,.32)" stroke-width="1.1">${d}</g><g fill="none" stroke="rgba(140,98,58,.5)" stroke-width="2">${di}</g><path d="${trail}" fill="none" stroke="rgba(196,85,31,.45)" stroke-width="2.2" stroke-dasharray="7 7" stroke-linecap="round"/>`, ' preserveAspectRatio="xMidYMid slice"'));
-    })();
-    const _RIDGE = (() => {
-        const R = _rng(141), W = 600;
-        let p = `M0 0H${W}V7`, y = 7;
-        for (let x = W - 12; x > 8; x -= 9 + R() * 16) { y = Math.max(1.5, Math.min(14.5, y + (R() - .5) * 8)); p += `L${_n(x)} ${_n(y)}`; }
-        return _svgUrl(_svgOf(W, 16, `<path d="${p}L0 7Z" fill="#233828"/>`));
-    })();
-    // Notebook: ballpoint doodles down the margins, and the spiral's rings
-    const _NOTEBOOK = (() => {
-        const R = _rng(71), w = _wobble(R, 2.2);
-        const path = pts => `<path d="${_poly(pts.map(w))}"/>`;
-        const ring = (cx, cy, r, n = 22, t = 1) => Array.from({ length: Math.round(n * t) + 1 }, (_, i) => [cx + Math.cos(i / n * 6.28) * r, cy + Math.sin(i / n * 6.28) * r]);
-        const spiral = (cx, cy) => Array.from({ length: 60 }, (_, i) => { const a = i * .42, r = 2 + i * .55; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; });
-        const star = (cx, cy, r) => Array.from({ length: 6 }, (_, i) => { const a = -Math.PI / 2 + i * 4 * Math.PI / 5; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; });
-        const heart = (cx, cy, s) => Array.from({ length: 41 }, (_, i) => { const t = i / 40 * 6.28; return [cx + 16 * Math.sin(t) ** 3 * s, cy - (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * s]; });
-        const cube = (x, y, a) => [path([[x, y], [x + a, y], [x + a, y + a], [x, y + a], [x, y]]), path([[x + a * .4, y - a * .4], [x + a * 1.4, y - a * .4], [x + a * 1.4, y + a * .6], [x + a, y + a]]), path([[x, y], [x + a * .4, y - a * .4]]), path([[x + a, y], [x + a * 1.4, y - a * .4]])].join('');
-        const bolt = (x, y) => path([[x, y], [x - 12, y + 26], [x - 2, y + 26], [x - 10, y + 52], [x + 12, y + 18], [x + 2, y + 18], [x + 8, y]]);
-        const d = [path(star(70, 140, 24)), path(spiral(64, 330)), path(heart(70, 520, 1.5)), cube(44, 690, 34), bolt(76, 840),
-            path(star(1532, 210, 18)), path(heart(1530, 420, 1.2)), path(spiral(1536, 620)), path(ring(1530, 820, 26)), path([[1512, 812], [1520, 820], [1546, 808]])].join('');
-        return _svgUrl(_svgOf(1600, 1000, `<g fill="none" stroke="rgba(35,65,170,.42)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</g>`, ' preserveAspectRatio="xMidYMid slice"'));
-    })();
-    // (a coil of the binding: through its punched hole in the page, round over the cover's edge — the back of the loop darker)
-    const _SPIRAL = _svgUrl(_svgOf(22, 26, '<defs><linearGradient id="w" x1="0" x2="1"><stop offset="0" stop-color="#6f767d"/><stop offset=".55" stop-color="#eef1f4"/><stop offset="1" stop-color="#8a9198"/></linearGradient></defs>'
-        + '<ellipse cx="11" cy="20.5" rx="4" ry="2.6" fill="rgba(30,25,20,.55)"/><path d="M13.6 20C17 13 17 5 11 2.2" fill="none" stroke="#5a6067" stroke-width="2.6" stroke-linecap="round"/>'
-        + '<path d="M8.4 20.6C4.6 13 5 5 11 2.2" fill="none" stroke="url(#w)" stroke-width="3" stroke-linecap="round"/>'));
-    // Terrazzo: stone chips set in a pale floor (drawn to repeat seamlessly)
-    const _TERRAZZO = (() => {
-        const S = 260, R = _rng(53), C = ['#dfa094', '#a3b394', '#d6a03c', '#4d4846', '#c5664c', '#e2cfb8', '#8aa1b4'];
-        let s = '';
-        const chip = (cx, cy, r, col, op) => {
-            const n = 5 + Math.floor(R() * 3), a0 = R() * 6.28;
-            let p = '';
-            for (let k = 0; k < n; k++) { const a = a0 + k / n * 6.28 + (R() - .5) * .6, rr = r * (.6 + R() * .5); p += `${k ? 'L' : 'M'}${_n(cx + Math.cos(a) * rr)} ${_n(cy + Math.sin(a) * rr)}`; }
-            for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) if (cx + dx > -r && cx + dx < S + r && cy + dy > -r && cy + dy < S + r) s += `<path d="${p}Z" transform="translate(${dx} ${dy})" fill="${col}" opacity="${op}"/>`;
-        };
-        for (let i = 0; i < 32; i++) chip(R() * S, R() * S, 3 + R() ** 2.2 * 15, C[Math.floor(R() * C.length)], _n(.4 + R() * .35));
-        for (let i = 0; i < 80; i++) s += `<circle cx="${_n(R() * S)}" cy="${_n(R() * S)}" r="${_n(.5 + R())}" fill="${C[Math.floor(R() * C.length)]}" opacity=".55"/>`;
-        return _svgUrl(_svgOf(S, S, s));
-    })();
-    // Sampler: cross-stitch — each stitch an X; a heart, tulips, a border band and an alphabet
-    const _SAMPLER = (() => {
-        const sz = 9, col = { r: '#b8312f', g: '#3c7a4a', y: '#c99a2e', b: '#2b3f6b' };
-        let s = '';
-        const motif = (rows, ox, oy) => rows.forEach((row, j) => [...row].forEach((ch, i) => {
-            if (!col[ch]) return;
-            const x = ox + i * sz, y = oy + j * sz, m = 1.6;
-            s += `<path d="M${x + m} ${y + m}L${x + sz - m} ${y + sz - m}M${x + sz - m} ${y + m}L${x + m} ${y + sz - m}" stroke="${col[ch]}"/>`;
-        }));
-        const heart = ['.rr...rr.', 'rrrr.rrrr', 'rrrrrrrrr', 'rrrrrrrrr', '.rrrrrrr.', '..rrrrr..', '...rrr...', '....r....'];
-        const tulip = ['..r.r.r..', '..rrrrr..', '.rrrrrrr.', '.rrrrrrr.', '..rrrrr..', '....g....', 'gg..g..gg', '.ggggggg.', '....g....', '....g....'];
-        const band = Array.from({ length: 3 }, (_, j) => Array.from({ length: 40 }, (_, i) => ((i + j) % 4 === 0 || (i - j + 40) % 4 === 0) ? 'y' : '.').join(''));
-        const A = ['.bbb.', 'b...b', 'b...b', 'bbbbb', 'b...b', 'b...b', 'b...b'], B = ['bbbb.', 'b...b', 'b...b', 'bbbb.', 'b...b', 'b...b', 'bbbb.'], Cc = ['.bbbb', 'b....', 'b....', 'b....', 'b....', 'b....', '.bbbb'];
-        motif(heart, 60, 120); motif(tulip, 1450, 700); motif(tulip, 1350, 760); motif(band, 1240, 900);
-        motif(A, 50, 820); motif(B, 110, 820); motif(Cc, 170, 820); motif(heart.map(r => r.replace(/r/g, 'g')), 1470, 140);
-        return _svgUrl(_svgOf(1600, 1000, `<g fill="none" stroke-width="1.7" stroke-linecap="round" opacity=".75">${s}</g>`, ' preserveAspectRatio="xMidYMid slice"'));
-    })();
-    // Pop Art: a comic burst, and a speech balloon with three dots in it
-    const _BURST = (() => {
-        const pt = (a, r) => `${_n(150 + Math.cos(a) * r)} ${_n(150 + Math.sin(a) * r)}`;
-        let o = '', i = '';
-        for (let k = 0; k < 32; k++) { const a = k / 32 * 6.28, R1 = k % 2 ? 92 : 146, R2 = k % 2 ? 62 : 104; o += `${k ? 'L' : 'M'}${pt(a, R1)}`; i += `${k ? 'L' : 'M'}${pt(a + .05, R2)}`; }
-        return _svgUrl(_svgOf(300, 300, `<path d="${o}Z" fill="#ffd400" stroke="#111" stroke-width="5" stroke-linejoin="round"/><path d="${i}Z" fill="#e8282b" stroke="#111" stroke-width="4" stroke-linejoin="round"/>`));
-    })();
-    const _SPEECH = _svgUrl(_svgOf(320, 240, '<path d="M160 12C240 12 306 56 306 108S240 204 160 204C146 204 132 203 119 200L58 232L80 186C40 168 14 140 14 108C14 56 80 12 160 12Z" fill="#fff" stroke="#111" stroke-width="5" stroke-linejoin="round"/><g fill="#111"><circle cx="112" cy="110" r="11"/><circle cx="160" cy="110" r="11"/><circle cx="208" cy="110" r="11"/></g>'));
-    // Zen: raked sand — fine lines, and stones with rings raked round them, a little moss; an ink-brush circle (ensō) for icons
-    const _RAKE = _svgUrl(_svgOf(200, 16, '<path d="M0 4Q50 2.6 100 4T200 4M0 12Q50 10.6 100 12T200 12" fill="none" stroke="rgba(120,100,70,.13)" stroke-width="1"/>'));
-    const _ZEN = (() => {
-        const R = _rng(83);
-        const stone = (cx, cy, rx, ry, rings) => {
-            let s = '';
-            for (let k = 1; k <= rings; k++) s += `<ellipse cx="${cx}" cy="${cy}" rx="${rx + k * 13}" ry="${ry + k * 10}" fill="none" stroke="rgba(120,100,70,.2)" stroke-width="1.2"/>`;
-            let p = '';
-            for (let i = 0; i < 14; i++) { const a = i / 14 * 6.28, f = .86 + R() * .2; p += `${i ? 'L' : 'M'}${_n(cx + Math.cos(a) * rx * f)} ${_n(cy + Math.sin(a) * ry * f)}`; }
-            s += `<path d="${p}Z" fill="url(#st)"/><ellipse cx="${_n(cx - rx * .25)}" cy="${_n(cy - ry * .35)}" rx="${_n(rx * .35)}" ry="${_n(ry * .18)}" fill="rgba(255,255,255,.1)"/>`;
-            s += `<ellipse cx="${_n(cx + rx * .5)}" cy="${_n(cy + ry * .75)}" rx="${_n(rx * .55)}" ry="${_n(ry * .22)}" fill="rgba(98,128,72,.45)"/>`;   // (moss at its foot)
-            return s;
-        };
-        return _svgUrl(_svgOf(1600, 1000, `<defs><radialGradient id="st" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#6d6e68"/><stop offset="1" stop-color="#34352f"/></radialGradient></defs>${stone(1360, 760, 64, 40, 6)}${stone(1470, 840, 30, 20, 3)}${stone(190, 250, 46, 30, 5)}`, ' preserveAspectRatio="xMidYMid slice"'));
-    })();
-    const _ENSO = col => {   // (heavy where the brush came down, thinning to a dry tail, a gap left)
-        const R = _rng(151), out = [], inn = [];
-        for (let i = 0; i <= 56; i++) {
-            const t = i / 56, a = -1.15 + t * 5.45, w = Math.max(.4, .5 + 3.9 * (1 - t) ** .7 * Math.min(1, t * 12) + (R() - .5) * .5), r = 14.2 + (R() - .5) * .5;
-            out.push([20 + Math.cos(a) * (r + w / 2), 20 + Math.sin(a) * (r + w / 2)]);
-            inn.push([20 + Math.cos(a) * (r - w / 2), 20 + Math.sin(a) * (r - w / 2)]);
-        }
-        return _svgUrl(_svgOf(40, 40, `<path d="${_poly([...out, ...inn.reverse()])}Z" fill="${col}"/>`));
-    };
     // Cathedral: stained glass — a rose window and a lancet, panes leaded — over coursed stone; a gilt arcade under the bar
     const _JEWELS = ['#b3122e', '#1d3fa3', '#127a4a', '#e09a1b', '#6b2fa0', '#c2306b', '#d8b23a', '#127d86', '#7a1a8a', '#2156c4'];
     const _ROSE = (() => {
@@ -1369,245 +1122,232 @@
         return _svgUrl(_svgOf(800, 800, `<g fill="none" stroke="rgba(63,216,255,.35)" stroke-width="1.2">${rings}<path d="M${C - 370} ${C}H${C + 370}M${C} ${C - 370}V${C + 370}"/><path d="${t}"/>${blips}</g>`));
     })();
     const _HEXGRID = _svgUrl(_svgOf(56, 97, '<path d="M28 0L56 16v33L28 65 0 49V16zM28 65v32" fill="none" stroke="rgba(63,216,255,.07)" stroke-width="1"/>'));
-    // Cyberpunk: rain, and a city at night along the bottom — lit windows, a few neon signs
-    const _RAIN = (() => {
-        const R = _rng(101);
-        let s = '';
-        for (let i = 0; i < 18; i++) { const x = R() * 140, y = R() * 180, l = 10 + R() * 26; s += `<path d="M${_n(x)} ${_n(y)}l${_n(-l * .26)} ${_n(l)}"/>`; }
-        return _svgUrl(_svgOf(140, 180, `<g stroke="rgba(5,217,232,.16)" stroke-width="1" stroke-linecap="round">${s}</g>`));
-    })();
-    const _SKYLINE = (() => {
-        const W = 1600, H = 440, R = _rng(107), lit = ['#fcee0a', '#05d9e8', '#ff2a6d', '#fff3c4'];
-        let b = '', win = '', neon = '';
-        for (let x = -10; x < W;) {
-            const w = 46 + R() * 110, h = 140 + R() ** 1.4 * 280, top = H - h, shade = ['#0f0d1d', '#141128', '#191530'][Math.floor(R() * 3)];
-            b += `<rect x="${_n(x)}" y="${_n(top)}" width="${_n(w)}" height="${_n(h)}" fill="${shade}"/>`;
-            for (let wy = top + 12; wy < H - 10; wy += 13) for (let wx = x + 8; wx < x + w - 8; wx += 10) if (R() < .17) win += `<rect x="${_n(wx)}" y="${_n(wy)}" width="4" height="6" fill="${lit[Math.floor(R() * lit.length)]}" opacity="${_n(.35 + R() * .5)}"/>`;
-            if (R() < .22) { const nx = x + w * .3, ny = top + 30 + R() * 60, c = R() < .5 ? '#ff2a6d' : '#05d9e8'; neon += `<rect x="${_n(nx)}" y="${_n(ny)}" width="12" height="${_n(40 + R() * 50)}" rx="2" fill="none" stroke="${c}" stroke-width="2.2" opacity=".85"/>`; }
-            x += w + R() * 6;
-        }
-        return _svgUrl(_svgOf(W, H, `${b}${win}<g filter="url(#n)">${neon}</g><defs><filter id="n" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.5" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>`));
-    })();
-    // Folio: tooled leather's grain, a shelf of books along the bottom, gilt diamonds under the bar, gilt corners
-    const _LEATHER = _svgUrl(_svgOf(260, 260, '<filter id="l" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency=".9 .5" numOctaves="3" seed="3" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 .2  0 0 0 0 .12  0 0 0 0 .07  0 0 0 .55 0"/></filter><rect width="260" height="260" filter="url(#l)"/>'));
-    const _SHELF = (() => {
-        const W = 1600, H = 250, R = _rng(113), C = ['#6e1f2a', '#1f4030', '#1f2a4a', '#5a3a22', '#7a5a22', '#3a1f3a', '#2a4a4a'];
-        let s = '';
-        for (let x = 0; x < W;) {
-            const w = 18 + R() * 30, h = 150 + R() * 74, y = H - 22 - h, c = C[Math.floor(R() * C.length)], lean = R() < .06 ? -6 + R() * 12 : 0;
-            s += `<g transform="rotate(${_n(lean)} ${_n(x + w / 2)} ${H - 22})"><rect x="${_n(x)}" y="${_n(y)}" width="${_n(w)}" height="${_n(h)}" rx="2" fill="${c}"/>`
-                + `<rect x="${_n(x)}" y="${_n(y + 12)}" width="${_n(w)}" height="2" fill="rgba(217,170,80,.75)"/><rect x="${_n(x)}" y="${_n(y + h - 16)}" width="${_n(w)}" height="2" fill="rgba(217,170,80,.75)"/>`
-                + (R() < .5 ? `<rect x="${_n(x + 3)}" y="${_n(y + 32)}" width="${_n(w - 6)}" height="${_n(26 + R() * 20)}" rx="1" fill="rgba(240,220,180,.18)"/>` : '') + '</g>';
-            x += w + (R() < .1 ? 14 : 1);
-        }
-        return _svgUrl(_svgOf(W, H, `${s}<rect y="${H - 22}" width="${W}" height="22" fill="#3a2416"/><rect y="${H - 22}" width="${W}" height="3" fill="#5a3a24"/>`));
-    })();
-    const _FLEURON = _svgUrl(_svgOf(18, 8, '<path d="M0 4H5M13 4H18" stroke="#c9a24a" stroke-width="1"/><path d="M9 .5L12.5 4L9 7.5L5.5 4Z" fill="#c9a24a"/>'));
-    const _GILT = (() => {   // (top left, top right, bottom right, bottom left)
-        const lines = '<path d="M3 34V3H34" stroke-width="1.3"/><path d="M8 26V8H26" stroke-width=".8"/><path d="M8 8C13 9 15 13 14 17C13.4 19.6 10.6 19.6 10.4 17.4C10.2 15.8 11.6 15 12.6 15.8M8 8C9 13 13 15 17 14C19.6 13.4 19.6 10.6 17.4 10.4C15.8 10.2 15 11.6 15.8 12.6" stroke-width=".9"/>';
-        const dots = '<circle cx="3" cy="3" r="1.9"/><circle cx="34" cy="3" r="1.1"/><circle cx="3" cy="34" r="1.1"/><path d="M19.5 19.5l2.2-1 1 2.2-2.2 1z"/>';
-        return [0, 90, 180, 270].map(r => _svgUrl(_svgOf(38, 38, `<g transform="rotate(${r} 19 19)"><g fill="none" stroke="#d6ad5c" stroke-opacity=".8" stroke-linecap="round">${lines}</g><g fill="#d6ad5c" fill-opacity=".85">${dots}</g></g>`)));
-    })();
-    // Nocturne: a crescent moon, moonflowers on a vine, moths — the fireflies on a layer of their own, to glow and dim
-    const _NOCTURNE = (() => {
-        const R = _rng(127);
-        const flower = (cx, cy, r, rot) => {
-            let p = '';
-            for (let k = 0; k < 5; k++) { const a = rot + k / 5 * 6.28; p += `<ellipse cx="${_n(cx + Math.cos(a) * r * .55)}" cy="${_n(cy + Math.sin(a) * r * .55)}" rx="${_n(r * .5)}" ry="${_n(r * .32)}" transform="rotate(${_n(a * 180 / Math.PI)} ${_n(cx + Math.cos(a) * r * .55)} ${_n(cy + Math.sin(a) * r * .55)})"/>`; }
-            return p + `<circle cx="${cx}" cy="${cy}" r="${_n(r * .14)}" fill="rgba(255,250,220,.5)"/>`;
+    const _THEMES_4 = ['bitmap', 'cathedral', 'cockpit'];
+    // (pixel art from rows of letters, each letter a color — ' ' or '.' nothing)
+    const _pixC = (rows, k, pal, x0 = 0, y0 = 0) => {
+        const by = {};
+        rows.forEach((row, y) => [...row].forEach((c, x) => { if (pal[c]) by[c] = (by[c] || '') + `M${x0 + x * k} ${y0 + y * k}h${k}v${k}h-${k}z`; }));
+        return Object.entries(by).map(([c, d]) => `<path d="${d}" fill="${pal[c]}"/>`).join('');
+    };
+
+    // Prism: a beam into a glass prism, its light fanned out in colors across the dark
+    const _PRISM = _svgUrl(_svgOf(1600, 1000, '<defs><linearGradient id="sp" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff3b3b"/><stop offset=".18" stop-color="#ff9a2e"/><stop offset=".34" stop-color="#ffe14d"/><stop offset=".5" stop-color="#4dff88"/><stop offset=".66" stop-color="#2ee6ff"/><stop offset=".82" stop-color="#5a6cff"/><stop offset="1" stop-color="#c04dff"/></linearGradient>'
+        + '<linearGradient id="gl" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.28)"/><stop offset="1" stop-color="rgba(255,255,255,.05)"/></linearGradient>'
+        + '<linearGradient id="fade" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient><mask id="fm"><rect width="1600" height="1000" fill="url(#fade)"/></mask>'
+        + '<filter id="b" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="10"/></filter><filter id="s" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.5"/></filter></defs>'
+        + '<path d="M-20 60L392 268" stroke="#fff" stroke-width="3" opacity=".75" filter="url(#s)"/><path d="M-20 60L392 268" stroke="#fff" stroke-width="1.2"/>'
+        + '<g mask="url(#fm)"><path d="M452 262L1640 520L1640 1060Z" fill="url(#sp)" opacity=".26" filter="url(#b)" transform="translate(0 0)"/></g>'
+        + '<path d="M420 170L520 344H320Z" fill="url(#gl)" stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-linejoin="round"/><path d="M420 170L436 344M420 170L404 344" stroke="rgba(255,255,255,.12)" stroke-width="1.2"/>', ' preserveAspectRatio="xMidYMid slice"'));
+    const _THEMES_5 = ['prism'];
+    // ── Drawn art for the simple themes (small and light — a soft pattern or a few blooms at the edges) ──
+    // (a leaner data URI for the larger drawings: single quotes inside, and only the characters that need it escaped)
+    const _svgLite = s => `url("data:image/svg+xml,${s.replace(/"/g, "'").replace(/[%#<>{}]/g, encodeURIComponent)}")`;
+    // Hydrangea: four-petal florets scattered thinly, in periwinkles and violets
+    const _FLORETS = (() => {
+        const S = 260, R = _rng(311), C = ['#8f9cf0', '#b39be6', '#7fa6f0', '#a9b4f6', '#c2a6ec'];
+        let s = '<defs><path id="p" d="M0 0C-4.6-3.6-4.6-9.2 0-12.4C4.6-9.2 4.6-3.6 0 0Z"/></defs>';
+        const floret = (x, y, a, k, c, o) => {
+            const g = `<g transform="translate(X Y) rotate(${_n(a)}) scale(${_n(k)})" fill="${c}" opacity="${o}"><use href="#p"/><use href="#p" transform="rotate(90)"/><use href="#p" transform="rotate(180)"/><use href="#p" transform="rotate(270)"/><circle r="1.8" fill="#ffffff"/></g>`;
+            for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) {
+                const X = x + dx, Y = y + dy;
+                if (X > -16 && X < S + 16 && Y > -16 && Y < S + 16) s += g.replace('translate(X Y)', `translate(${_n(X)} ${_n(Y)})`);
+            }
         };
-        const leaf = (x, y, a, s) => `<path transform="translate(${_n(x)} ${_n(y)}) rotate(${_n(a)}) scale(${s})" d="M0 0C6-8 18-8 22 0C18 8 6 8 0 0Z"/>`;
-        const moth = (x, y, s) => `<g transform="translate(${x} ${y}) scale(${s})"><path d="M0 -8V9"/><path d="M0 -4C-10 -16 -22 -10 -18 0C-15 6 -6 4 0 1M0 -4C10 -16 22 -10 18 0C15 6 6 4 0 1M0 2C-7 6 -10 13 -4 14C-1 14 0 8 0 4M0 2C7 6 10 13 4 14C1 14 0 8 0 4"/></g>`;
-        const vine = 'M-10 1010C80 900 60 800 150 720S190 560 120 470 150 300 230 240';
-        let fl = '', lv = '';
-        const c = _curve([-10, 1010], [200, 620], [230, 240]);
-        for (let i = 1; i < 9; i++) { const [x, y] = c.at(i / 9), [dx, dy] = c.tan(i / 9), a = Math.atan2(dy, dx) * 180 / Math.PI; lv += leaf(x, y, a + (i % 2 ? 60 : -60), .9 + R() * .5); }
-        fl += flower(232, 236, 30, .3) + flower(110, 470, 22, 1.1) + flower(150, 722, 26, 2);
-        return _svgUrl(_svgOf(1600, 1000, `<defs><radialGradient id="mg" r=".5"><stop offset=".55" stop-color="rgba(220,235,255,.22)"/><stop offset="1" stop-color="rgba(220,235,255,0)"/></radialGradient><mask id="cr"><circle cx="1505" cy="150" r="74" fill="#fff"/><circle cx="1539" cy="128" r="66" fill="#000"/></mask></defs>`
-            + `<circle cx="1505" cy="150" r="190" fill="url(#mg)"/><circle cx="1505" cy="150" r="74" fill="rgba(240,244,250,.85)" mask="url(#cr)"/>`
-            + `<g fill="none" stroke="rgba(225,235,240,.3)" stroke-width="1.5" stroke-linecap="round"><path d="${vine}"/>${lv}</g><g fill="rgba(240,245,250,.1)" stroke="rgba(240,245,250,.55)" stroke-width="1.3">${fl}</g>`
-            + `<g fill="none" stroke="rgba(240,245,250,.42)" stroke-width="1.4" stroke-linejoin="round">${moth(420, 160, 1.2)}${moth(1180, 420, .9)}${moth(1500, 760, 1)}</g>`, ' preserveAspectRatio="xMidYMid slice"'));
+        for (let i = 0; i < 11; i++) floret(R() * S, R() * S, R() * 90, .75 + R() * .55, C[i % C.length], _n(.14 + R() * .12));
+        return _svgLite(_svgOf(S, S, s));
     })();
-    const _FIREFLIES = (() => {
-        const R = _rng(129);
-        const f = Array.from({ length: 18 }, () => { const x = _n(R() * 1600), y = _n(180 + R() * 780); return `<circle cx="${x}" cy="${y}" r="6" fill="rgba(220,255,150,.3)" filter="url(#f)"/><circle cx="${x}" cy="${y}" r="${_n(1.1 + R() * .9)}" fill="#f4ffd0"/>`; }).join('');
-        return _svgUrl(_svgOf(1600, 1000, `<defs><filter id="f" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="2.5"/></filter></defs>${f}`, ' preserveAspectRatio="xMidYMid slice"'));
-    })();
-    // Marquee: velvet curtains drawn back with a gold rope (left; the right one its mirror), and a row of bulbs — one in three
-    // lit, moved along a bulb at a time so they chase
-    const _CURTAIN = (() => {
-        let folds = '';
-        for (let i = 0; i < 7; i++) {
-            const xt = 12 + i * 29, xm = 8 + i * 11.5, xb = 6 + i * 23;
-            folds += `<path d="M${xt} 0Q${xt} 380 ${_n(xm)} 610Q${_n(xm)} 760 ${xb} 1000" stroke="rgba(0,0,0,.42)" stroke-width="9"/><path d="M${xt + 12} 0Q${xt + 12} 380 ${_n(xm + 5)} 610Q${_n(xm + 5)} 760 ${xb + 11} 1000" stroke="rgba(255,140,150,.13)" stroke-width="5"/>`;
+    const _THEMES_S1 = ['daybreak', 'hydrangea', 'sorbet', 'rosewater', 'rosegold', 'sapphire'];
+    // Low Poly: a dawn landscape in facets — mountains and sky as a mesh of shaded triangles
+    const _LOWPOLY = (() => {
+        const R = _rng(841), W = 1600, H = 1000, cols = 18, rows = 12;
+        const pts = [];
+        for (let j = 0; j <= rows; j++) for (let i = 0; i <= cols; i++) {
+            const edge = i === 0 || j === 0 || i === cols || j === rows;
+            pts.push([i / cols * W + (edge ? 0 : (R() - .5) * W / cols * .7), j / rows * H + (edge ? 0 : (R() - .5) * H / rows * .7)]);
         }
-        const shape = 'M0 0H200C200 260 150 520 84 612C98 760 130 880 156 1000H0Z';
-        const body = `<defs><clipPath id="c"><path d="${shape}"/></clipPath><linearGradient id="g" x2="1"><stop offset="0" stop-color="#3a0610"/><stop offset=".55" stop-color="#7d1424"/><stop offset="1" stop-color="#5c0d1a"/></linearGradient><linearGradient id="v" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity=".35"/><stop offset=".25" stop-color="#000" stop-opacity="0"/><stop offset=".85" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".45"/></linearGradient></defs>`
-            + `<g clip-path="url(#c)"><rect width="200" height="1000" fill="url(#g)"/><g fill="none">${folds}</g><rect width="200" height="1000" fill="url(#v)"/></g>`
-            + `<path d="${shape}" fill="none" stroke="rgba(0,0,0,.5)" stroke-width="2"/>`
-            + '<path d="M-4 596Q44 640 92 606" fill="none" stroke="#b8862c" stroke-width="9" stroke-linecap="round"/><path d="M-4 596Q44 640 92 606" fill="none" stroke="#f0c45c" stroke-width="5" stroke-linecap="round" stroke-dasharray="3 4"/>'
-            + '<path d="M86 610q4 18 2 34" stroke="#d9a63e" stroke-width="3" fill="none"/><path d="M80 642h16l4 34h-24z" fill="#d9a63e"/><path d="M80 642h16" stroke="#f3d27a" stroke-width="2"/>';
-        return [_svgUrl(_svgOf(200, 1000, body, ' preserveAspectRatio="none"')), _svgUrl(_svgOf(200, 1000, `<g transform="translate(200 0) scale(-1 1)">${body}</g>`, ' preserveAspectRatio="none"'))];
-    })();
-    const _BULBS = _svgUrl(_svgOf(66, 14, '<defs><radialGradient id="on"><stop offset="0" stop-color="#fffbe8"/><stop offset=".45" stop-color="#ffe08a"/><stop offset="1" stop-color="#ffc850" stop-opacity="0"/></radialGradient><radialGradient id="off"><stop offset="0" stop-color="#d9a24c"/><stop offset=".65" stop-color="#8a5a1e"/><stop offset="1" stop-color="#5a3a12" stop-opacity="0"/></radialGradient></defs><circle cx="11" cy="7" r="7" fill="url(#on)"/><circle cx="11" cy="7" r="2.6" fill="#fffdf2"/><circle cx="33" cy="7" r="4" fill="url(#off)"/><circle cx="55" cy="7" r="4" fill="url(#off)"/>'));
-    // Astrolabe: a star chart (constellations joined up, a celestial grid) and an astrolabe's rings; a brass rule, engraved
-    const _STARCHART = (() => {
-        const W = 1600, H = 1000, R = _rng(131);
-        let stars = '', lines = '';
-        for (let i = 0; i < 150; i++) stars += `<circle cx="${_n(R() * W)}" cy="${_n(R() * H)}" r="${_n(.5 + R() ** 3 * 2)}" fill="rgba(240,235,215,${_n(.3 + R() * .5)})"/>`;
-        for (const [cx, cy] of [[300, 180], [1260, 230], [880, 640], [1420, 760], [140, 620]]) {
-            let x = cx, y = cy, p = `M${cx} ${cy}`;
-            stars += `<circle cx="${cx}" cy="${cy}" r="2.6" fill="rgba(255,248,225,.9)"/>`;
-            for (let k = 0; k < 5; k++) { x += (R() - .5) * 170; y += (R() - .5) * 130; p += `L${_n(x)} ${_n(y)}`; stars += `<circle cx="${_n(x)}" cy="${_n(y)}" r="${_n(1.6 + R() * 1.4)}" fill="rgba(255,248,225,.85)"/>`; }
-            lines += `<path d="${p}"/>`;
+        const ridge = x => 560 + Math.sin(x / 210) * 70 + Math.sin(x / 90 + 1) * 34 - Math.max(0, 260 - Math.abs(x - 1180) * .9) * .9 - Math.max(0, 200 - Math.abs(x - 360) * .8) * .7;
+        const mix = (a, b, t) => a.map((v, k) => Math.round(v + (b[k] - v) * t));
+        const hex = c => '#' + c.map(v => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('');
+        let s = '';
+        const tri = (a, b, c) => {
+            const cx = (a[0] + b[0] + c[0]) / 3, cy = (a[1] + b[1] + c[1]) / 3, r = ridge(cx);
+            let col;
+            if (cy < r) col = mix([255, 214, 186], [196, 214, 245], Math.min(1, cy / r * 1.1));   // sky: peach high, blue low (toward the horizon)
+            else { const t = Math.min(1, (cy - r) / 380); col = mix([128, 140, 200], [72, 84, 150], t); const lit = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) > 0 ? 18 : -10; col = col.map(v => v + lit); }
+            col = col.map(v => v + Math.round((R() - .5) * 16));
+            s += `<path d="M${Math.round(a[0])} ${Math.round(a[1])}L${Math.round(b[0])} ${Math.round(b[1])}L${Math.round(c[0])} ${Math.round(c[1])}Z" fill="${hex(col)}" stroke="${hex(col)}" stroke-width=".6"/>`;
+        };
+        for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+            const p = pts[j * (cols + 1) + i], q = pts[j * (cols + 1) + i + 1], r2 = pts[(j + 1) * (cols + 1) + i], t = pts[(j + 1) * (cols + 1) + i + 1];
+            if ((i + j) % 2) { tri(p, q, t); tri(p, t, r2); } else { tri(p, q, r2); tri(q, t, r2); }
         }
-        const C = [200, 800], pt = (r, a) => `${_n(C[0] + Math.cos(a) * r)} ${_n(C[1] + Math.sin(a) * r)}`;
-        let ticks = '', spokes = '';
-        for (let i = 0; i < 120; i++) { const a = i / 120 * 6.28; ticks += `M${pt(i % 10 ? 300 : 290, a)}L${pt(310, a)}`; }
-        for (let i = 0; i < 12; i++) { const a = i / 12 * 6.28; spokes += `M${pt(120, a)}L${pt(290, a)}`; }
-        const astro = `<g fill="none" stroke="rgba(199,154,82,.4)" stroke-width="1.3"><circle cx="${C[0]}" cy="${C[1]}" r="310"/><circle cx="${C[0]}" cy="${C[1]}" r="290"/><circle cx="${C[0]}" cy="${C[1]}" r="120"/><circle cx="${C[0] + 40}" cy="${C[1] - 30}" r="190"/><path d="${ticks}"/><path d="${spokes}" stroke-dasharray="2 5"/></g>`;
-        const grid = `<g fill="none" stroke="rgba(199,154,82,.12)" stroke-width="1"><ellipse cx="800" cy="500" rx="900" ry="260"/><ellipse cx="800" cy="500" rx="900" ry="520"/><path d="M-100 500H1700"/><ellipse cx="800" cy="500" rx="300" ry="700"/><ellipse cx="800" cy="500" rx="620" ry="700"/></g>`;
-        return _svgUrl(_svgOf(W, H, `${grid}${stars}<g fill="none" stroke="rgba(199,154,82,.4)" stroke-width="1">${lines}</g>${astro}`, ' preserveAspectRatio="xMidYMid slice"'));
+        return _svgLite(_svgOf(W, H, s, ' preserveAspectRatio="xMidYMid slice"'));
     })();
-    const _SCALE = (() => {
-        let t = '';
-        for (let x = 0; x < 60; x += 3) t += `M${x + .5} 0V${x % 30 === 0 ? 6.5 : x % 15 === 0 ? 4.5 : 2.6}`;
-        return _svgUrl(_svgOf(60, 10, `<defs><linearGradient id="b" x2="0" y2="1"><stop offset="0" stop-color="#f2d69c"/><stop offset=".5" stop-color="#c79a52"/><stop offset="1" stop-color="#8a6630"/></linearGradient></defs><rect width="60" height="10" fill="url(#b)"/><path d="${t}" stroke="#3a2a12" stroke-opacity=".75"/><path d="M0 9.5H60" stroke="#5a4218"/>`));
+    // Retro OS: desktop icons down the left — a computer, a folder, a document and a bin, in pixels
+    const _DESKTOP = (() => {
+        const P = { k: '#000000', w: '#ffffff', g: '#c0c0c0', d: '#808080', b: '#000080', c: '#00a8a8', y: '#ffe066', o: '#d4a017' };
+        const comp = ['..kkkkkkkkkkkk..', '..kwwwwwwwwwwk..', '..kwbbbbbbbbwk..', '..kwbccccccbwk..', '..kwbccccccbwk..', '..kwbccccccbwk..', '..kwbbbbbbbbwk..', '..kwwwwwwwwwwk..', '..kkkkkkkkkkkk..', '.....kddddk.....', '..kkkkkkkkkkkk..', '..kggggggggggk..', '..kgdgdgdgdggk..', '..kkkkkkkkkkkk..'];
+        const folder = ['................', '.kkkkk..........', 'kyyyyyk.........', 'kyyyyyykkkkkkkk.', 'kooooooooooooook', 'kyyyyyyyyyyyyyyk', 'kyyyyyyyyyyyyyyk', 'kyyyyyyyyyyyyyyk', 'kyyyyyyyyyyyyyyk', 'kyyyyyyyyyyyyyyk', 'kyyyyyyyyyyyyyyk', 'kkkkkkkkkkkkkkkk'];
+        const doc = ['..kkkkkkkkk.....', '..kwwwwwwwkk....', '..kwdddddwkwk...', '..kwwwwwwwkkkk..', '..kwddddddddwk..', '..kwwwwwwwwwwk..', '..kwddddddddwk..', '..kwwwwwwwwwwk..', '..kwddddddwwwk..', '..kwwwwwwwwwwk..', '..kkkkkkkkkkkk..'];
+        const bin = ['...kkkkkkkkkk...', '..kggggggggggk..', '..kkkkkkkkkkkk..', '...kgdgdgdgdk...', '...kgdgdgdgdk...', '...kgdgdgdgdk...', '...kgdgdgdgdk...', '...kgdgdgdgdk...', '...kkkkkkkkkk...'];
+        const label = y => `<rect x="10" y="${y}" width="76" height="10" fill="#ffffff" opacity=".85"/>`;
+        return _svgLite(_svgOf(100, 600, _pixC(comp, 4, P, 16, 20) + label(84) + _pixC(folder, 4, P, 16, 150) + label(206) + _pixC(doc, 4, P, 16, 280) + label(332) + _pixC(bin, 4, P, 16, 410) + label(456),
+            ' shape-rendering="crispEdges"'));
     })();
-    // Groovy: 70s rainbow arcs from two corners, and four wavy stripes under the bar
-    const _GROOVY = (() => {
-        const band = ['#f3e3c3', '#e8a33d', '#d9622b', '#8a4a22', '#7d7f2a'];
-        const arcs = (cx, cy, r0, w, start, sweep) => band.map((c, i) => { const r = r0 + i * w; return `<path d="M${_n(cx + Math.cos(start) * r)} ${_n(cy + Math.sin(start) * r)}A${r} ${r} 0 0 ${sweep} ${_n(cx + Math.cos(start + Math.PI / 2 * (sweep ? 1 : -1)) * r)} ${_n(cy + Math.sin(start + Math.PI / 2 * (sweep ? 1 : -1)) * r)}" stroke="${c}"/>`; }).join('');
-        return _svgUrl(_svgOf(1600, 1000, `<g fill="none" stroke-width="30" opacity=".85">${arcs(1600, 1000, 170, 30, Math.PI, 1)}${arcs(0, 0, 110, 30, 0, 1)}</g>`, ' preserveAspectRatio="xMidYMid slice"'));
+    // Y2K: chrome blobs and four-point sparkles, a holographic ring
+    const _Y2K = (() => {
+        const spark = (x, y, k, c) => `<path transform="translate(${x} ${y}) scale(${k})" d="M0-20C2-6 6-2 20 0C6 2 2 6 0 20C-2 6-6 2-20 0C-6-2-2-6 0-20Z" fill="${c}"/>`;
+        return _svgLite(_svgOf(1600, 1000, '<defs><linearGradient id="ch" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset=".35" stop-color="#c9ccd8"/><stop offset=".5" stop-color="#6c7088"/><stop offset=".62" stop-color="#e8eaf2"/><stop offset="1" stop-color="#8a8ea6"/></linearGradient>'
+            + '<linearGradient id="ho" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff9ef0"/><stop offset=".35" stop-color="#9ee8ff"/><stop offset=".7" stop-color="#c6ff9e"/><stop offset="1" stop-color="#ffd59e"/></linearGradient></defs>'
+            + '<path d="M1300 120C1380 60 1520 80 1540 180S1460 330 1380 300 1220 180 1300 120Z" fill="url(#ch)" opacity=".85"/><path d="M1330 140C1370 110 1430 112 1450 140" stroke="#ffffff" stroke-width="6" fill="none" stroke-linecap="round" opacity=".8"/>'
+            + '<path d="M60 760C120 700 260 720 270 820S150 960 90 920 0 820 60 760Z" fill="url(#ch)" opacity=".8"/>'
+            + '<circle cx="230" cy="220" r="90" fill="none" stroke="url(#ho)" stroke-width="16" opacity=".75"/><circle cx="1450" cy="760" r="50" fill="none" stroke="url(#ho)" stroke-width="10" opacity=".7"/>'
+            + spark(1200, 300, 1.4, '#ffffff') + spark(380, 140, 1, '#ffb3f3') + spark(140, 600, .9, '#9ee8ff') + spark(1520, 620, 1.1, '#ffffff') + spark(1240, 880, .8, '#c6ff9e') + spark(330, 900, .7, '#ffffff'),
+            ' preserveAspectRatio="xMidYMid slice"'));
     })();
-    const _WAVES = _svgUrl(_svgOf(120, 17, ['#f0b24a', '#e07a30', '#c4512a', '#8a3d22'].map((c, i) => { const y = 3.4 + i * 3.4; return `<path d="M0 ${_n(y)}C20 ${_n(y - 2.2)} 40 ${_n(y - 2.2)} 60 ${_n(y)}S100 ${_n(y + 2.2)} 120 ${_n(y)}" fill="none" stroke="${c}" stroke-width="3.6"/>`; }).join('')));
-    const _THEMES_4 = ['bitmap', 'transit', 'contour', 'notebook', 'terrazzo', 'sampler', 'popart', 'zen', 'cathedral', 'cockpit', 'cyberpunk', 'folio', 'nocturne', 'marquee', 'astrolabe', 'groovy'];
-    // (a star's outline as a clip-path polygon: n points, outer and inner radius in % of the box)
-    const _starPoly = (n, r1, r2) => Array.from({ length: n * 2 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / n, r = i % 2 ? r2 : r1; return `${_n(50 + Math.cos(a) * r)}% ${_n(50 + Math.sin(a) * r)}%`; }).join(', ');
+    const _THEMES_7 = ['lowpoly', 'retroos', 'y2k'];
+    // Mist: soft banks of fog low and high
+    const _MIST = _svgLite(_svgOf(1600, 1000, '<defs><filter id="f" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="28"/></filter></defs><g filter="url(#f)" fill="#ffffff">'
+        + '<ellipse cx="200" cy="900" rx="520" ry="90" opacity=".75"/><ellipse cx="1300" cy="940" rx="600" ry="100" opacity=".7"/><ellipse cx="800" cy="980" rx="700" ry="70" opacity=".6"/>'
+        + '<ellipse cx="1400" cy="140" rx="380" ry="60" opacity=".5"/><ellipse cx="160" cy="260" rx="300" ry="50" opacity=".45"/></g>', ' preserveAspectRatio="xMidYMid slice"'));
+    // Smoke: wisps curling up from the bottom corners
+    const _SMOKE = _svgLite(_svgOf(1600, 1000, '<defs><filter id="s" x="-30%" y="-30%" width="160%" height="160%"><feTurbulence type="fractalNoise" baseFrequency=".012" numOctaves="3" seed="9"/><feDisplacementMap in="SourceGraphic" scale="120"/><feGaussianBlur stdDeviation="14"/></filter></defs>'
+        + '<g filter="url(#s)" fill="none" stroke="#d8d2cc" stroke-linecap="round">'
+        + '<path d="M120 1050C80 900 220 820 160 680S260 480 200 360" stroke-width="40" opacity=".14"/><path d="M1480 1050C1520 880 1380 800 1450 640S1340 440 1420 300" stroke-width="46" opacity=".12"/>'
+        + '<path d="M300 1060C280 960 380 900 340 800" stroke-width="30" opacity=".1"/></g>', ' preserveAspectRatio="xMidYMid slice"'));
+    const _THEMES_S2 = ['heather', 'mist', 'smoke', 'ultraviolet'];
+    // Kawaii: clouds, a star and a heart with little faces, a rainbow, sparkles
+    const _KAWAII = (() => {
+        const face = (x, y, k) => `<g transform="translate(${x} ${y}) scale(${k})"><ellipse cx="-11" cy="0" rx="2.6" ry="3.4" fill="#4a3a52"/><ellipse cx="11" cy="0" rx="2.6" ry="3.4" fill="#4a3a52"/>`
+            + '<ellipse cx="-19" cy="7" rx="5" ry="3" fill="#ff9ec4" opacity=".75"/><ellipse cx="19" cy="7" rx="5" ry="3" fill="#ff9ec4" opacity=".75"/><path d="M-4 6Q0 10 4 6" fill="none" stroke="#4a3a52" stroke-width="1.8" stroke-linecap="round"/></g>';
+        const cloud = (x, y, k) => `<g transform="translate(${x} ${y}) scale(${k})"><path d="M-70 20C-92 20-96-8-74-12C-74-40-40-48-26-28C-18-56 26-58 32-26C52-40 82-24 72 0C92 4 88 30 66 30H-60C-66 30-70 26-70 20Z" fill="#e9dcff" transform="translate(4 6)"/>`
+            + '<path d="M-70 20C-92 20-96-8-74-12C-74-40-40-48-26-28C-18-56 26-58 32-26C52-40 82-24 72 0C92 4 88 30 66 30H-60C-66 30-70 26-70 20Z" fill="#ffffff"/>' + face(0, 4, 1) + '</g>';
+        const star = (x, y, k, a) => { let d = ''; for (let i = 0; i < 10; i++) { const ang = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 22 : 46; d += `${i ? 'L' : 'M'}${_n(Math.cos(ang) * r)} ${_n(Math.sin(ang) * r)}`; } return `<g transform="translate(${x} ${y}) rotate(${a}) scale(${k})"><path d="${d}Z" fill="#fff1a8" stroke="#ffe066" stroke-width="10" stroke-linejoin="round"/>${face(0, 4, .8)}</g>`; };
+        const heart = (x, y, k, a) => `<g transform="translate(${x} ${y}) rotate(${a}) scale(${k})"><path d="M0 36C-46 6-52-24-30-38C-16-46-4-38 0-28C4-38 16-46 30-38C52-24 46 6 0 36Z" fill="#ffc4dc" stroke="#ffb0cf" stroke-width="6" stroke-linejoin="round"/>${face(0, -6, .8)}</g>`;
+        const rainbow = (x, y, k) => `<g transform="translate(${x} ${y}) scale(${k})" fill="none" stroke-linecap="round">` + ['#ffb3c7', '#ffd6a8', '#fff1a8', '#c8f2d0', '#bfe3ff', '#dccbff'].map((c, i) => `<path d="M${-110 + i * 12} 0A${110 - i * 12} ${110 - i * 12} 0 0 1 ${110 - i * 12} 0" stroke="${c}" stroke-width="12"/>`).join('') + '</g>';
+        const spark = (x, y, k, c) => `<path transform="translate(${x} ${y}) scale(${k})" d="M0-14C1-4 4-1 14 0C4 1 1 4 0 14C-1 4-4 1-14 0C-4-1-1-4 0-14Z" fill="${c}"/>`;
+        return _svgLite(_svgOf(1600, 1000, rainbow(170, 250, 1) + cloud(70, 250, .8) + cloud(280, 252, .6) + star(1450, 200, 1.2, 12) + heart(140, 760, 1.2, -10) + cloud(1430, 840, 1.3) + cloud(1220, 930, .7)
+            + spark(1300, 120, 1, '#ffb3d1') + spark(420, 140, .8, '#c9b3ff') + spark(1540, 520, .9, '#9fe3c4') + spark(70, 520, .8, '#ffd27a') + spark(330, 900, .9, '#ffb3d1') + spark(1150, 760, .7, '#c9b3ff'),
+            ' preserveAspectRatio="xMidYMid slice"'));
+    })();
+    const _CLOUDEDGE = _svgLite(_svgOf(40, 16, '<circle cx="10" cy="2" r="10" fill="#e9dcff"/><circle cx="30" cy="2" r="10" fill="#e9dcff"/><circle cx="10" cy="0" r="10" fill="#ffffff"/><circle cx="30" cy="0" r="10" fill="#ffffff"/>'));
+    const _THEMES_8 = ['kawaii'];
+    // Pewter: hand-hammered — a lit relief of shallow dents (noise raised into a surface, light from the upper left), stitched to tile
+    const _PEWTER = _svgLite(_svgOf(260, 260, '<filter id="h" filterUnits="userSpaceOnUse" x="-24" y="-24" width="308" height="308"><feTurbulence type="fractalNoise" baseFrequency=".0154" numOctaves="2" seed="9" stitchTiles="stitch" x="0" y="0" width="260" height="260" result="t"/><feTile in="t" result="n"/>'
+        + '<feDiffuseLighting in="n" surfaceScale="3.2" lighting-color="#ffffff" result="l"><feDistantLight azimuth="225" elevation="52"/></feDiffuseLighting>'
+        + '<feColorMatrix in="l" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  1.6 0 0 0 -1.05" result="hi"/><feColorMatrix in="l" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -1.7 0 0 0 .78" result="lo"/>'
+        + '<feMerge><feMergeNode in="lo"/><feMergeNode in="hi"/></feMerge></filter><rect width="260" height="260" filter="url(#h)" opacity=".5"/>'));
+    const _THEMES_S4 = ['pewter'];
+    // Sage: linen threads both ways (no ground colour of their own — the page's shows through)
+    const _LINENTHREADS = _svgLite(_svgOf(200, 200, '<filter id="h" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency=".012 .55" numOctaves="2" seed="3" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 .3  0 0 0 0 .36  0 0 0 0 .27  0 0 0 .7 -.27"/></filter>'
+        + '<filter id="v" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency=".55 .012" numOctaves="2" seed="9" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 .4  0 0 0 0 .42  0 0 0 0 .32  0 0 0 .65 -.26"/></filter>'
+        + '<rect width="200" height="200" filter="url(#h)"/><rect width="200" height="200" filter="url(#v)"/>'));
+    // ── Candidate batch C1: mediums carried through the whole interface (art kept to three small strips) ──
+    // Sewing Pattern: a tape measure along the bar's lower edge — yellow tape, eighths, half-inches and numbered inches
+    const _TAPE = (() => {
+        const W = 3200, H = 14, U = 48;   // (48px to the inch)
+        let ticks = '', nums = '';
+        for (let i = 0; i * U / 8 <= W; i++) {
+            const x = _n(i * U / 8 + .5), L = i % 8 === 0 ? 9 : i % 4 === 0 ? 6.5 : i % 2 === 0 ? 4.5 : 3;
+            ticks += `M${x} 0v${L}`;
+            if (i % 8 === 0 && i > 0) nums += `<text x="${_n(i * U / 8 - 2)}" y="12.6" text-anchor="end">${i / 8}</text>`;
+        }
+        return _svgLite(_svgOf(W, H, `<rect width="${W}" height="${H}" fill="#f1cd3b"/><rect width="${W}" height="1" fill="#8a6d10" opacity=".6"/><path d="${ticks}" stroke="#1f1d1a" stroke-width="1" fill="none"/><g font-family="Arial, Helvetica, sans-serif" font-size="7.5" font-weight="700" fill="#1f1d1a">${nums}</g><rect y="${H - 1}" width="${W}" height="1" fill="#b8961f" opacity=".5"/>`));
+    })();
+    // Receipt: a barcode — bars from a fixed sequence, so it is the same every time
+    const _BARCODE = (() => {
+        const R = _rng(2718), W = 220, H = 12;
+        let x = 0, d = '';
+        while (x < W - 4) { const w = 1 + Math.floor(R() * 3), gap = 1 + Math.floor(R() * 2.4); d += `M${x} 0h${w}v${H}h-${w}z`; x += w + gap; }
+        return _svgLite(_svgOf(W, H, `<path d="${d}" fill="#222222"/>`, ' shape-rendering="crispEdges"'));
+    })();
+    // Passport: the machine-readable line under the bar (generic text, no names: the filler runs to the end)
+    const _MRZ = (() => {
+        const line = ('P<DTI<<DRESS<TO<IMPRESS' + '<'.repeat(170)).replace(/</g, '&lt;');
+        return _svgLite(_svgOf(2400, 18, `<rect width="2400" height="18" fill="#f7f8f1"/><text x="12" y="13.5" font-family="Consolas, Menlo, monospace" font-size="12" letter-spacing="2.4" fill="#5b6273">${line}</text>`));
+    })();
     // In Settings: the light looks, then the dark ones, each in the order shown (desc: a line about it, on hover)
     const THEME_PRESETS = [
         { id: 'pastel',  label: 'R. Pastel', base: 'light', fav: '#9061f9', cover: '#fdf7ff', desc: 'Soft rainbow pastels on white',
           pv: ['linear-gradient(135deg,#ffe3ef,#fff6d9 35%,#e1f8e3 65%,#e4ecff)', 'linear-gradient(90deg,#ffc2d6,#ffdcb5,#fff3b0,#c9f2cb,#b8e4ff,#cbbcff)', '#ffffff', 'linear-gradient(90deg,#f27ab0,#b07cf7,#6fa8ff)'] },
+        { id: 'kawaii', label: 'Kawaii', base: 'light', fav: '#b43f8e', cover: '#fbeef6', font: 'Mochiy+Pop+One', desc: 'Pastel clouds and stars with little faces',
+          pv: ['linear-gradient(135deg,#ffe4f0,#efe6ff 50%,#e2f8ee)', 'linear-gradient(90deg,#ffb3d1,#d9c2ff 50%,#a8e6cf)', '#ffffff', 'linear-gradient(100deg,#ff9cc7,#c9a6ff)'] },
         { id: 'holo',    label: 'R. Pastel 2', base: 'light', fav: '#7c5cff', cover: '#f7f5ff', desc: 'Holographic pastels, the bar slowly shifting',
           pv: ['conic-gradient(from 210deg at 70% 30%,#f9dff0,#dfe9fa,#dff9f2,#faf6df,#f9dfdf,#f9dff0)', 'linear-gradient(90deg,#f5c2e7,#c2d7f5,#c2f5e9,#f5f0c2,#f5c2c2,#e0c2f5)', '#ffffff', 'linear-gradient(90deg,#8b5cf6,#ec4899,#06b6d4)'] },
         { id: 'lilac',  label: 'Lilac Dream', base: 'light', fav: '#a855f7', cover: '#faf5ff', desc: 'Lilac and pink, with sparkles',
           pv: ['radial-gradient(circle at 20% 15%,#fff,transparent 45%),linear-gradient(180deg,#efe4ff,#fff4fb)', 'linear-gradient(90deg,#e9d5ff,#fbcfe8,#dbeafe,#f5d0fe)', '#ffffff', 'linear-gradient(90deg,#c084fc,#f472b6,#93c5fd)'] },
+        { id: 'heather', label: 'Heather', base: 'light', fav: '#7a5a8c', cover: '#f4f1f5', desc: 'Muted heather purple with a mossy line',
+          pv: ['linear-gradient(160deg,#efe8f3,#f6f3f7 60%,#e6efe4)', 'linear-gradient(90deg,#776686,#635470)', '#ffffff', 'linear-gradient(90deg,#86669a,#684a78)'] },
         { id: 'peony',  label: 'Peony', base: 'light', fav: '#c8436b', cover: '#fbf1f2', desc: 'Blush pink and raspberry',
           pv: ['linear-gradient(160deg,#fdf5f6,#f6e3e6)', 'linear-gradient(90deg,#f9d7df,#eaa0b6)', '#ffffff', 'linear-gradient(90deg,#d24f76,#a8355c)'] },
-        { id: 'champagne', label: 'Champagne', base: 'light', fav: '#c9a06a', cover: '#f7eee8', accentAttr: 'yellow', font: 'Bodoni+Moda:opsz,wght@6..96,500..700', desc: 'Blush and gold foil, bubbles rising',
-          pv: ['radial-gradient(circle at 20% 70%,rgba(190,150,95,.5) 0 1.6px,transparent 2.2px),radial-gradient(circle at 72% 38%,rgba(190,150,95,.45) 0 1.2px,transparent 1.8px),linear-gradient(180deg,#faf2ec,#f4e9e1)', 'linear-gradient(100deg,#e6cfa8,#f7ead2 30%,#d8b98a 55%,#f3e3c6 75%,#cfae7f)', '#fffaf6', 'linear-gradient(100deg,#d9b98a,#f3e3c6,#c9a06a)'] },
+        { id: 'rosewater', label: 'Rosewater', base: 'light', fav: '#a34a64', cover: '#f8f1f1', desc: 'Dusty rose and mauve, softly grained',
+          pv: ['linear-gradient(180deg,#faf3f2,#f2e6e8)', 'linear-gradient(90deg,#9c566a,#925370 50%,#80507a)', '#fffbfb', 'linear-gradient(90deg,#ad5470,#8c3c54)'] },
+        { id: 'daybreak', label: 'Daybreak', base: 'light', fav: '#c9473a', cover: '#fdf5ef', desc: 'Dawn gold, blush and a periwinkle sky',
+          pv: ['linear-gradient(180deg,#fff2e2,#fcedf1 55%,#eef0fc)', 'linear-gradient(90deg,#ffd8a8,#ffc4b2 35%,#f6c3d8 66%,#c8cdf5)', '#ffffff', 'linear-gradient(90deg,#d6603c,#c9465a,#9b4a8c)'] },
         { id: 'sunset',  label: 'Sunset', base: 'light', fav: '#ea4c60', cover: '#fff7f2', desc: 'Warm peach, coral and plum',
           pv: ['linear-gradient(160deg,#fff1e6,#ffe4ea 55%,#f3e4ff)', 'linear-gradient(90deg,#ff9b54,#ff6a6a 45%,#c2549d 78%,#7b4ba8)', '#ffffff', 'linear-gradient(90deg,#ff8a4c,#ef4f6b,#b24f9f)'] },
-        { id: 'terracotta', label: 'Terracotta', base: 'light', fav: '#b8532f', cover: '#f6eee6', desc: 'Sun-baked clay, sand and olive',
-          pv: ['linear-gradient(180deg,#f8f0e7,#f1e4d6)', 'linear-gradient(90deg,#8f3a22,#b4552f)', '#fffaf5', 'linear-gradient(90deg,#a9472a,#c0632f)'] },
-        { id: 'terrazzo', label: 'Terrazzo', base: 'light', fav: '#b35340', cover: '#f3eee8', font: 'Syne:wght@600;700;800', desc: 'Speckled stone floors with a brass strip set in',
-          pv: [`${_TERRAZZO} 0 0/70px 70px,#f3eee8`, 'linear-gradient(180deg,#ecd5c8 0 72%,#c49a4a 72%)', '#fffdfa', '#b35340'] },
-        { id: 'kraft', label: 'Kraft', base: 'light', fav: '#b5382c', cover: '#cdb48e', font: 'Courier+Prime:wght@400;700', desc: 'Brown paper, labels, tape and a red stamp',
-          pv: ['radial-gradient(rgba(60,40,20,.28) .6px,transparent 1px) 0 0/5px 5px,#cdb48e', 'linear-gradient(180deg,#23324b 0 78%,transparent 78%),radial-gradient(circle at 50% 100%,transparent 1px,#23324b 1.5px) 0 0/4px 7px', '#fbf6ec', '#b5382c'] },
-        { id: 'sampler', label: 'Sampler', base: 'light', fav: '#8f2b2b', cover: '#f3eee2', font: 'Fraunces:opsz,wght@9..144,600;9..144,700', desc: 'Cross-stitch on linen, in red and indigo thread',
-          pv: ['radial-gradient(rgba(80,62,40,.28) .6px,transparent 1px) 0 0/3px 3px,#f3eee2', '#8f2b2b', '#fbf8f0', '#2f4a7a'] },
+        { id: 'sorbet', label: 'Sorbet', base: 'light', fav: '#d6336c', cover: '#fff6f2', desc: 'Mango, raspberry and pistachio',
+          pv: ['linear-gradient(160deg,#fff1e6,#fff3f4 50%,#eef8ec)', 'linear-gradient(90deg,#ffcfa8,#ffb8c2 38%,#fbc6dc 68%,#cfeccb)', '#ffffff', 'linear-gradient(90deg,#e5486f,#d6336c,#c23a8a)'] },
         { id: 'honeycomb', label: 'Honeycomb', base: 'light', fav: '#d69213', cover: '#fdf6e3', accentAttr: 'yellow', desc: 'Golden honey over a faint comb',
           pv: [`${_HEXCOMB} 0 0/14px 24px,linear-gradient(180deg,#fff9ea,#fcf2da)`, 'linear-gradient(90deg,#f4c552,#d69213)', '#fffdf6', 'linear-gradient(90deg,#e8ad2c,#c27a0a)'] },
-        { id: 'popart', label: 'Pop Art', base: 'light', fav: '#d9221f', cover: '#fff7d6', font: 'Bangers', desc: 'Comic panels, Ben-Day dots and a big burst',
-          pv: ['radial-gradient(circle,rgba(0,163,224,.5) 30%,transparent 34%) 0 0/4px 4px,#fff7d6', 'linear-gradient(180deg,#ffd400 0 70%,#111 70%)', '#ffffff', '#d9221f'] },
-        { id: 'midcentury', label: 'Mid-Century', base: 'light', fav: '#1b7a70', cover: '#f3e7cf', font: 'Josefin+Sans:wght@600;700', desc: 'Walnut, mustard and teal, with atomic stars',
-          pv: [`${_MCM_ATOMIC} 0 0/64px 49px,#f3e7cf`, 'linear-gradient(180deg,#5a3a24 0 64%,#e0a526 64% 82%,#d5612a 82%)', '#fffaf0', '#e0a526'] },
-        { id: 'regal', label: 'Regal', base: 'light', fav: '#2a56b8', cover: '#fbf6e9', desc: 'Royal blue on cream, with a gold rule',
-          pv: ['linear-gradient(180deg,#fcf6e6,#f3e9d2)', 'linear-gradient(90deg,#1b336f,#23468f 55%,#2f5bb5)', '#fffdf8', 'linear-gradient(90deg,#2a56b8,#3b6fd6 60%,#c4952b)'] },
         { id: 'bauhaus', label: 'Bauhaus', base: 'light', fav: '#d4322c', cover: '#efe9dc', font: 'Jost:wght@500;600;700', desc: 'Red, yellow and blue, circles and squares',
           pv: ['radial-gradient(circle at 86% 22%,rgba(212,50,44,.55) 0 9px,transparent 9.5px),linear-gradient(45deg,rgba(242,182,50,.6) 0 18%,transparent 18%),#efe9dc', 'linear-gradient(180deg,#151515 0 68%,transparent 68%),linear-gradient(90deg,#d4322c 0 33%,#f2b632 33% 66%,#1f4e9e 66%)', '#fbf8f1', '#d4322c'] },
-        { id: 'transit', label: 'Transit', base: 'light', fav: '#0039a6', cover: '#f4f4f1', font: 'Archivo:wght@600;700;800', desc: 'Subway signage: black bands, route colors, bold type',
-          pv: ['linear-gradient(135deg,transparent 0 44%,rgba(238,53,46,.55) 44% 50%,transparent 50% 62%,rgba(0,57,166,.5) 62% 68%,transparent 68%),#f4f4f1', 'linear-gradient(180deg,#161616 0 22%,#ffffff 22% 34%,#161616 34%)', '#ffffff', '#0039a6'] },
-        { id: 'paper', label: 'Paper & Ink', base: 'light', fav: '#c23b22', cover: '#f4efe4', desc: 'Cream paper, black ink and a red seal',
-          pv: ['#f4efe4', 'linear-gradient(180deg,#1f1d1a 0 75%,#c23b22 75%)', '#fbf8f1', '#c23b22'] },
-        { id: 'atelier', label: 'Atelier', base: 'light', fav: '#1f3ad1', cover: '#f5f3ee', font: 'Instrument+Serif:ital@0;1', desc: 'A gallery’s white walls, ink, and one cobalt blue',
-          pv: ['linear-gradient(180deg,#f7f5f0,#f1eee7)', 'linear-gradient(180deg,#ffffff 0 70%,#141416 70% 80%,#ffffff 80% 88%,#141416 88%)', '#ffffff', '#141416'] },
         { id: 'bitmap', label: 'Bitmap', base: 'light', fav: '#000000', cover: '#ffffff', font: 'Pixelify+Sans:wght@500;600;700', desc: 'A one-bit desktop: black, white and a pixel font',
           pv: [`${_DITHER} 0 0/4px 4px,#ffffff`, 'linear-gradient(180deg,#ffffff 0 78%,#000000 78%)', '#ffffff', '#000000'] },
-        { id: 'linen', label: 'Linen', base: 'light', fav: '#2f6e6a', cover: '#efebe4', desc: 'Woven linen, charcoal and deep teal',
-          pv: ['repeating-linear-gradient(0deg,rgba(60,50,35,.07) 0 1px,transparent 1px 3px),#efebe4', 'linear-gradient(180deg,#2b2a28 0 78%,#b58f4d 78%)', '#f9f7f3', '#2f6e6a'] },
-        { id: 'zen', label: 'Zen', base: 'light', fav: '#4f6b3c', cover: '#ece6d8', font: 'Zen+Maru+Gothic:wght@500;700', desc: 'Raked sand, still stones and an ink-brush circle',
-          pv: [`${_RAKE} 0 0/50px 4px,#ece6d8`, '#2e2f2a', '#fbf9f3', '#4f6b3c'] },
+        { id: 'retroos', label: 'Retro OS', base: 'light', fav: '#000080', cover: '#1b8f8f', font: 'Silkscreen', desc: 'A teal desktop and bevelled grey windows',
+          pv: ['#1b8f8f', 'linear-gradient(90deg,#000080,#0f74bd)', '#c0c0c0', '#c0c0c0'] },
         { id: 'matcha', label: 'Matcha', base: 'light', fav: '#557f29', cover: '#f2f1e6', desc: 'Oat milk and fresh matcha',
           pv: ['linear-gradient(180deg,#f5f4ea,#e9ead4)', 'linear-gradient(90deg,#dce8bd,#b2ca7e)', '#fcfbf5', '#557f29'] },
-        { id: 'herbarium', label: 'Herbarium', base: 'light', fav: '#3d6a44', cover: '#f1ebdd', font: 'Cormorant+Garamond:ital,wght@0,600;0,700;1,600', desc: 'Pressed ferns on old paper, in green ink',
-          pv: [`${_HERB_FROND} right -4px top -6px/30px 40px no-repeat,linear-gradient(180deg,#f3eee1,#ece4d2)`, 'linear-gradient(180deg,#2f5037 0 82%,#c9a75a 82%)', '#fbf7ed', '#3d6a44'] },
-        { id: 'contour', label: 'Contour', base: 'light', fav: '#2f6b3d', cover: '#efebdc', font: 'Bitter:wght@600;700', desc: 'A trail map: contour lines, forest green, an orange blaze',
-          pv: [`${_CONTOUR} center/cover,#efebdc`, '#2a402f', '#fbf9f1', '#c55a22'] },
-        { id: 'tropical',  label: 'Tropical', base: 'light', fav: '#0d9488', cover: '#f2fbf9', desc: 'Teal water and coral',
-          pv: ['linear-gradient(180deg,#ddf6ff,#ecfbf4 55%,#fff3d6)', 'linear-gradient(90deg,#0e7490,#0d9488 45%,#e2566b 80%,#c81e6b)', '#ffffff', 'linear-gradient(90deg,#0d9488,#14b8a6,#f97366)'] },
-        { id: 'fjord', label: 'Fjord', base: 'light', fav: '#3a6b8c', cover: '#edf1f4', desc: 'Cool slate and sea mist',
-          pv: ['linear-gradient(180deg,#eff3f6,#e3e9ee)', 'linear-gradient(90deg,#2b3d4f,#4f6b80)', '#fbfcfd', '#3a6b8c'] },
-        { id: 'nautical', label: 'Nautical', base: 'light', fav: '#b8292f', cover: '#f3f1ea', font: 'Zilla+Slab:wght@600;700', desc: 'Navy and signal red, rope and a compass rose',
-          pv: [`${_COMPASS} right -12px bottom -12px/42px 42px no-repeat,#f3f1ea`, `linear-gradient(180deg,#172a4a 0 70%,transparent 70%),${_ROPE} 0 100%/8px 4px repeat-x`, '#fdfcf8', '#b8292f'] },
+        { id: 'mist', label: 'Mist', base: 'light', fav: '#4a6a8a', cover: '#e9eef3', desc: 'Cool grey-blue, fog low on the ground',
+          pv: ['linear-gradient(180deg,#d8e1ea,#f4f6f8)', 'linear-gradient(90deg,#56697e,#5e7186 50%,#52647a)', '#ffffff', 'linear-gradient(90deg,#55759a,#3e5a76)'] },
         { id: 'glacier',   label: 'Glacier', base: 'light', fav: '#2563eb', cover: '#f2f8ff', desc: 'Crisp blues with drifting snow',
           pv: ['radial-gradient(circle at 30% 0%,#cdeafe,transparent 60%),linear-gradient(180deg,#eaf4ff,#f7fbff)', 'linear-gradient(90deg,#1e3a8a,#2563eb 50%,#0284c7)', '#ffffff', 'linear-gradient(90deg,#1d4ed8,#0ea5e9,#22d3ee)'] },
-        { id: 'porcelain', label: 'Porcelain', base: 'light', fav: '#1d4fa3', cover: '#eef2f8', font: 'Playfair+Display:wght@600;700', desc: 'Blue-and-white china, glazed and painted',
-          pv: [`${_DELFT} 0 0/20px 20px,#eef2f8`, `linear-gradient(180deg,#1a4594 0 72%,transparent 72%),${_SCALLOP} 0 100%/6px 3px repeat-x`, '#fafcff', '#1d4fa3'] },
-        { id: 'notebook', label: 'Notebook', base: 'light', fav: '#2350b0', cover: '#fdfcf6', font: 'Caveat:wght@600;700', desc: 'Ruled paper, ballpoint doodles and a spiral binding',
-          pv: ['linear-gradient(90deg,transparent 0 7px,rgba(222,82,82,.6) 7px 8px,transparent 8px),repeating-linear-gradient(180deg,transparent 0 4px,rgba(80,130,210,.35) 4px 5px),#fdfcf6', '#2b4a9a', '#ffffff', '#2350b0'] },
-        { id: 'riso', label: 'Riso', base: 'light', fav: '#d6276f', cover: '#f5f0e6', desc: 'Fluorescent pink and blue, printed on cream',
-          pv: ['radial-gradient(rgba(50,85,164,.22) 1px,transparent 1.3px) 0 0/5px 5px,#f5f0e6', 'linear-gradient(180deg,#3255a4 0 78%,#d6276f 78%)', '#fffcf6', '#d6276f'] },
-        { id: 'gold',    label: 'Midnight Gold', base: 'dark', fav: '#d4af37', cover: '#0b0a08', accentAttr: 'yellow', desc: 'Black and polished gold',
-          pv: ['radial-gradient(circle at 50% -20%,#3a2f12,transparent 60%),#0b0a08', 'linear-gradient(90deg,#7a5c16,#b8892a 22%,#e9c96a 45%,#fff1b8 52%,#d4af37 62%,#9c7623 85%,#6e5212)', '#1b1813', 'linear-gradient(90deg,#b08d2a,#e9c96a,#b08d2a)'] },
-        { id: 'kintsugi', label: 'Kintsugi', base: 'dark', fav: '#d4a64a', cover: '#0f0d0c', accentAttr: 'yellow', font: 'Shippori+Mincho:wght@600;700', desc: 'Black lacquer, mended with seams of gold',
-          pv: [`${_KINTSUGI} center/cover,#0f0d0c`, `linear-gradient(180deg,#151210 0 76%,transparent 76%),${_SEAM} 0 100%/60px 3px repeat-x,#151210`, '#171412', 'linear-gradient(90deg,#b88a2f,#e8c879,#b88a2f)'] },
+        { id: 'hydrangea', label: 'Hydrangea', base: 'light', fav: '#4f56c9', cover: '#f3f4fc', desc: 'Periwinkle and violet florets',
+          pv: ['linear-gradient(160deg,#e8edff,#f2f1fb 55%,#efe6fa)', 'linear-gradient(90deg,#c9d4ff,#bcc0f5 40%,#c9b8ef 75%,#dac7f1)', '#ffffff', 'linear-gradient(90deg,#5a62d6,#8056c4)'] },
+        { id: 'lowpoly', label: 'Low Poly', base: 'light', fav: '#4a54a8', cover: '#dde6f7', font: 'Lexend:wght@700', desc: 'A dawn landscape cut into facets',
+          pv: ['linear-gradient(160deg,#ffd6ba 0 30%,#c4d6f5 30% 55%,#8a8ccf 55% 75%,#5a63a8 75%)', 'linear-gradient(115deg,#525ca6 0 33%,#434c95 33% 66%,#3f4890 66%)', '#ffffff', 'linear-gradient(120deg,#ffbe98 50%,#ffa77f 50%)'] },
+        { id: 'rosegold', label: 'Rose Gold', base: 'dark', fav: '#e8a598', cover: '#141011', accentAttr: 'yellow', desc: 'Charcoal with a polished rose-gold sheen',
+          pv: ['radial-gradient(circle at 50% -10%,#3a2826,#141011 70%)', 'linear-gradient(90deg,#c27b6f,#e0a596 25%,#f3c9bc 50%,#e0a596 75%,#c27b6f)', '#231d1e', 'linear-gradient(90deg,#f3c9bc,#c98576)'] },
         { id: 'ember', label: 'Ember', base: 'dark', fav: '#ea580c', cover: '#120c0a', desc: 'Glowing embers on charcoal',
           pv: ['radial-gradient(circle at 50% 120%,#7c2d0f,transparent 65%),#120c0a', 'linear-gradient(90deg,#7f1d1d,#b8380c,#dd5a12,#b8380c)', '#221714', 'linear-gradient(90deg,#b91c1c,#ea580c,#f59e0b)'] },
-        { id: 'marquee', label: 'Marquee', base: 'dark', fav: '#f5c542', cover: '#12060a', accentAttr: 'yellow', font: 'Limelight', desc: 'An old theatre: velvet curtains and a row of bulbs',
-          pv: ['linear-gradient(90deg,#6a1220 0 9%,transparent 9% 91%,#6a1220 91%),radial-gradient(ellipse at 50% 0%,rgba(255,214,140,.25),transparent 70%),#12060a', 'radial-gradient(circle,#ffe39a 0 .9px,transparent 1.3px) 0 4.5px/5px 3px repeat-x,linear-gradient(180deg,#951c2d,#6a1220)', '#1d0b10', '#f5c542'] },
         { id: 'espresso', label: 'Espresso', base: 'dark', fav: '#a96b38', cover: '#15100c', accentAttr: 'yellow', desc: 'Dark roast and caramel crema',
           pv: ['radial-gradient(circle at 50% -20%,#5a3a22,#15100c 70%)', 'linear-gradient(90deg,#2e1c13,#5f3b26)', '#261d17', 'linear-gradient(90deg,#c8894a,#e6bb84)'] },
-        { id: 'groovy', label: 'Groovy', base: 'dark', fav: '#e8a33d', cover: '#22140c', accentAttr: 'yellow', font: 'Shrikhand', desc: 'Seventies stripes in mustard, orange and brown',
-          pv: ['radial-gradient(circle at 100% 100%,transparent 0 7px,#e8a33d 7px 9.5px,#d9622b 9.5px 12px,#8a4a22 12px 14.5px,transparent 14.5px),#22140c', 'linear-gradient(180deg,#4a2c18 0 52%,#e8a33d 52% 68%,#d9622b 68% 84%,#8a4a22 84%)', '#2c1b11', '#e26a32'] },
-        { id: 'folio', label: 'Folio', base: 'dark', fav: '#d1a54e', cover: '#17100d', accentAttr: 'yellow', font: 'IM+Fell+English:ital@0;1&family=IM+Fell+English+SC', desc: 'Oxblood leather, gilt tooling and a shelf of old books',
-          pv: [`${_LEATHER} 0 0/60px 60px,#17100d`, 'linear-gradient(180deg,#5e1a25 0 75%,#d1a54e 75%)', '#221814', 'linear-gradient(90deg,#b58b38,#ebc877,#b58b38)'] },
         { id: 'bordeaux', label: 'Bordeaux', base: 'dark', fav: '#a3325a', cover: '#150a0e', desc: 'Deep wine, with a champagne line',
           pv: ['radial-gradient(circle at 80% -10%,#6b1a30,#150a0e 70%)', 'linear-gradient(180deg,#5a1628 0 80%,#e9c27a 80%)', '#28141c', 'linear-gradient(90deg,#a3325a,#cf5574)'] },
         { id: 'cathedral', label: 'Cathedral', base: 'dark', fav: '#d9b44a', cover: '#0c0a10', accentAttr: 'yellow', font: 'Pirata+One', desc: 'Stained glass and stone, the light falling in colors',
           pv: [`${_ROSE} right -10px top -8px/36px 36px no-repeat,#0c0a10`, 'linear-gradient(90deg,#5a0f20,#3a1666 40%,#14306b 70%,#0e4a4a)', '#16121b', 'linear-gradient(90deg,#b8922f,#ecd07e,#b8922f)'] },
         { id: 'nightshade', label: 'Nightshade', base: 'dark', fav: '#e2620f', cover: '#0c0a10', desc: 'Purple night with an orange glow',
           pv: ['radial-gradient(circle at 85% 0%,#4a2410,transparent 60%),radial-gradient(circle at 5% 0%,#2c1a4a,transparent 60%),#0b0910', 'linear-gradient(90deg,#2b1640,#4c2a6b 55%,#8a3a12)', '#1c1724', 'linear-gradient(90deg,#e2620f,#c2410c,#7e22ce)'] },
-        { id: 'neon',    label: 'Neon Nights', base: 'dark', fav: '#e5309a', cover: '#0a0614', desc: 'Hot pink and electric blue',
-          pv: ['radial-gradient(circle at 50% -20%,#5c1846,#0d0719 70%)', 'linear-gradient(90deg,#ff2e97,#8a3ffc 52%,#1fb6ff)', '#1a112e', 'linear-gradient(90deg,#ff2e97,#a04cff,#3aa7ff)'] },
-        { id: 'synthwave', label: 'Synthwave', base: 'dark', fav: '#ff3ea5', cover: '#120626', accentAttr: 'yellow', font: 'Orbitron:wght@600;700;800', desc: 'An 80s sunset over a neon grid',
-          pv: [`linear-gradient(rgba(255,62,165,.6) 1px,transparent 1px) 0 26px/7px 4px,${_SUN} center 9px/18px 18px no-repeat,linear-gradient(180deg,#0d041f,#3a0d4f 72%,#5c1550)`, 'linear-gradient(90deg,#2a0b5a,#a8237f,#d23a52)', '#1a0b35', 'linear-gradient(90deg,#ff3ea5,#ff7a59)'] },
-        { id: 'cyberpunk', label: 'Cyberpunk', base: 'dark', fav: '#fcee0a', cover: '#0b0a14', accentAttr: 'yellow', font: 'Rajdhani:wght@600;700', desc: 'Neon in the rain, a city at night, hazard yellow',
-          pv: [`linear-gradient(0deg,#191530 0 22%,transparent 22%),${_RAIN} 0 0/30px 40px,#0b0a14`, 'repeating-linear-gradient(-45deg,#fcee0a 0 2px,#0b0a14 2px 4px) 0 100%/100% 2px no-repeat,#17102b', '#13111f', '#fcee0a'] },
+        { id: 'y2k', label: 'Y2K', base: 'dark', fav: '#9ee8ff', cover: '#120b24', accentAttr: 'yellow', font: 'Audiowide', desc: 'Liquid chrome, holograms and sparkles',
+          pv: ['radial-gradient(circle at 80% 20%,rgba(255,158,240,.4),transparent 50%),radial-gradient(circle at 20% 80%,rgba(158,232,255,.35),transparent 50%),#120b24', 'linear-gradient(180deg,#f7f8fc,#dcdfe9 46%,#b4b8c9 52%,#eceef4)', '#1b1335', 'linear-gradient(100deg,#ff9ef0,#9ee8ff,#c6ff9e,#ffd59e)'] },
         { id: 'starlight', label: 'Starlight', base: 'dark', fav: '#8b5cf6', cover: '#050816', desc: 'A violet sky full of stars',
           pv: ['radial-gradient(1px 1px at 20% 30%,#fff,transparent),radial-gradient(1px 1px at 70% 60%,#fff,transparent),radial-gradient(1px 1px at 45% 80%,#fff,transparent),radial-gradient(circle at 80% 0%,#4a1a55,transparent 60%),#060a1c', 'linear-gradient(90deg,#1e1452,#4c1d95 35%,#9d2f8f 70%,#e2557f)', '#121733', 'linear-gradient(90deg,#6d3fe0,#b4479e,#e2557f)'] },
-        { id: 'astrolabe', label: 'Astrolabe', base: 'dark', fav: '#c79a52', cover: '#070b17', accentAttr: 'yellow', font: 'Marcellus+SC', desc: 'Brass instruments under a chart of the stars',
-          pv: [`${_STARCHART} center/cover,#070b17`, 'linear-gradient(180deg,#0f1730 0 70%,#c79a52 70%)', '#0d1426', 'linear-gradient(180deg,#e6c27e,#a87c36)'] },
+        { id: 'ultraviolet', label: 'Ultraviolet', base: 'dark', fav: '#b388ff', cover: '#0c0618', accentAttr: 'yellow', desc: 'Electric violet glowing over a faint grid',
+          pv: ['radial-gradient(circle at 50% 0%,#3a1a8a,#0c0618 70%)', 'linear-gradient(90deg,#2a0d5e,#4a17a8 50%,#2a0d5e)', '#1a0f31', 'linear-gradient(90deg,#c6a5ff,#9a6bff)'] },
         { id: 'dusk', label: 'Dusk', base: 'dark', fav: '#e58f6e', cover: '#10111f', accentAttr: 'yellow', desc: 'Twilight blues, warm at the horizon',
           pv: ['linear-gradient(180deg,#14152c,#2a1f3a 70%,#5a3a40)', 'linear-gradient(90deg,#1d1f45,#4f3d6e,#94525a)', '#1e1f34', 'linear-gradient(90deg,#e58f6e,#f6c08a)'] },
         { id: 'moonstone', label: 'Moonstone', base: 'dark', fav: '#6f86e0', cover: '#0f1218', accentAttr: 'yellow', desc: 'Midnight with a pearly blue sheen',
           pv: ['radial-gradient(circle at 15% -10%,#2e3a66,#0f1218 70%)', 'linear-gradient(90deg,#222838,#3a3550,#2b3a4c)', '#1c212b', 'linear-gradient(90deg,#8fa8ff,#b7a6ff,#f0c4b0)'] },
-        { id: 'nocturne', label: 'Nocturne', base: 'dark', fav: '#c9dceb', cover: '#091114', accentAttr: 'yellow', font: 'Gilda+Display', desc: 'A moonlit garden: moonflowers, moths and fireflies',
-          pv: ['radial-gradient(circle at 82% 26%,rgba(240,244,250,.9) 0 2.5px,rgba(220,235,255,.2) 3px,transparent 9px),#091114', '#0f1d22', '#0f191c', 'linear-gradient(90deg,#b3c9db,#eef5fa)'] },
-        { id: 'lumen', label: 'Lumen', base: 'dark', fav: '#8aa8ff', cover: '#0a0e1c', accentAttr: 'yellow', desc: 'Frosted glass over drifting light',
-          pv: ['radial-gradient(circle at 18% 30%,rgba(124,92,255,.75),transparent 46%),radial-gradient(circle at 82% 72%,rgba(60,210,255,.55),transparent 46%),radial-gradient(circle at 70% 10%,rgba(255,90,200,.45),transparent 40%),#0a0e1c', 'linear-gradient(90deg,rgba(150,160,255,.55),rgba(230,140,255,.45),rgba(110,230,255,.5))', 'rgba(255,255,255,.14)', 'linear-gradient(90deg,#8aa8ff,#c08bff,#7ff0e6)'] },
-        { id: 'aurora',  label: 'Aurora', base: 'dark', fav: '#10a37f', cover: '#070a10', desc: 'Northern lights over a dark sky',
-          pv: ['radial-gradient(circle at 15% 0%,#0f5545,transparent 60%),radial-gradient(circle at 85% 0%,#3a2a72,transparent 60%),#070a10', 'linear-gradient(90deg,#0f766e,#1d4f91 50%,#5b3cc4)', '#131a24', 'linear-gradient(90deg,#10a37f,#2f6fd6,#7c4ddb)'] },
+        { id: 'sapphire', label: 'Sapphire', base: 'dark', fav: '#7ea6ff', cover: '#070c1f', accentAttr: 'yellow', desc: 'Deep sapphire, faceted, with a silver glint',
+          pv: ['radial-gradient(circle at 50% -10%,#1d3480,#070c1f 70%)', 'linear-gradient(90deg,#11235f,#1a3a9e 25%,#2a4cb5 50%,#1a3a9e 75%,#11235f)', '#121c3c', 'linear-gradient(90deg,#a3c0ff,#6a8ff0)'] },
+        { id: 'prism', label: 'Prism', base: 'dark', fav: '#e8ecff', cover: '#0d0e12', accentAttr: 'yellow', font: 'Space+Grotesk:wght@600;700', desc: 'A beam of light split into colors',
+          pv: ['linear-gradient(160deg,transparent 40%,rgba(255,59,59,.25) 50%,rgba(255,225,77,.25) 56%,rgba(77,255,136,.22) 62%,rgba(46,230,255,.22) 68%,rgba(192,77,255,.2) 74%,transparent 80%),#0d0e12', 'linear-gradient(180deg,#08090c 0 80%,transparent 80%),linear-gradient(90deg,#ff3b3b,#ffe14d,#4dff88,#2ee6ff,#c04dff)', '#14161c', '#ffffff'] },
         { id: 'ocean',   label: 'Ocean Depths', base: 'dark', fav: '#0ea5a4', cover: '#041322', desc: 'Deep teal water',
           pv: ['radial-gradient(circle at 20% 0%,#0f4a5c,#05162a 70%)', 'linear-gradient(90deg,#0a3d62,#0b5f7a 45%,#0e8a8f)', '#0e263d', 'linear-gradient(90deg,#0e7490,#0ea5a4,#22c1a6)'] },
         { id: 'verdigris', label: 'Verdigris', base: 'dark', fav: '#d7895a', cover: '#0c1615', accentAttr: 'yellow', font: 'Cinzel:wght@600;700', desc: 'Copper gone green, with bright copper edges',
           pv: [`${_PATINA} 0 0/90px 90px,#0c1615`, 'linear-gradient(180deg,#173a34 0 66%,#c27a4c 66%)', '#112120', 'linear-gradient(180deg,#e4a173,#b0633a)'] },
-        { id: 'blueprint', label: 'Blueprint', base: 'dark', fav: '#1f5d99', cover: '#0b3a66', accentAttr: 'yellow', desc: 'Drafting blue with a fine grid',
-          pv: ['linear-gradient(rgba(255,255,255,.16) 1px,transparent 1px) 0 0/7px 7px,linear-gradient(90deg,rgba(255,255,255,.16) 1px,transparent 1px) 0 0/7px 7px,#0b3a66', '#072b50', '#134d82', '#ffd166'] },
+        { id: 'pewter', label: 'Pewter', base: 'dark', fav: '#c9a65c', cover: '#262b30', accentAttr: 'yellow', desc: 'Hand-hammered pewter and brass',
+          pv: ['radial-gradient(circle at 30% 35%,rgba(255,255,255,.08),transparent 25%),radial-gradient(circle at 70% 60%,rgba(0,0,0,.18),transparent 25%),linear-gradient(160deg,#2c3238,#22272c)', 'linear-gradient(180deg,#454c55,#353b42)', '#2e343a', 'linear-gradient(180deg,#dcbd7c,#b8954c)'] },
         { id: 'cockpit', label: 'Cockpit', base: 'dark', fav: '#3fd8ff', cover: '#05080f', accentAttr: 'yellow', font: 'Chakra+Petch:wght@600;700', desc: 'A flight deck at night: radar, gauges and cyan readouts',
           pv: [`${_RADAR} right -14px bottom -14px/46px 46px no-repeat,#05080f`, 'linear-gradient(180deg,#0b1424 0 70%,#3fd8ff 70% 80%,#0b1424 80%)', '#0a111d', '#3fd8ff'] },
-        { id: 'evergreen', label: 'Evergreen', base: 'dark', fav: '#1c6b4f', cover: '#0b1612', accentAttr: 'yellow', desc: 'Pine green and brass',
-          pv: ['radial-gradient(circle at 20% -10%,#1f5a43,#0b1612 70%)', 'linear-gradient(180deg,#164234 0 80%,#c9a75a 80%)', '#152820', 'linear-gradient(90deg,#b8954a,#d4b46a)'] },
-        { id: 'deco', label: 'Deco', base: 'dark', fav: '#d8b36a', cover: '#08130f', accentAttr: 'yellow', font: 'Poiret+One', desc: 'Emerald and gold — fans, rays and brackets',
-          pv: [`${_DECO_FAN} 0 0/16px 8px,#08130f`, 'linear-gradient(180deg,#0b1a14 0 58%,#d8b36a 58% 68%,#0b1a14 68% 80%,#d8b36a 80% 90%,#0b1a14 90%)', '#0e1e18', 'linear-gradient(180deg,#e6c886,#c9a254)'] },
         { id: 'chalkboard', label: 'Chalkboard', base: 'dark', fav: '#ffd66b', cover: '#1c2a24', accentAttr: 'yellow', font: 'Patrick+Hand', desc: 'Slate, chalk dust and a wooden frame',
           pv: ['radial-gradient(ellipse at 30% 60%,rgba(255,255,255,.1),transparent 60%),#1c2a24', 'repeating-linear-gradient(90deg,rgba(0,0,0,.12) 0 2px,transparent 2px 6px),linear-gradient(180deg,#6b4a2e,#533722)', '#22322b', '#f6f7f2'] },
         { id: 'phosphor', label: 'Phosphor', base: 'dark', fav: '#33f06f', cover: '#040905', accentAttr: 'yellow', font: '', desc: 'A green-screen terminal, scanlines and all',
           pv: ['repeating-linear-gradient(180deg,rgba(0,0,0,.45) 0 1px,transparent 1px 3px),radial-gradient(circle at 50% 40%,#0c2312,#040905 75%)', 'linear-gradient(180deg,#06100a 0 82%,#33f06f 82%)', '#07110a', '#33f06f'] },
-        { id: 'volt', label: 'Volt', base: 'dark', fav: '#d4ff3a', cover: '#0b0c0d', accentAttr: 'yellow', font: 'Barlow+Condensed:ital,wght@1,700;1,800', desc: 'Matte black and a jolt of volt, built for speed',
-          pv: ['linear-gradient(115deg,transparent 0 58%,rgba(212,255,58,.2) 58% 63%,transparent 63% 67%,rgba(212,255,58,.12) 67% 72%,transparent 72%),#0b0c0d', 'linear-gradient(180deg,#16171a 0 70%,#d4ff3a 70%)', '#131416', '#d4ff3a'] },
         { id: 'graphite', label: 'Graphite', base: 'dark', fav: '#3a6be6', cover: '#0e0f11', desc: 'A calm, focused dark',
           pv: ['radial-gradient(rgba(255,255,255,.12) 1px,transparent 1.3px) 0 0/6px 6px,#0e0f11', 'linear-gradient(180deg,#202227,#17181c)', '#1c1d21', '#3a6be6'] },
+        { id: 'smoke', label: 'Smoke', base: 'dark', fav: '#e0b8a0', cover: '#121010', accentAttr: 'yellow', desc: 'Warm charcoal and wisps of smoke',
+          pv: ['radial-gradient(ellipse at 50% 100%,#2a2522,#121010 70%)', 'linear-gradient(90deg,#2a2624,#34302d 50%,#2a2624)', '#211d1c', 'linear-gradient(90deg,#ecc9b4,#c99a80)'] },
         { id: 'noir', label: 'Noir', base: 'dark', fav: '#d92f32', cover: '#0b0b0b', desc: 'Black and white, and one red',
           pv: ['radial-gradient(circle at 50% -30%,#2a2a2a,#0b0b0b 70%)', 'linear-gradient(180deg,#161616 0 82%,#d92f32 82%)', '#1b1b1b', '#d92f32'] },
     ];
@@ -12939,6 +12679,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['2.8', [
+            'Themes: the themes are being worked on: some new ones are in, some are out for now, and more are being tested and improved for future updates',
+            'Home: card titles (Customs, Newest Items) no longer get cut off in themes with wide lettering',
+            'Customs editor: with Every item or a color picked, your custom stays in place while you scroll the results (only the list scrolls now, in the full page and the popup)',
+            'Customs editor: cap values on the NC items’ tiles — turn them on in the layout menu (Cap values: Show)',
+        ]],
         ['2.7', [
             'Themes: 48 new Advanced themes, light and dark apart — 32 with their own typeface, drawn backdrop and details (Notebook, Marquee, Cockpit, Kintsugi…)',
             'Customs: sort a search — newest, oldest, A–Z, Z–A, color, zone, rarity, cap value, or yours first',
@@ -14024,19 +13770,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     radial-gradient(900px 560px at 0% 100%, rgba(214,160,255,.35), transparent 60%),
                     linear-gradient(180deg, #fff6f0, #fff2f4);
             }
-            :root[data-dti-theme="regal"][data-mode][data-style] {
-                --bg: #fbf6e9; --surface: #fffdf8; --surface-2: #fbf6ea; --surface-3: #f3e8cf; --border: #e7d4a6; --nav-bg: #fffdf8;
-                --text: #262014; --text-muted: #6f6347; --text-sub: #a69772;
-                --accent: #2a56b8; --accent-dim: #1f4294; --accent-glow: rgba(42,86,184,.12); --accent-text: #2450ae; --accent-fg: #ffffff;
-                --nc: #a86b00;
-                --solid-bg: #23468f;
-                --solid-fill: linear-gradient(100deg, #1b336f 0%, #23468f 50%, #2f5bb5 100%);
-                --solid-fg: #fff8e6; --solid-fg-2: rgba(255,248,230,.8); --solid-line: rgba(255,240,200,.3);
-                --solid-hover: rgba(255,240,200,.14); --solid-active: rgba(255,240,200,.24);
-                --theme-btn: linear-gradient(100deg, #2a56b8, #3b6fd6 60%, #c4952b);
-                --theme-page: radial-gradient(1100px 520px at 50% -10%, rgba(240,206,120,.38), transparent 60%),
-                    linear-gradient(180deg, #fcf7ea, #f6efdc);
-            }
             :root[data-dti-theme="ocean"][data-mode][data-style] {
                 --bg: #041322; --surface: #0a1d30; --surface-2: #0e263d; --surface-3: #13304b; --border: #1c3d5c; --nav-bg: #06182a;
                 --text: #e2f1ff; --text-muted: #8eb0ca; --text-sub: #557a96;
@@ -14050,34 +13783,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 --theme-page: radial-gradient(1100px 560px at 15% -10%, rgba(45,212,191,.14), transparent 60%),
                     radial-gradient(1000px 600px at 95% 10%, rgba(59,130,246,.14), transparent 60%),
                     linear-gradient(180deg, #05162a, #020c18);
-            }
-            :root[data-dti-theme="aurora"][data-mode][data-style] {
-                --bg: #070a10; --surface: #0e131b; --surface-2: #131a24; --surface-3: #19222e; --border: #243140; --nav-bg: #0a0e15;
-                --text: #e8f1f8; --text-muted: #91a3b6; --text-sub: #5b6b7c;
-                --accent: #0f9a78; --accent-dim: #0b7a60; --accent-glow: rgba(110,231,183,.14); --accent-text: #6ee7b7; --accent-fg: #ffffff;
-                --solid-bg: #1e5a8a;
-                --solid-fill: linear-gradient(100deg, #0f766e 0%, #1d4f91 50%, #5b3cc4 100%);
-                --solid-fg: #f0fdf4; --solid-fg-2: rgba(240,253,244,.8); --solid-line: rgba(240,253,244,.22);
-                --solid-hover: rgba(240,253,244,.1); --solid-active: rgba(240,253,244,.18);
-                --theme-btn: linear-gradient(100deg, #0f9a78, #2f6fd6 55%, #7c4ddb);
-                --theme-page: radial-gradient(1000px 420px at 10% -8%, rgba(52,211,153,.18), transparent 62%),
-                    radial-gradient(900px 440px at 70% -10%, rgba(139,92,246,.2), transparent 62%),
-                    radial-gradient(800px 420px at 100% 40%, rgba(56,189,248,.08), transparent 60%),
-                    linear-gradient(180deg, #070a10, #070a10);
-            }
-            :root[data-dti-theme="neon"][data-mode][data-style] {
-                --bg: #0a0614; --surface: #130c22; --surface-2: #1a112e; --surface-3: #231739; --border: #352356; --nav-bg: #0e0819;
-                --text: #f6eeff; --text-muted: #b49bd8; --text-sub: #6f5a98;
-                --accent: #e5309a; --accent-dim: #b51f78; --accent-glow: rgba(255,60,172,.18); --accent-text: #ff6ec7; --accent-fg: #ffffff;
-                --nc: #ffd23f; --np: #5ee1ff;
-                --solid-bg: #7a3fb0;
-                --solid-fill: linear-gradient(100deg, #ff2e97 0%, #8a3ffc 52%, #1fb6ff 100%);
-                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.85); --solid-line: rgba(255,255,255,.28);
-                --solid-hover: rgba(255,255,255,.14); --solid-active: rgba(255,255,255,.22);
-                --theme-btn: linear-gradient(100deg, #ff2e97, #a04cff 60%, #3aa7ff);
-                --theme-page: radial-gradient(1100px 520px at 50% -18%, rgba(255,46,151,.2), transparent 60%),
-                    radial-gradient(900px 500px at 100% 100%, rgba(31,182,255,.12), transparent 60%),
-                    linear-gradient(180deg, #0d0719, #07040f);
             }
             :root[data-dti-theme="nightshade"][data-mode][data-style] {
                 --bg: #0c0a10; --surface: #15111b; --surface-2: #1c1724; --surface-3: #251e2f; --border: #342a41; --nav-bg: #100d15;
@@ -14112,21 +13817,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     radial-gradient(1.6px 1.6px at 213px 29px, rgba(244,114,182,.55), transparent),
                     radial-gradient(1px 1px at 89px 181px, rgba(234,179,8,.55), transparent);
                 --theme-pattern-size: 240px 220px;
-            }
-            :root[data-dti-theme="tropical"][data-mode][data-style] {
-                --bg: #f2fbf9; --surface: #ffffff; --surface-2: #f5fbf9; --surface-3: #e3f5f0; --border: #bfe5dc; --nav-bg: #ffffff;
-                --text: #12302c; --text-muted: #4f6f69; --text-sub: #8aa8a2;
-                --accent: #0d9488; --accent-dim: #0f766e; --accent-glow: rgba(13,148,136,.12); --accent-text: #0f766e; --accent-fg: #ffffff;
-                --nc: #c2570c; --np: #0369a1;
-                --solid-bg: #0f8f8a;
-                --solid-fill: linear-gradient(100deg, #0e7490 0%, #0d9488 45%, #e2566b 80%, #c81e6b 100%);
-                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.86); --solid-line: rgba(255,255,255,.3);
-                --solid-hover: rgba(255,255,255,.15); --solid-active: rgba(255,255,255,.25);
-                --theme-btn: linear-gradient(100deg, #0d9488, #14b8a6 45%, #f97366);
-                --theme-page: radial-gradient(1000px 420px at 50% -10%, rgba(125,211,252,.4), transparent 60%),
-                    radial-gradient(900px 500px at 100% 100%, rgba(253,224,171,.6), transparent 60%),
-                    radial-gradient(800px 420px at 0% 60%, rgba(153,246,228,.38), transparent 60%),
-                    linear-gradient(180deg, #ecfbff, #f3fbf6 55%, #fff8e8);
             }
             :root[data-dti-theme="glacier"][data-mode][data-style] {
                 --bg: #f2f8ff; --surface: #ffffff; --surface-2: #f6faff; --surface-3: #e5f0fd; --border: #cfe2f7; --nav-bg: #ffffff;
@@ -14199,20 +13889,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     radial-gradient(1.3px 1.3px at 230px 30px, rgba(248,113,113,.55), transparent);
                 --theme-pattern-size: 300px 240px;
             }
-            :root[data-dti-theme="gold"][data-mode][data-style] {
-                --bg: #0b0a08; --surface: #14120e; --surface-2: #1b1813; --surface-3: #23201a; --border: #3a3224; --nav-bg: #0f0d0a;
-                --text: #f6efdf; --text-muted: #b9ab8c; --text-sub: #786c52;
-                --accent: #d4af37; --accent-dim: #b08d2a; --accent-glow: rgba(212,175,55,.16); --accent-text: #e6c55a; --accent-fg: #1a1405;
-                --nc: #e6c55a; --np: #93c5fd;
-                --solid-bg: #c9a23a;
-                --solid-fill: linear-gradient(100deg, #7a5c16 0%, #b8892a 22%, #e9c96a 45%, #fff1b8 52%, #d4af37 62%, #9c7623 85%, #6e5212 100%);
-                --solid-fg: #1a1405; --solid-fg-2: rgba(26,20,5,.76); --solid-line: rgba(26,20,5,.22);
-                --solid-hover: rgba(255,255,255,.22); --solid-active: rgba(255,255,255,.36);
-                --theme-btn: linear-gradient(100deg, #b08d2a, #e9c96a 50%, #b08d2a); --theme-btn-fg: #1a1405;
-                --theme-page: radial-gradient(1000px 420px at 50% -15%, rgba(212,175,55,.15), transparent 60%),
-                    radial-gradient(800px 500px at 100% 100%, rgba(120,90,30,.13), transparent 60%),
-                    linear-gradient(180deg, #0d0b08, #080706);
-            }
             :root[data-dti-theme="peony"][data-mode][data-style] {
                 --bg: #fbf1f2; --surface: #ffffff; --surface-2: #fdf6f7; --surface-3: #f6e3e6; --border: #efd2d7; --nav-bg: #ffffff;
                 --text: #3a1e26; --text-muted: #85596a; --text-sub: #bf95a2;
@@ -14226,21 +13902,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 --theme-page: radial-gradient(900px 480px at 0% 0%, rgba(249,215,223,.6), transparent 60%),
                     radial-gradient(800px 480px at 100% 100%, rgba(253,232,214,.55), transparent 60%),
                     linear-gradient(180deg, #fdf5f6, #faeef0);
-            }
-            :root[data-dti-theme="terracotta"][data-mode][data-style] {
-                --bg: #f6eee6; --surface: #fffaf5; --surface-2: #faf3ec; --surface-3: #f1e4d6; --border: #e6d3c0; --nav-bg: #fffaf5;
-                --text: #2d1f17; --text-muted: #7a5f4e; --text-sub: #b1978a;
-                --accent: #b8532f; --accent-dim: #9c4224; --accent-glow: rgba(184,83,47,.12); --accent-text: #a8482a; --accent-fg: #ffffff;
-                --nc: #a0590b; --np: #4d6b35;
-                --solid-bg: #a5472a;
-                --solid-fill: linear-gradient(100deg, #8f3a22 0%, #a5472a 50%, #b4552f 100%);
-                --solid-fg: #fff8f1; --solid-fg-2: rgba(255,248,241,.84); --solid-line: rgba(255,236,220,.28);
-                --solid-hover: rgba(255,240,228,.13); --solid-active: rgba(255,240,228,.22);
-                --theme-btn: linear-gradient(100deg, #a9472a, #b85432 55%, #c0632f);
-                --theme-page: radial-gradient(1000px 500px at 100% -10%, rgba(222,154,110,.3), transparent 60%),
-                    radial-gradient(900px 520px at 0% 110%, rgba(150,160,100,.16), transparent 60%),
-                    linear-gradient(180deg, #f8f0e7, #f3e8dc);
-                --theme-pattern: ${_GRAIN('.055')}; --theme-pattern-size: 180px 180px;
             }
             :root[data-dti-theme="honeycomb"][data-mode][data-style] {
                 --bg: #fdf6e3; --surface: #fffdf6; --surface-2: #fdf8ea; --surface-3: #f8ecc9; --border: #efdcaa; --nav-bg: #fffdf6;
@@ -14257,37 +13918,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     linear-gradient(180deg, #fff9ea, #fcf2da);
                 --theme-pattern: ${_HEXCOMB}; --theme-pattern-size: 55px 96px;
             }
-            :root[data-dti-theme="paper"][data-mode][data-style] {
-                --bg: #f4efe4; --surface: #fbf8f1; --surface-2: #f7f2e8; --surface-3: #ece4d3; --border: #ddd2bd; --nav-bg: #fbf8f1;
-                --text: #1d1b17; --text-muted: #5e584d; --text-sub: #9a9282;
-                --accent: #c23b22; --accent-dim: #a32e18; --accent-glow: rgba(194,59,34,.11); --accent-text: #b0341d; --accent-fg: #fffaf2;
-                --nc: #9a5b00; --np: #2b4c7e;
-                --solid-bg: #1f1d1a;
-                --solid-fill: linear-gradient(180deg, #24221e, #1b1a17);
-                --solid-fg: #f4efe4; --solid-fg-2: rgba(244,239,228,.74); --solid-line: rgba(244,239,228,.16);
-                --solid-hover: rgba(244,239,228,.08); --solid-active: rgba(244,239,228,.14);
-                --theme-btn: linear-gradient(180deg, #cc4329, #b5341c);
-                --theme-page: radial-gradient(1200px 600px at 50% -20%, rgba(255,255,255,.65), transparent 60%),
-                    linear-gradient(180deg, #f6f1e6, #f0e9da);
-                --theme-pattern: ${_GRAIN('.075')}; --theme-pattern-size: 180px 180px;
-            }
-            :root[data-dti-theme="linen"][data-mode][data-style] {
-                --bg: #efebe4; --surface: #f9f7f3; --surface-2: #f4f1eb; --surface-3: #e7e1d7; --border: #d9d1c4; --nav-bg: #f9f7f3;
-                --text: #22201c; --text-muted: #5f5a52; --text-sub: #9a948a;
-                --accent: #2f6e6a; --accent-dim: #245854; --accent-glow: rgba(47,110,106,.12); --accent-text: #2a635f; --accent-fg: #ffffff;
-                --nc: #9a6a1e; --np: #3e6a8c;
-                --solid-bg: #2b2a28;
-                --solid-fill: linear-gradient(180deg, #33312e, #282725);
-                --solid-fg: #f3efe8; --solid-fg-2: rgba(243,239,232,.74); --solid-line: rgba(243,239,232,.16);
-                --solid-hover: rgba(243,239,232,.08); --solid-active: rgba(243,239,232,.14);
-                --theme-btn: linear-gradient(100deg, #2f6e6a, #3d8580);
-                --theme-page: radial-gradient(1000px 520px at 100% -10%, rgba(255,255,255,.7), transparent 60%),
-                    radial-gradient(900px 500px at 0% 110%, rgba(47,110,106,.08), transparent 60%),
-                    linear-gradient(180deg, #f1ede6, #ebe6dd);
-                --theme-pattern: repeating-linear-gradient(0deg, rgba(60,50,35,.035) 0 1px, transparent 1px 4px),
-                    repeating-linear-gradient(90deg, rgba(60,50,35,.03) 0 1px, transparent 1px 4px), ${_GRAIN('.04')};
-                --theme-pattern-size: auto, auto, 180px 180px;
-            }
             :root[data-dti-theme="matcha"][data-mode][data-style] {
                 --bg: #f2f1e6; --surface: #fcfbf5; --surface-2: #f7f6ec; --surface-3: #e9ead4; --border: #d9dcbc; --nav-bg: #fcfbf5;
                 --text: #22281a; --text-muted: #5b6448; --text-sub: #959d80;
@@ -14301,34 +13931,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 --theme-page: radial-gradient(1000px 520px at 0% -10%, rgba(198,217,154,.45), transparent 60%),
                     radial-gradient(900px 500px at 100% 110%, rgba(240,226,190,.55), transparent 60%),
                     linear-gradient(180deg, #f5f4ea, #efeee0);
-            }
-            :root[data-dti-theme="fjord"][data-mode][data-style] {
-                --bg: #edf1f4; --surface: #fbfcfd; --surface-2: #f4f7f9; --surface-3: #e3e9ee; --border: #d0dae3; --nav-bg: #fbfcfd;
-                --text: #17222c; --text-muted: #4e5f6e; --text-sub: #8c9cab;
-                --accent: #3a6b8c; --accent-dim: #2e5672; --accent-glow: rgba(58,107,140,.12); --accent-text: #335f7d; --accent-fg: #ffffff;
-                --nc: #a0620d; --np: #3a7a64;
-                --solid-bg: #34495c;
-                --solid-fill: linear-gradient(100deg, #2b3d4f 0%, #3b5468 55%, #4f6b80 100%);
-                --solid-fg: #f2f6f9; --solid-fg-2: rgba(242,246,249,.8); --solid-line: rgba(242,246,249,.2);
-                --solid-hover: rgba(242,246,249,.1); --solid-active: rgba(242,246,249,.18);
-                --theme-btn: linear-gradient(100deg, #3a6b8c, #467c9e);
-                --theme-page: radial-gradient(1100px 500px at 50% -15%, rgba(255,255,255,.9), transparent 60%),
-                    radial-gradient(900px 520px at 100% 100%, rgba(170,195,214,.35), transparent 60%),
-                    linear-gradient(180deg, #eff3f6, #e8edf1);
-            }
-            :root[data-dti-theme="riso"][data-mode][data-style] {
-                --bg: #f5f0e6; --surface: #fffcf6; --surface-2: #faf6ee; --surface-3: #efe7d8; --border: #e2d7c4; --nav-bg: #fffcf6;
-                --text: #1b1a2e; --text-muted: #575670; --text-sub: #9896ad;
-                --accent: #d6276f; --accent-dim: #b81d5d; --accent-glow: rgba(214,39,111,.13); --accent-text: #c41f66; --accent-fg: #ffffff;
-                --nc: #c46a00; --np: #0067b1;
-                --solid-bg: #2f4fa2;
-                --solid-fill: linear-gradient(100deg, #2b4a9c, #3255a4);
-                --solid-fg: #fff6fb; --solid-fg-2: rgba(255,246,251,.82); --solid-line: rgba(255,246,251,.24);
-                --solid-hover: rgba(214,39,111,.24); --solid-active: rgba(214,39,111,.38);
-                --theme-btn: linear-gradient(100deg, #e0337c, #d6276f);
-                --theme-page: linear-gradient(180deg, #f6f1e7, #f2ecdf);
-                --theme-pattern: radial-gradient(rgba(50,85,164,.075) 1px, transparent 1.5px), radial-gradient(rgba(214,39,111,.06) 1px, transparent 1.5px);
-                --theme-pattern-size: 11px 11px, 11px 11px; --theme-pattern-pos: 0 0, 5.5px 5.5px;
             }
             :root[data-dti-theme="espresso"][data-mode][data-style] {
                 --bg: #15100c; --surface: #1e1712; --surface-2: #261d17; --surface-3: #30251d; --border: #3d2f25; --nav-bg: #19130e;
@@ -14387,36 +13989,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     radial-gradient(800px 460px at 90% 0%, rgba(240,196,176,.08), transparent 60%),
                     linear-gradient(180deg, #10131a, #0c0e13);
             }
-            :root[data-dti-theme="blueprint"][data-mode][data-style] {
-                --bg: #0b3a66; --surface: #0f4475; --surface-2: #134d82; --surface-3: #18578f; --border: #2d6aa3; --nav-bg: #0a355e;
-                --text: #eaf3ff; --text-muted: #a9c4e2; --text-sub: #7fa3c8;
-                --accent: #ffd166; --accent-dim: #f2b938; --accent-glow: rgba(255,209,102,.18); --accent-text: #ffd77a; --accent-fg: #1d2b3a;
-                --nc: #ffd166; --np: #9fe7ff;
-                --solid-bg: #08305a;
-                --solid-fill: linear-gradient(180deg, #0a3866, #072b50);
-                --solid-fg: #f2f8ff; --solid-fg-2: rgba(242,248,255,.78); --solid-line: rgba(255,255,255,.2);
-                --solid-hover: rgba(255,255,255,.08); --solid-active: rgba(255,255,255,.14);
-                --theme-btn: linear-gradient(180deg, #ffd77a, #f5c04a); --theme-btn-fg: #14253a;
-                --theme-page: radial-gradient(1200px 600px at 50% -20%, rgba(80,150,220,.25), transparent 60%),
-                    linear-gradient(180deg, #0c3d6b, #093258);
-                --theme-pattern: linear-gradient(rgba(255,255,255,.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.1) 1px, transparent 1px),
-                    linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
-                --theme-pattern-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
-            }
-            :root[data-dti-theme="evergreen"][data-mode][data-style] {
-                --bg: #0b1612; --surface: #10201a; --surface-2: #152820; --surface-3: #1b3128; --border: #264035; --nav-bg: #0d1b16;
-                --text: #e8f1ea; --text-muted: #9fb7a8; --text-sub: #5f7a6b;
-                --accent: #c9a75a; --accent-dim: #a98a42; --accent-glow: rgba(201,167,90,.16); --accent-text: #dcbd73; --accent-fg: #1a1607;
-                --nc: #dcbd73; --np: #8fd0b0;
-                --solid-bg: #164234;
-                --solid-fill: linear-gradient(100deg, #0f2e23 0%, #164234 55%, #1c4f3e 100%);
-                --solid-fg: #f0f7f1; --solid-fg-2: rgba(240,247,241,.8); --solid-line: rgba(240,247,241,.18);
-                --solid-hover: rgba(240,247,241,.08); --solid-active: rgba(240,247,241,.14);
-                --theme-btn: linear-gradient(100deg, #b8954a, #d4b46a 55%, #c9a75a); --theme-btn-fg: #1a1607;
-                --theme-page: radial-gradient(1100px 520px at 20% -15%, rgba(40,110,80,.28), transparent 60%),
-                    radial-gradient(900px 500px at 100% 100%, rgba(201,167,90,.07), transparent 60%),
-                    linear-gradient(180deg, #0c1813, #08110d);
-            }
             :root[data-dti-theme="graphite"][data-mode][data-style] {
                 --bg: #0e0f11; --surface: #16171a; --surface-2: #1c1d21; --surface-3: #24262b; --border: #2c2e34; --nav-bg: #121316;
                 --text: #eceef2; --text-muted: #9a9ea8; --text-sub: #5f636d;
@@ -14459,55 +14031,28 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             html[data-dti-theme] :is(.btn-primary, .dti-nx-new) { background: var(--theme-btn) !important; border-color: transparent !important; color: var(--theme-btn-fg, #fff) !important; }
             /* Lilac Dream, R. Pastel 2 and Ember: the nav bar's colors drift slowly along it */
             @keyframes dti-theme-flow { from { background-position: 0 0; } to { background-position: 1600px 0; } }
-            html:is([data-dti-theme="lilac"], [data-dti-theme="holo"], [data-dti-theme="ember"], [data-dti-theme="moonstone"], [data-dti-theme="champagne"]) #main-nav {
+            html:is([data-dti-theme="lilac"], [data-dti-theme="holo"], [data-dti-theme="ember"], [data-dti-theme="moonstone"]) #main-nav {
                 background-size: 1600px 100% !important; animation: dti-theme-flow 22s linear infinite;
             }
             @media (prefers-reduced-motion: reduce) { html[data-dti-theme] #main-nav { animation: none !important; } }
             html[data-dti-theme="starlight"] #main-nav { box-shadow: 0 6px 30px rgba(157,47,143,.35) !important; }
             html[data-dti-theme="ember"] #main-nav { box-shadow: 0 6px 28px rgba(234,88,12,.35) !important; }
-            html[data-dti-theme="gold"] #main-nav { box-shadow: inset 0 -1px 0 rgba(255,241,184,.55), 0 6px 26px rgba(212,175,55,.2) !important; }
             html[data-dti-theme="holo"] #main-nav { box-shadow: 0 6px 24px rgba(124,92,255,.18) !important; }
             html[data-dti-theme][data-style="solid"] :is(#dti-closet-left .dti-list-section-head, #dti-closet-right button.dti-panel-label):hover {
                 background: var(--solid-fill); box-shadow: inset 0 0 0 999px var(--solid-hover);
             }
-            html[data-dti-theme="regal"] #main-nav { box-shadow: inset 0 -3px 0 #d4a63a, 0 4px 18px rgba(35,70,143,.22) !important; }
-            html[data-dti-theme="neon"] #main-nav { box-shadow: 0 0 26px rgba(255,46,151,.32) !important; }
-            html[data-dti-theme="neon"] :is(.btn-primary, .dti-nx-new) { box-shadow: 0 0 18px rgba(255,46,151,.38) !important; }
             /* (each new one's finishing touch on the bar: a printed rule, a brass or champagne hairline, a soft glow) */
             html[data-dti-theme="peony"] #main-nav { box-shadow: 0 4px 18px rgba(200,67,107,.14) !important; }
-            html[data-dti-theme="terracotta"] #main-nav { box-shadow: inset 0 -1px 0 rgba(255,236,220,.18), 0 4px 18px rgba(143,58,34,.22) !important; }
             html[data-dti-theme="honeycomb"] #main-nav { box-shadow: inset 0 -1px 0 rgba(120,80,0,.2), 0 4px 18px rgba(214,146,19,.22) !important; }
-            html[data-dti-theme="paper"] #main-nav { box-shadow: inset 0 -3px 0 #c23b22, 0 2px 14px rgba(0,0,0,.16) !important; }
-            html[data-dti-theme="linen"] #main-nav { box-shadow: inset 0 -2px 0 #b58f4d, 0 3px 14px rgba(0,0,0,.14) !important; }
             html[data-dti-theme="matcha"] #main-nav { box-shadow: 0 4px 16px rgba(85,127,41,.16) !important; }
-            html[data-dti-theme="fjord"] #main-nav { box-shadow: 0 4px 18px rgba(43,61,79,.22) !important; }
-            html[data-dti-theme="riso"] #main-nav { box-shadow: 0 3px 0 rgba(214,39,111,.6) !important; }   /* (the second ink, printed a touch off) */
-            html[data-dti-theme="riso"] :is(.btn-primary, .dti-nx-new) { box-shadow: 2px 2px 0 #3255a4 !important; }
             html[data-dti-theme="espresso"] #main-nav { box-shadow: inset 0 -1px 0 rgba(211,154,91,.4), 0 6px 22px rgba(0,0,0,.35) !important; }
             html[data-dti-theme="bordeaux"] #main-nav { box-shadow: inset 0 -1px 0 rgba(233,194,122,.5), 0 6px 24px rgba(90,22,40,.4) !important; }
             html[data-dti-theme="dusk"] #main-nav { box-shadow: 0 6px 26px rgba(148,82,90,.25) !important; }
             html[data-dti-theme="moonstone"] #main-nav { box-shadow: inset 0 -1px 0 rgba(200,215,255,.3), 0 6px 24px rgba(0,0,0,.35) !important; }
-            html[data-dti-theme="blueprint"] #main-nav { box-shadow: inset 0 -1px 0 rgba(255,255,255,.3), 0 4px 18px rgba(0,0,0,.3) !important; }
-            html[data-dti-theme="evergreen"] #main-nav { box-shadow: inset 0 -1px 0 rgba(201,167,90,.55), 0 6px 22px rgba(0,0,0,.35) !important; }
             html[data-dti-theme="graphite"] #main-nav { box-shadow: inset 0 -1px 0 rgba(255,255,255,.07), 0 1px 0 rgba(0,0,0,.6) !important; }
             html[data-dti-theme="noir"] #main-nav { box-shadow: inset 0 -1px 0 rgba(217,47,50,.85), 0 4px 18px rgba(0,0,0,.5) !important; }
             /* ══ The third set — each with a typeface of its own for headings, a drawn layer over its backdrop, a finish under the
                bar, its own scrollbars and selection; cards, buttons and icons made over where it suits the look ══ */
-            :root[data-dti-theme="atelier"][data-mode][data-style] {
-                --bg: #f5f3ee; --surface: #ffffff; --surface-2: #faf8f4; --surface-3: #efece5; --border: #e2ddd2; --nav-bg: #ffffff;
-                --text: #141416; --text-muted: #57544f; --text-sub: #9b968c;
-                --accent: #1f3ad1; --accent-dim: #172ea8; --accent-glow: rgba(31,58,209,.1); --accent-text: #1d36c4; --accent-fg: #ffffff;
-                --nc: #9a5a00; --np: #1f6f5c;
-                --solid-bg: #ffffff; --solid-fill: linear-gradient(180deg, #ffffff, #fbfaf7);
-                --solid-fg: #141416; --solid-fg-2: rgba(20,20,22,.66); --solid-line: rgba(20,20,22,.14); --solid-hover: rgba(20,20,22,.05); --solid-active: rgba(20,20,22,.09);
-                --theme-btn: #141416;
-                --theme-page: radial-gradient(1200px 520px at 50% -12%, rgba(255,251,240,.95), transparent 62%), linear-gradient(180deg, #f7f5f0, #f1eee7);
-                --theme-pattern: ${_GRAIN('.03')}; --theme-pattern-size: 180px 180px;
-                --shadow-sm: 0 1px 0 rgba(20,20,22,.04); --shadow-md: 0 1px 0 rgba(20,20,22,.05), 0 10px 30px rgba(20,20,22,.06); --shadow-lg: 0 18px 50px rgba(20,20,22,.13);
-                --theme-font: 'Instrument Serif', Georgia, serif; --theme-font-wt: 400; --theme-hc-size: 17px; --theme-hc-track: 0; --theme-hc-case: none; --theme-brand-track: 0;
-                --theme-navdeco: #141416; --theme-navdeco-h: 1px; --theme-navdeco-gap: 2px;
-                --theme-scroll: #3a3a3e; --theme-sel: #1f3ad1; --theme-sel-fg: #ffffff;
-            }
             :root[data-dti-theme="bauhaus"][data-mode][data-style] {
                 --bg: #efe9dc; --surface: #fbf8f1; --surface-2: #f6f1e6; --surface-3: #ebe3d2; --border: #cfc4ad; --nav-bg: #fbf8f1;
                 --text: #151515; --text-muted: #4f4a42; --text-sub: #8e877a;
@@ -14529,113 +14074,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 --theme-navdeco: linear-gradient(90deg, #d4322c 0 33.34%, #f2b632 33.34% 66.67%, #1f4e9e 66.67%); --theme-navdeco-h: 6px;
                 --theme-scroll: #151515; --theme-sel: #f2b632; --theme-sel-fg: #151515;
             }
-            :root[data-dti-theme="herbarium"][data-mode][data-style] {
-                --bg: #f1ebdd; --surface: #fbf7ed; --surface-2: #f6f0e3; --surface-3: #ebe2cf; --border: #d8cbb0; --nav-bg: #fbf7ed;
-                --text: #1f251c; --text-muted: #5a6150; --text-sub: #9a9a83;
-                --accent: #3d6a44; --accent-dim: #31573a; --accent-glow: rgba(61,106,68,.12); --accent-text: #355f3c; --accent-fg: #ffffff;
-                --nc: #9c5d16; --np: #3f6688;
-                --solid-bg: #2c4a33; --solid-fill: linear-gradient(180deg, #2f5037, #263f2d);
-                --solid-fg: #f6f1e3; --solid-fg-2: rgba(246,241,227,.76); --solid-line: rgba(246,241,227,.18); --solid-hover: rgba(246,241,227,.08); --solid-active: rgba(246,241,227,.15);
-                --theme-btn: linear-gradient(180deg, #44744b, #3d6a44);
-                --theme-page: radial-gradient(1100px 520px at 0% 0%, rgba(255,252,240,.85), transparent 60%), radial-gradient(900px 520px at 100% 100%, rgba(196,170,120,.2), transparent 60%), linear-gradient(180deg, #f3eee1, #ece4d2);
-                --theme-pattern: ${_GRAIN('.06')}; --theme-pattern-size: 180px 180px;
-                --theme-decor: ${_HERB_FROND} right -30px top 64px / 460px 600px no-repeat, ${_HERB_SPRIG} left -24px bottom -30px / 400px 460px no-repeat;
-                --shadow-sm: 0 1px 2px rgba(60,50,30,.06); --shadow-md: 0 6px 18px rgba(60,50,30,.09); --shadow-lg: 0 14px 36px rgba(60,50,30,.15);
-                --theme-font: 'Cormorant Garamond', Georgia, serif; --theme-font-wt: 700; --theme-hc-size: 16px; --theme-hc-track: .02em; --theme-hc-case: none; --theme-brand-track: .01em;
-                --theme-navdeco: linear-gradient(90deg, transparent, rgba(176,148,90,.9) 12%, rgba(176,148,90,.9) 88%, transparent); --theme-navdeco-h: 1px; --theme-navdeco-gap: 3px;
-                --theme-scroll: #b9a98a; --theme-sel: rgba(61,106,68,.24);
-            }
-            :root[data-dti-theme="midcentury"][data-mode][data-style] {
-                --bg: #f3e7cf; --surface: #fffaf0; --surface-2: #fbf3e3; --surface-3: #f0e2c4; --border: #e1cfa8; --nav-bg: #fffaf0;
-                --text: #2a1f16; --text-muted: #66523d; --text-sub: #a89074;
-                --accent: #1b7a70; --accent-dim: #15645c; --accent-glow: rgba(27,122,112,.13); --accent-text: #17695f; --accent-fg: #ffffff;
-                --nc: #b0620c; --np: #2c5f8f;
-                --solid-bg: #5a3a24; --solid-fill: repeating-linear-gradient(90deg, rgba(255,255,255,.035) 0 2px, transparent 2px 9px, rgba(0,0,0,.05) 9px 10px, transparent 10px 17px), linear-gradient(180deg, #6b4529, #4e321f);
-                --solid-fg: #fff6e6; --solid-fg-2: rgba(255,246,230,.78); --solid-line: rgba(255,246,230,.2); --solid-hover: rgba(255,246,230,.1); --solid-active: rgba(255,246,230,.17);
-                --theme-btn: linear-gradient(180deg, #e0a526, #d4961a); --theme-btn-fg: #2a1f16;
-                --theme-page: radial-gradient(1000px 520px at 100% 0%, rgba(224,165,38,.2), transparent 60%), radial-gradient(900px 520px at 0% 100%, rgba(27,122,112,.13), transparent 60%), linear-gradient(180deg, #f5ead3, #efe1c4);
-                --theme-pattern: ${_MCM_ATOMIC}; --theme-pattern-size: 420px 320px;
-                --shadow-sm: 0 2px 4px rgba(90,58,36,.08); --shadow-md: 0 8px 20px rgba(90,58,36,.12); --shadow-lg: 0 16px 40px rgba(90,58,36,.17);
-                --theme-font: 'Josefin Sans', 'Poppins', sans-serif; --theme-font-wt: 700; --theme-hc-size: 12px; --theme-hc-track: .12em; --theme-brand-track: .02em;
-                --theme-navdeco: linear-gradient(180deg, #e0a526 0 3px, #d5612a 3px 6px); --theme-navdeco-h: 6px;
-                --theme-scroll: #c99a52; --theme-sel: rgba(224,165,38,.38);
-            }
-            :root[data-dti-theme="porcelain"][data-mode][data-style] {
-                --bg: #eef2f8; --surface: #fafcff; --surface-2: #f3f6fb; --surface-3: #e6ecf5; --border: #d3dceb; --nav-bg: #fafcff;
-                --text: #13213b; --text-muted: #4b5a78; --text-sub: #8a97b0;
-                --accent: #1d4fa3; --accent-dim: #173f85; --accent-glow: rgba(29,79,163,.11); --accent-text: #1b489a; --accent-fg: #ffffff;
-                --nc: #a05c0c; --np: #1d6f8a;
-                --solid-bg: #1a4594; --solid-fill: linear-gradient(180deg, #1f53aa, #183f86);
-                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.82); --solid-line: rgba(255,255,255,.26); --solid-hover: rgba(255,255,255,.12); --solid-active: rgba(255,255,255,.2);
-                --theme-btn: linear-gradient(180deg, #2a5fbb, #1d4fa3);
-                --theme-page: radial-gradient(1200px 600px at 50% -10%, rgba(255,255,255,.95), transparent 60%), linear-gradient(180deg, #f1f4f9, #e8edf5);
-                --theme-pattern: ${_DELFT}; --theme-pattern-size: 120px 120px;
-                --shadow-sm: 0 1px 2px rgba(20,40,90,.06), inset 0 1px 0 rgba(255,255,255,.9); --shadow-md: 0 8px 22px rgba(20,40,90,.09), inset 0 1px 0 #ffffff; --shadow-lg: 0 18px 46px rgba(20,40,90,.17);
-                --theme-font: 'Playfair Display', Georgia, serif; --theme-font-wt: 700; --theme-hc-size: 14px; --theme-hc-track: .01em; --theme-hc-case: none;
-                --theme-navdeco: ${_SCALLOP} 0 0 / 20px 8px repeat-x; --theme-navdeco-h: 8px;
-                --theme-scroll: #8aa2cf; --theme-sel: rgba(29,79,163,.2);
-            }
-            :root[data-dti-theme="kraft"][data-mode][data-style] {
-                --bg: #cdb48e; --surface: #fbf6ec; --surface-2: #f5eedf; --surface-3: #ebe0c9; --border: #cdb68f; --nav-bg: #fbf6ec;
-                --text: #2a2219; --text-muted: #4a3f31; --text-sub: #8c7a62;
-                --accent: #b5382c; --accent-dim: #962c22; --accent-glow: rgba(181,56,44,.12); --accent-text: #a8322a; --accent-fg: #ffffff;
-                --nc: #8f4e0a; --np: #2c4466;
-                --solid-bg: #23324b; --solid-fill: linear-gradient(180deg, #26364f, #1f2d44);
-                --solid-fg: #f7f0e1; --solid-fg-2: rgba(247,240,225,.78); --solid-line: rgba(247,240,225,.2); --solid-hover: rgba(247,240,225,.09); --solid-active: rgba(247,240,225,.16);
-                --theme-btn: #b5382c;
-                --theme-page: radial-gradient(1000px 600px at 50% 0%, rgba(255,240,210,.35), transparent 60%), linear-gradient(180deg, #d2ba95, #c7ad86);
-                --theme-pattern: ${_GRAIN('.1')}, radial-gradient(rgba(70,45,20,.22) .7px, transparent 1.2px), radial-gradient(rgba(255,250,235,.18) .8px, transparent 1.3px);
-                --theme-pattern-size: 180px 180px, 23px 29px, 37px 31px; --theme-pattern-pos: 0 0, 0 0, 11px 7px;
-                --theme-decor: ${_POSTMARK} right 3% top 92px / 420px 190px no-repeat;
-                --shadow-sm: 0 1px 2px rgba(60,40,10,.12); --shadow-md: 0 6px 16px rgba(60,40,10,.16); --shadow-lg: 0 14px 34px rgba(60,40,10,.22);
-                --theme-font: 'Courier Prime', 'Courier New', monospace; --theme-font-wt: 700; --theme-hc-size: 12px; --theme-hc-track: .08em;
-                --theme-navdeco: radial-gradient(circle at 50% 100%, transparent 3.2px, #1f2d44 3.8px) 0 0 / 12px 7px repeat-x; --theme-navdeco-h: 7px;
-                --theme-scroll: #8c7a62; --theme-sel: rgba(181,56,44,.24);
-            }
-            :root[data-dti-theme="champagne"][data-mode][data-style] {
-                --bg: #f7eee8; --surface: #fffaf6; --surface-2: #fbf4ee; --surface-3: #f2e5da; --border: #ebd8c8; --nav-bg: #fffaf6;
-                --text: #2c1f1d; --text-muted: #75605b; --text-sub: #a38b84;
-                --accent: #c9a06a; --accent-dim: #b38a57; --accent-glow: rgba(201,160,106,.18); --accent-text: #8a5f33; --accent-fg: #2c1f1d;
-                --nc: #9c5d1c; --np: #5a6f9a;
-                --solid-bg: #e2c79d; --solid-fill: linear-gradient(100deg, #e6cfa8 0%, #f7ead2 18%, #d8b98a 36%, #f3e3c6 52%, #cfae7f 70%, #f0dfc0 86%, #ddc196 100%);
-                --solid-fg: #3a2a1f; --solid-fg-2: rgba(58,42,31,.74); --solid-line: rgba(58,42,31,.18); --solid-hover: rgba(255,255,255,.3); --solid-active: rgba(255,255,255,.48);
-                --theme-btn: linear-gradient(100deg, #d9b98a, #f3e3c6 45%, #c9a06a); --theme-btn-fg: #2c1f1d;
-                --theme-page: radial-gradient(900px 500px at 12% 0%, rgba(255,226,214,.75), transparent 60%), radial-gradient(900px 520px at 88% 100%, rgba(233,210,170,.5), transparent 60%), linear-gradient(180deg, #faf2ec, #f4e9e1);
-                --shadow-sm: 0 1px 3px rgba(120,80,40,.07); --shadow-md: 0 8px 24px rgba(120,80,40,.1); --shadow-lg: 0 18px 48px rgba(120,80,40,.17);
-                --theme-font: 'Bodoni Moda', Didot, Georgia, serif; --theme-font-wt: 600; --theme-hc-size: 12.5px; --theme-hc-track: .08em;
-                --theme-navdeco: linear-gradient(90deg, transparent, rgba(160,120,70,.55) 15%, rgba(160,120,70,.55) 85%, transparent); --theme-navdeco-h: 1px; --theme-navdeco-gap: 2px;
-                --theme-scroll: #d9b98a; --theme-sel: rgba(201,160,106,.38);
-            }
-            :root[data-dti-theme="nautical"][data-mode][data-style] {
-                --bg: #f3f1ea; --surface: #fdfcf8; --surface-2: #f7f5ee; --surface-3: #ece8dc; --border: #dad4c4; --nav-bg: #fdfcf8;
-                --text: #14213a; --text-muted: #4a5568; --text-sub: #8a92a0;
-                --accent: #b8292f; --accent-dim: #96202a; --accent-glow: rgba(184,41,47,.12); --accent-text: #a8242a; --accent-fg: #ffffff;
-                --nc: #a05f0c; --np: #1f5b8f;
-                --solid-bg: #172a4a; --solid-fill: linear-gradient(180deg, #1b3157, #14264a);
-                --solid-fg: #f4f1e8; --solid-fg-2: rgba(244,241,232,.78); --solid-line: rgba(244,241,232,.2); --solid-hover: rgba(244,241,232,.09); --solid-active: rgba(244,241,232,.16);
-                --theme-btn: linear-gradient(180deg, #c3333a, #b8292f);
-                --theme-page: radial-gradient(1100px 500px at 50% -10%, rgba(255,255,255,.9), transparent 60%), linear-gradient(180deg, #f5f3ec, #ebe7dc);
-                --theme-decor: ${_COMPASS} right -70px bottom -70px / 440px 440px no-repeat;
-                --theme-font: 'Zilla Slab', Georgia, serif; --theme-font-wt: 700; --theme-hc-size: 13px; --theme-hc-track: .06em;
-                --theme-navdeco: ${_ROPE} 0 0 / 16px 8px repeat-x; --theme-navdeco-h: 8px;
-                --theme-scroll: #8a92a0; --theme-sel: rgba(184,41,47,.2);
-            }
-            :root[data-dti-theme="synthwave"][data-mode][data-style] {
-                --bg: #120626; --surface: #1a0b35; --surface-2: #210f42; --surface-3: #2a1452; --border: #3d1f6e; --nav-bg: #150830;
-                --text: #fcf0ff; --text-muted: #c6a8e8; --text-sub: #8467ad;
-                --accent: #ff3ea5; --accent-dim: #e0268a; --accent-glow: rgba(255,62,165,.2); --accent-text: #ff7cc5; --accent-fg: #1a0631;
-                --nc: #ffd23f; --np: #4be3ff; --success: #5cf2a4;
-                --solid-bg: #6a1b8a; --solid-fill: linear-gradient(100deg, #2a0b5a 0%, #5d1786 35%, #a8237f 70%, #d23a52 100%);
-                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.84); --solid-line: rgba(255,255,255,.26); --solid-hover: rgba(255,255,255,.12); --solid-active: rgba(255,255,255,.2);
-                --theme-btn: linear-gradient(100deg, #ff3ea5, #ff7a59); --theme-btn-fg: #1a0631;
-                --theme-page: radial-gradient(70vh 34vh at 50% calc(100% - 34vh), rgba(255,90,140,.3), transparent 70%), linear-gradient(180deg, #0b031c 0%, #170634 40%, #300a4d 66%, #4a0f52 100%);
-                --theme-pattern: ${_SUN}; --theme-pattern-size: min(48vh, 500px) min(48vh, 500px); --theme-pattern-pos: center bottom 27vh; --theme-pattern-repeat: no-repeat;
-                --shadow-sm: 0 0 0 1px rgba(255,62,165,.12), 0 2px 8px rgba(5,0,20,.5); --shadow-md: 0 0 0 1px rgba(255,62,165,.16), 0 10px 28px rgba(5,0,20,.6), 0 0 26px rgba(255,62,165,.08);
-                --shadow-lg: 0 0 0 1px rgba(255,62,165,.2), 0 18px 48px rgba(5,0,20,.7), 0 0 40px rgba(255,62,165,.12);
-                --theme-font: 'Orbitron', 'Poppins', sans-serif; --theme-font-wt: 700; --theme-hc-size: 11px; --theme-hc-track: .14em; --theme-brand-track: .06em;
-                --theme-navdeco: linear-gradient(90deg, #4be3ff, #ff3ea5 50%, #ffd23f); --theme-navdeco-h: 2px;
-                --theme-scroll: #ff3ea5; --theme-scroll-track: #12062a; --theme-sel: rgba(75,227,255,.38); --theme-sel-fg: #ffffff;
-            }
             :root[data-dti-theme="phosphor"][data-mode][data-style] {
                 --bg: #040905; --surface: #07110a; --surface-2: #0a160d; --surface-3: #0e1d12; --border: #163a20; --nav-bg: #050c07;
                 --text: #c6f7d2; --text-muted: #77c493; --text-sub: #3f7a52;
@@ -14650,37 +14088,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 --theme-font: 'JetBrains Mono', ui-monospace, monospace; --theme-font-wt: 600; --theme-hc-size: 11px; --theme-hc-track: .08em; --theme-brand-track: -.02em;
                 --theme-navdeco: rgba(51,240,111,.7); --theme-navdeco-h: 1px;
                 --theme-scroll: #20c457; --theme-scroll-track: #040905; --theme-sel: #33f06f; --theme-sel-fg: #031a0a;
-            }
-            :root[data-dti-theme="deco"][data-mode][data-style] {
-                --bg: #08130f; --surface: #0e1e18; --surface-2: #12271f; --surface-3: #173127; --border: #284a3c; --nav-bg: #0a1712;
-                --text: #f2ead5; --text-muted: #c4b693; --text-sub: #7f7a62;
-                --accent: #d8b36a; --accent-dim: #b8944c; --accent-glow: rgba(216,179,106,.17); --accent-text: #e6c886; --accent-fg: #1a1407;
-                --nc: #e6c886; --np: #7fd1b9;
-                --solid-bg: #0b1a14; --solid-fill: linear-gradient(180deg, #0e221a, #091610);
-                --solid-fg: #f3e7c8; --solid-fg-2: rgba(243,231,200,.76); --solid-line: rgba(216,179,106,.3); --solid-hover: rgba(216,179,106,.1); --solid-active: rgba(216,179,106,.18);
-                --theme-btn: linear-gradient(180deg, #e6c886, #c9a254); --theme-btn-fg: #1a1407;
-                --theme-page: radial-gradient(1100px 520px at 50% -12%, rgba(216,179,106,.14), transparent 60%), radial-gradient(900px 500px at 100% 100%, rgba(30,90,70,.25), transparent 60%), linear-gradient(180deg, #0a1712, #06100c);
-                --theme-pattern: ${_DECO_FAN}; --theme-pattern-size: 60px 30px;
-                --theme-decor: repeating-conic-gradient(from -90deg at 50% -6%, rgba(216,179,106,.08) 0 1.2deg, transparent 1.2deg 7.5deg);
-                --theme-font: 'Poiret One', 'Josefin Sans', sans-serif; --theme-font-wt: 400; --theme-hc-size: 14px; --theme-hc-track: .14em; --theme-brand-track: .08em;
-                --theme-navdeco: linear-gradient(#d8b36a, #d8b36a) 0 0 / 100% 1px no-repeat, linear-gradient(#d8b36a, #d8b36a) 0 3px / 100% 1px no-repeat; --theme-navdeco-h: 4px;
-                --theme-scroll: #b8944c; --theme-scroll-track: #08130f; --theme-sel: rgba(216,179,106,.35);
-            }
-            :root[data-dti-theme="volt"][data-mode][data-style] {
-                --bg: #0b0c0d; --surface: #131416; --surface-2: #191b1e; --surface-3: #202226; --border: #2b2e33; --nav-bg: #0e0f11;
-                --text: #f3f5f0; --text-muted: #a0a69c; --text-sub: #5d6259;
-                --accent: #d4ff3a; --accent-dim: #b4dc1f; --accent-glow: rgba(212,255,58,.14); --accent-text: #dcff5c; --accent-fg: #0b0c0d;
-                --nc: #ffb020; --np: #5ec8ff; --success: #7dff9a;
-                --solid-bg: #111214; --solid-fill: repeating-linear-gradient(115deg, rgba(255,255,255,.03) 0 2px, transparent 2px 9px), linear-gradient(180deg, #16171a, #0e0f11);
-                --solid-fg: #f3f5f0; --solid-fg-2: rgba(243,245,240,.7); --solid-line: rgba(255,255,255,.12); --solid-hover: rgba(212,255,58,.1); --solid-active: rgba(212,255,58,.18);
-                --theme-btn: #d4ff3a; --theme-btn-fg: #0b0c0d;
-                --theme-page: radial-gradient(900px 500px at 88% -10%, rgba(212,255,58,.1), transparent 60%), linear-gradient(180deg, #0d0e10, #090a0b);
-                --theme-pattern: repeating-linear-gradient(115deg, rgba(255,255,255,.018) 0 1px, transparent 1px 7px);
-                --theme-decor: linear-gradient(115deg, transparent 0 58%, rgba(212,255,58,.07) 58% 62%, transparent 62% 64.5%, rgba(212,255,58,.045) 64.5% 70%, transparent 70%);
-                --shadow-md: 0 10px 28px rgba(0,0,0,.6); --shadow-lg: 0 18px 46px rgba(0,0,0,.75);
-                --theme-font: 'Barlow Condensed', 'Poppins', sans-serif; --theme-font-wt: 800; --theme-hc-size: 15px; --theme-hc-track: .04em; --theme-brand-track: .02em;
-                --theme-navdeco: #d4ff3a; --theme-navdeco-h: 3px;
-                --theme-scroll: #d4ff3a; --theme-scroll-track: #0b0c0d; --theme-sel: #d4ff3a; --theme-sel-fg: #0b0c0d;
             }
             :root[data-dti-theme="verdigris"][data-mode][data-style] {
                 --bg: #0c1615; --surface: #112120; --surface-2: #152826; --surface-3: #1a302d; --border: #284441; --nav-bg: #0e1a19;
@@ -14712,62 +14119,28 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 --theme-navdeco: linear-gradient(180deg, #8a6644, #5e4128); --theme-navdeco-h: 5px;
                 --theme-scroll: #788a7e; --theme-scroll-track: #1c2a24; --theme-sel: rgba(255,214,107,.35);
             }
-            :root[data-dti-theme="lumen"][data-mode][data-style] {
-                --bg: #0a0e1c; --surface: #121935; --surface-2: #18203f; --surface-3: #1f2850; --border: #2b3666; --nav-bg: rgba(16,22,48,.6);
-                --text: #f2f5ff; --text-muted: #b2bbdc; --text-sub: #6f7aa6;
-                --accent: #8aa8ff; --accent-dim: #6f8ff5; --accent-glow: rgba(138,168,255,.18); --accent-text: #b1c5ff; --accent-fg: #0a0e1c;
-                --nc: #ffd27a; --np: #7ff0e6;
-                --solid-bg: #1d2550; --solid-fill: linear-gradient(100deg, rgba(120,140,255,.26), rgba(200,120,255,.18) 50%, rgba(80,220,255,.2));
-                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.8); --solid-line: rgba(255,255,255,.2); --solid-hover: rgba(255,255,255,.1); --solid-active: rgba(255,255,255,.18);
-                --theme-btn: linear-gradient(100deg, #8aa8ff, #c08bff 55%, #7ff0e6); --theme-btn-fg: #0a0e1c;
-                --theme-page: linear-gradient(180deg, #0b1020, #080b16);
-                --theme-decor: radial-gradient(38vw 38vw at 14% 18%, rgba(124,92,255,.5), transparent 62%), radial-gradient(34vw 34vw at 86% 26%, rgba(255,90,200,.3), transparent 62%),
-                    radial-gradient(42vw 42vw at 62% 92%, rgba(60,210,255,.32), transparent 64%), radial-gradient(28vw 28vw at 28% 78%, rgba(90,255,190,.16), transparent 62%);
-                --shadow-sm: 0 2px 10px rgba(0,0,0,.25); --shadow-md: 0 10px 34px rgba(0,0,0,.35); --shadow-lg: 0 20px 60px rgba(0,0,0,.5);
-                --theme-navdeco: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); --theme-navdeco-h: 1px;
-                --theme-scroll: rgba(255,255,255,.28); --theme-sel: rgba(138,168,255,.38); --theme-sel-fg: #ffffff;
-            }
-            :root[data-dti-theme="kintsugi"][data-mode][data-style] {
-                --bg: #0f0d0c; --surface: #171412; --surface-2: #1d1916; --surface-3: #241f1b; --border: #352d27; --nav-bg: #12100e;
-                --text: #f3ece2; --text-muted: #bfae9a; --text-sub: #776a5c;
-                --accent: #d4a64a; --accent-dim: #b88a2f; --accent-glow: rgba(212,166,74,.17); --accent-text: #e2bc6a; --accent-fg: #1a1305;
-                --nc: #e2bc6a; --np: #e0786a;
-                --solid-bg: #151210; --solid-fill: linear-gradient(180deg, #1a1614, #110f0d);
-                --solid-fg: #f3ece2; --solid-fg-2: rgba(243,236,226,.72); --solid-line: rgba(212,166,74,.28); --solid-hover: rgba(212,166,74,.09); --solid-active: rgba(212,166,74,.16);
-                --theme-btn: linear-gradient(100deg, #b88a2f, #e8c879 50%, #b88a2f); --theme-btn-fg: #1a1305;
-                --theme-page: radial-gradient(1000px 520px at 50% -12%, rgba(200,64,45,.13), transparent 60%), radial-gradient(800px 500px at 100% 100%, rgba(212,166,74,.06), transparent 60%), linear-gradient(180deg, #110f0d, #0b0a09);
-                --theme-pattern: ${_GRAIN('.05')}; --theme-pattern-size: 180px 180px;
-                --theme-decor: ${_KINTSUGI} center / cover no-repeat;
-                --theme-font: 'Shippori Mincho', Georgia, serif; --theme-font-wt: 700; --theme-hc-size: 12px; --theme-hc-track: .05em;
-                --theme-navdeco: ${_SEAM} 0 0 / 240px 6px repeat-x; --theme-navdeco-h: 6px; --theme-navdeco-gap: -3px;
-                --theme-scroll: #b88a2f; --theme-scroll-track: #0f0d0c; --theme-sel: rgba(212,166,74,.36);
-            }
             /* (shared by the set) a typeface for headings, card titles and the brand; the finish under the bar; the drawn layer */
             html[data-dti-font] :is(h1, h2, h3, .dti-hc-title, .dti-pm-title, .dti-cs-title, .dti-brand, #dti-closet-title, #dti-search-row :is(.chakra-editable__preview, .chakra-editable__input)) {
                 font-family: var(--theme-font) !important; font-weight: var(--theme-font-wt, 700) !important;
             }
             html[data-dti-font] .dti-hc-title { font-size: var(--theme-hc-size, 11px) !important; letter-spacing: var(--theme-hc-track, 1.1px) !important; text-transform: var(--theme-hc-case, uppercase) !important; }
             html[data-dti-font] .dti-brand { letter-spacing: var(--theme-brand-track, -.5px) !important; }
+            html[data-dti-font] #dti-right-large-card .dti-hc-head .dti-hc-title { font-size: min(var(--theme-hc-size, 11px), 13px) !important; letter-spacing: 0 !important; }
+            html:is([data-dti-theme="bitmap"]) #dti-right-large-card .dti-hc-head .dti-hc-title { font-size: 11px !important; }
+            html[data-dti-theme="retroos"] #dti-right-large-card .dti-hc-head .dti-hc-title { font-size: 10px !important; }
             html:is(${_thm(_THEMES_3)}) #main-nav::after {
                 content: ''; position: absolute; left: 0; right: 0; top: calc(100% + var(--theme-navdeco-gap, 0px)); height: var(--theme-navdeco-h, 3px);
                 background: var(--theme-navdeco, none); pointer-events: none;
             }
-            html:is(${_thm(['bauhaus', 'herbarium', 'kraft', 'nautical', 'deco', 'volt', 'chalkboard', 'lumen', 'kintsugi'])}) body::after {
+            html:is(${_thm(['bauhaus', 'chalkboard'])}) body::after {
                 content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--theme-decor);
             }
             html:is(${_thm(_THEMES_3)}) { scrollbar-color: var(--theme-scroll) var(--theme-scroll-track, transparent); }
             html:is(${_thm(_THEMES_3)}) ::selection { background: var(--theme-sel); }
-            html:is(${_thm(['atelier', 'bauhaus', 'synthwave', 'phosphor', 'volt', 'lumen'])}) ::selection { color: var(--theme-sel-fg); }
-            @keyframes dti-rise { to { transform: translateY(-420px); } }
+            html:is(${_thm(['bauhaus', 'phosphor'])}) ::selection { color: var(--theme-sel-fg); }
             @keyframes dti-blink { 50% { opacity: 0; } }
             @media (prefers-reduced-motion: reduce) { html[data-dti-theme] body::after, html[data-dti-theme] .dti-brand::after { animation: none !important; } }
 
-            /* Atelier: the bar's double rule; corners kept small; black buttons that turn cobalt */
-            html[data-dti-theme="atelier"] #main-nav { box-shadow: inset 0 -1px 0 #141416 !important; }
-            html[data-dti-theme="atelier"] :is(${_CARDS}) { border-radius: 4px !important; }
-            html[data-dti-theme="atelier"] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; transition: background .15s !important; }
-            html[data-dti-theme="atelier"] :is(.btn-primary, .dti-nx-new):hover { background: #1f3ad1 !important; }
-            html[data-dti-theme="atelier"] .dti-hc-ico { background: transparent !important; color: #141416 !important; border: 1px solid #141416; border-radius: 50% !important; }
             /* Bauhaus: black frames and hard shadows, square corners; the gem a red circle */
             html[data-dti-theme="bauhaus"] #main-nav { box-shadow: none !important; }
             html[data-dti-theme="bauhaus"] :is(${_CARDS}) { border: 2px solid #151515 !important; border-radius: 0 !important; box-shadow: 5px 5px 0 #151515 !important; }
@@ -14776,62 +14149,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             html[data-dti-theme="bauhaus"] #main-nav .dti-brand-gem { border-radius: 50% !important; background: #d4322c !important; }
             html[data-dti-theme="bauhaus"] #main-nav .dti-brand-gem svg :is(path, line) { stroke: #ffffff !important; }
             html[data-dti-theme="bauhaus"] .dti-hc-ico { border-radius: 0 !important; background: #f2b632 !important; color: #151515 !important; }
-            /* Herbarium: a specimen label's double frame on the cards; italic titles; the bar's gold hairline */
-            html[data-dti-theme="herbarium"] #main-nav { box-shadow: inset 0 -1px 0 rgba(212,178,106,.55), 0 4px 16px rgba(30,45,30,.18) !important; }
-            html[data-dti-theme="herbarium"] :is(.dti-section-card, #dti-hero, .dti-panel-section) { box-shadow: inset 0 0 0 4px var(--surface), inset 0 0 0 5px rgba(61,106,68,.2), var(--shadow-sm) !important; }
-            html[data-dti-theme="herbarium"] .dti-hc-title { font-style: italic; }
-            html[data-dti-theme="herbarium"] .dti-hc-ico { border-radius: 50% !important; }
-            /* Mid-Century: round corners, mustard buttons with a darker lip, circles for icons */
-            html[data-dti-theme="midcentury"] #main-nav { box-shadow: 0 6px 20px rgba(78,50,31,.3) !important; }
-            html[data-dti-theme="midcentury"] :is(${_CARDS}) { border-radius: 18px !important; }
-            html[data-dti-theme="midcentury"] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; box-shadow: 0 2px 0 #a8730f !important; }
-            html[data-dti-theme="midcentury"] .dti-hc-ico { border-radius: 50% !important; background: rgba(224,165,38,.2) !important; color: #9a6510 !important; }
-            /* Porcelain: the bar's scalloped rim; cobalt titles */
-            html[data-dti-theme="porcelain"] #main-nav { box-shadow: none !important; }
-            html[data-dti-theme="porcelain"] :is(${_CARDS}) { border-color: #cdd8ea !important; }
-            html[data-dti-theme="porcelain"] .dti-hc-ico { border-radius: 50% !important; background: #1d4fa3 !important; color: #ffffff !important; }
-            /* Kraft: dashed labels with a strip of tape; a stamped button; the bar's perforated edge */
-            html[data-dti-theme="kraft"] #main-nav { box-shadow: none !important; }
-            html[data-dti-theme="kraft"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) { border: 1.5px dashed rgba(42,34,25,.32) !important; border-radius: 6px !important; }
-            html[data-dti-theme="kraft"] .dti-section-card { position: relative; }
-            html[data-dti-theme="kraft"] .dti-section-card::before {
-                content: ''; position: absolute; z-index: 3; top: -4px; left: 50%; width: 84px; height: 18px; margin-left: -42px; transform: rotate(-2.5deg); pointer-events: none;
-                background: repeating-linear-gradient(45deg, rgba(255,255,255,.22) 0 5px, transparent 5px 10px), rgba(206,186,148,.62); box-shadow: 0 1px 2px rgba(60,40,10,.14);
-            }
-            html[data-dti-theme="kraft"] .dti-section-card:nth-child(even)::before { transform: rotate(2deg); margin-left: -30px; }
-            html[data-dti-theme="kraft"] :is(.btn-primary, .dti-nx-new) { border-radius: 3px !important; box-shadow: inset 0 0 0 2px rgba(255,255,255,.3), inset 0 0 0 3.5px #b5382c !important; letter-spacing: .04em; }
-            html[data-dti-theme="kraft"] .dti-hc-ico { border-radius: 2px !important; background: #23324b !important; color: #f7f0e1 !important; }
-            /* Champagne: bubbles rising (slowly — still, if you'd rather), gold-edged cards, gold titles */
-            html[data-dti-theme="champagne"] body::after {
-                content: ''; position: fixed; left: 0; right: 0; top: 0; height: calc(100vh + 420px); z-index: -1; pointer-events: none;
-                background: ${_BUBBLES} 0 0 / 320px 420px; opacity: .85; animation: dti-rise 70s linear infinite;
-            }
-            html[data-dti-theme="champagne"] #main-nav { box-shadow: 0 6px 24px rgba(150,110,60,.18) !important; }
-            html[data-dti-theme="champagne"] :is(${_CARDS}) { border-color: rgba(201,160,106,.42) !important; }
-            html[data-dti-theme="champagne"] .dti-hc-title { color: #8a5f33 !important; }
-            html[data-dti-theme="champagne"] .dti-hc-ico { border-radius: 50% !important; background: linear-gradient(135deg, #f3e3c6, #c9a06a) !important; color: #3a2a1f !important; }
-            /* Nautical: a navy band along each card's top; round navy icons */
-            html[data-dti-theme="nautical"] #main-nav { box-shadow: 0 4px 16px rgba(20,38,74,.25) !important; }
-            html[data-dti-theme="nautical"] :is(.dti-section-card, #dti-hero) { border-top: 3px solid #172a4a !important; }
-            html[data-dti-theme="nautical"] .dti-hc-ico { border-radius: 50% !important; background: #172a4a !important; color: #f4f1e8 !important; }
-            /* Synthwave: the neon grid running off to the sun; chrome titles; neon edges */
-            html[data-dti-theme="synthwave"] body::after {
-                content: ''; position: fixed; z-index: -1; pointer-events: none; left: -60%; right: -60%; bottom: 0; height: 44vh;
-                background: linear-gradient(rgba(255,62,165,.75) 2px, transparent 2px) 0 0 / 80px 64px, linear-gradient(90deg, rgba(75,227,255,.55) 2px, transparent 2px) 0 0 / 80px 64px, linear-gradient(180deg, #1c0740, #0e0322);
-                transform: perspective(260px) rotateX(58deg); transform-origin: 50% 100%;
-                -webkit-mask-image: linear-gradient(0deg, #000 30%, transparent 96%); mask-image: linear-gradient(0deg, #000 30%, transparent 96%);
-            }
-            html[data-dti-theme="synthwave"] body::before { opacity: .72; }
-            html[data-dti-theme="synthwave"] #main-nav { box-shadow: 0 0 24px rgba(255,62,165,.35) !important; }
-            html[data-dti-theme="synthwave"] #main-nav::after { box-shadow: 0 0 10px rgba(255,62,165,.9), 0 0 22px rgba(75,227,255,.5); }
-            html[data-dti-theme="synthwave"] h1:not(#wardrobe-2020-root h1) {
-                background: linear-gradient(180deg, #ffffff 0%, #ffe3f6 40%, #ff7cc5 54%, #4be3ff 100%); -webkit-background-clip: text; background-clip: text; color: transparent !important;
-                filter: drop-shadow(0 0 10px rgba(255,62,165,.35));
-            }
-            html[data-dti-theme="synthwave"] :is(${_CARDS}) { border-color: rgba(255,62,165,.28) !important; }
-            html[data-dti-theme="synthwave"] .dti-hc-title { color: #4be3ff !important; text-shadow: 0 0 8px rgba(75,227,255,.5); }
-            html[data-dti-theme="synthwave"] :is(.btn-primary, .dti-nx-new) { box-shadow: 0 0 16px rgba(255,62,165,.45) !important; }
-            html[data-dti-theme="synthwave"] .dti-hc-ico { background: rgba(75,227,255,.14) !important; color: #4be3ff !important; box-shadow: 0 0 10px rgba(75,227,255,.25); }
             /* Phosphor: a CRT over everything — scanlines and a dark edge; glowing type; a cursor after the name */
             html[data-dti-theme="phosphor"] body::after {
                 content: ''; position: fixed; inset: 0; z-index: 2147483000; pointer-events: none;
@@ -14847,29 +14164,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             html[data-dti-theme="phosphor"] #main-nav :is(.dti-nav-center > .dti-nav-link, .dti-nav-more-btn) { font-family: 'JetBrains Mono', ui-monospace, monospace !important; letter-spacing: -.02em; }
             html[data-dti-theme="phosphor"] :is(.btn-primary, .dti-nx-new) { border-radius: 3px !important; font-family: 'JetBrains Mono', ui-monospace, monospace !important; }
             html[data-dti-theme="phosphor"] .dti-hc-ico { border-radius: 3px !important; }
-            /* Deco: rays from the top (fading), gold brackets at the cards' corners, gold titles */
-            html[data-dti-theme="deco"] body::after { -webkit-mask-image: radial-gradient(ellipse 85% 70% at 50% 0%, #000, transparent 78%); mask-image: radial-gradient(ellipse 85% 70% at 50% 0%, #000, transparent 78%); }
-            html[data-dti-theme="deco"] #main-nav { box-shadow: 0 6px 22px rgba(0,0,0,.45) !important; }
-            html[data-dti-theme="deco"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) {
-                border-color: rgba(216,179,106,.3) !important;
-                background: linear-gradient(#d8b36a, #d8b36a) top 3px left 3px / 12px 1px no-repeat, linear-gradient(#d8b36a, #d8b36a) top 3px left 3px / 1px 12px no-repeat,
-                    linear-gradient(#d8b36a, #d8b36a) top 3px right 3px / 12px 1px no-repeat, linear-gradient(#d8b36a, #d8b36a) top 3px right 3px / 1px 12px no-repeat,
-                    linear-gradient(#d8b36a, #d8b36a) bottom 3px left 3px / 12px 1px no-repeat, linear-gradient(#d8b36a, #d8b36a) bottom 3px left 3px / 1px 12px no-repeat,
-                    linear-gradient(#d8b36a, #d8b36a) bottom 3px right 3px / 12px 1px no-repeat, linear-gradient(#d8b36a, #d8b36a) bottom 3px right 3px / 1px 12px no-repeat, var(--surface) !important;
-            }
-            html[data-dti-theme="deco"] :is(#dti-hero, ul#outfits > li, header.item-header) { border-color: rgba(216,179,106,.3) !important; }
-            html[data-dti-theme="deco"] .dti-hc-title { color: var(--accent-text) !important; }
-            html[data-dti-theme="deco"] :is(.btn-primary, .dti-nx-new) { border-radius: 2px !important; letter-spacing: .08em; text-transform: uppercase; }
-            html[data-dti-theme="deco"] .dti-hc-ico { border-radius: 0 !important; transform: rotate(45deg) scale(.86); }
-            html[data-dti-theme="deco"] .dti-hc-ico svg { transform: rotate(-45deg); }
-            /* Volt: everything italic and upper-case; a volt stripe down each card; angled buttons */
-            html[data-dti-theme="volt"] #main-nav { box-shadow: none !important; }
-            html[data-dti-theme="volt"] #main-nav::after { box-shadow: 0 0 14px rgba(212,255,58,.55); }
-            html[data-dti-theme="volt"] :is(h1, h2, h3, .dti-hc-title, .dti-pm-title, .dti-cs-title, .dti-brand) { font-style: italic; text-transform: uppercase; }
-            html[data-dti-theme="volt"] :is(${_CARDS}) { border-radius: 4px !important; }
-            html[data-dti-theme="volt"] .dti-section-card { box-shadow: inset 3px 0 0 #d4ff3a, var(--shadow-sm) !important; }
-            html[data-dti-theme="volt"] :is(.btn-primary, .dti-nx-new) { border-radius: 0 !important; clip-path: polygon(9px 0, 100% 0, calc(100% - 9px) 100%, 0 100%); padding-left: 18px !important; padding-right: 18px !important; text-transform: uppercase; font-style: italic; }
-            html[data-dti-theme="volt"] .dti-hc-ico { border-radius: 2px !important; background: #d4ff3a !important; color: #0b0c0d !important; transform: skewX(-10deg); }
             /* Verdigris: a riveted copper strip under the bar; copper-edged cards; patina-green titles */
             html[data-dti-theme="verdigris"] body::before { opacity: .55; }
             html[data-dti-theme="verdigris"] #dti-search-row :is(h1, .chakra-editable__preview, .chakra-editable__input) { font-size: 29px !important; }
@@ -14883,21 +14177,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             html[data-dti-theme="chalkboard"] :is(${_CARDS}) { border-color: rgba(255,255,255,.14) !important; border-radius: 8px !important; }
             html[data-dti-theme="chalkboard"] .dti-hc-title { color: #ffe08f !important; }
             html[data-dti-theme="chalkboard"] .dti-hc-ico { background: rgba(255,255,255,.08) !important; color: #f3f5ef !important; border: 1.5px dashed rgba(255,255,255,.35); }
-            /* Lumen: frosted glass over the light — the bar, the search row and the big cards */
-            html[data-dti-theme="lumen"] #main-nav { -webkit-backdrop-filter: blur(18px) saturate(160%) !important; backdrop-filter: blur(18px) saturate(160%) !important; box-shadow: 0 1px 0 rgba(255,255,255,.08), 0 8px 30px rgba(0,0,0,.3) !important; }
-            html[data-dti-theme="lumen"] :is(.dti-section-card, #dti-hero, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar, header.item-header, #dti-search-row) {
-                background: rgba(255,255,255,.055) !important; border-color: rgba(255,255,255,.12) !important;
-                -webkit-backdrop-filter: blur(18px) saturate(150%); backdrop-filter: blur(18px) saturate(150%);
-                box-shadow: 0 10px 34px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.07) !important;
-            }
-            html[data-dti-theme="lumen"] ul#outfits > li { background: rgba(255,255,255,.05) !important; border-color: rgba(255,255,255,.1) !important; }
-            html[data-dti-theme="lumen"] .dti-hc-ico { background: rgba(255,255,255,.1) !important; color: #ffffff !important; }
-            /* Kintsugi: gold seams across the page and under the bar; gold titles, vermilion icons */
-            html[data-dti-theme="kintsugi"] body::after { opacity: .85; }
-            html[data-dti-theme="kintsugi"] #main-nav { box-shadow: 0 6px 24px rgba(0,0,0,.5) !important; }
-            html[data-dti-theme="kintsugi"] :is(${_CARDS}) { border-color: rgba(212,166,74,.2) !important; }
-            html[data-dti-theme="kintsugi"] .dti-hc-title { color: var(--accent-text) !important; }
-            html[data-dti-theme="kintsugi"] .dti-hc-ico { background: rgba(200,64,45,.16) !important; color: #e0786a !important; }
             /* ══ The fourth set — the third's way (a typeface, a drawn layer, a finish under the bar, its scrollbars and selection), and
                further: some bars and title bars made apart, cards cut, stitched, notched or framed, icons shaped to the theme, a little
                motion where it belongs (a radar turning, fireflies, marquee bulbs — still, if you'd rather) ══ */
@@ -14916,119 +14195,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 --theme-font: 'Pixelify Sans', ui-monospace, monospace; --theme-font-wt: 600; --theme-hc-size: 14px; --theme-hc-track: .02em; --theme-hc-case: none; --theme-brand-track: 0;
                 --theme-navdeco: #000000; --theme-navdeco-h: 2px;
                 --theme-scroll: #000000; --theme-scroll-track: #ffffff; --theme-sel: #000000; --theme-sel-fg: #ffffff;
-            }
-            :root[data-dti-theme="transit"][data-mode][data-style] {
-                --bg: #f4f4f1; --surface: #ffffff; --surface-2: #f7f7f5; --surface-3: #ececea; --border: #dcdcd8; --nav-bg: #161616;
-                --text: #111111; --text-muted: #4d4d4d; --text-sub: #8a8a8a;
-                --accent: #0039a6; --accent-dim: #002d84; --accent-glow: rgba(0,57,166,.1); --accent-text: #0039a6; --accent-fg: #ffffff;
-                --nc: #b5530c; --np: #00843a;
-                --solid-bg: #161616; --solid-fill: linear-gradient(180deg, #1b1b1b, #121212);
-                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.76); --solid-line: rgba(255,255,255,.22); --solid-hover: rgba(255,255,255,.1); --solid-active: rgba(255,255,255,.18);
-                --theme-btn: #0039a6;
-                --theme-page: linear-gradient(180deg, #f6f6f3, #efefeb);
-                --theme-pattern: ${_SUBWAY}; --theme-pattern-size: 72px 48px;
-                --theme-decor: ${_TRANSIT} center / cover no-repeat;
-                --shadow-sm: 0 1px 2px rgba(0,0,0,.06); --shadow-md: 0 4px 14px rgba(0,0,0,.08); --shadow-lg: 0 12px 34px rgba(0,0,0,.14);
-                --theme-font: 'Archivo', 'Helvetica Neue', Arial, sans-serif; --theme-font-wt: 800; --theme-hc-size: 14px; --theme-hc-track: -.01em; --theme-hc-case: none; --theme-brand-track: -.02em;
-                --theme-navdeco: none; --theme-navdeco-h: 0px;
-                --theme-scroll: #161616; --theme-sel: #fccc0a; --theme-sel-fg: #111111;
-            }
-            :root[data-dti-theme="contour"][data-mode][data-style] {
-                --bg: #efebdc; --surface: #fbf9f1; --surface-2: #f6f3e8; --surface-3: #ece7d6; --border: #d9d2bb; --nav-bg: #2a402f;
-                --text: #1f261c; --text-muted: #55604c; --text-sub: #938f78;
-                --accent: #2f6b3d; --accent-dim: #275a33; --accent-glow: rgba(47,107,61,.12); --accent-text: #2b6238; --accent-fg: #ffffff;
-                --nc: #a5530f; --np: #2c5f8a;
-                --solid-bg: #2a402f; --solid-fill: linear-gradient(180deg, #2c4431, #233828);
-                --solid-fg: #f3f1e4; --solid-fg-2: rgba(243,241,228,.78); --solid-line: rgba(243,241,228,.2); --solid-hover: rgba(243,241,228,.09); --solid-active: rgba(243,241,228,.16);
-                --theme-btn: linear-gradient(180deg, #c95f26, #b04a1a);
-                --theme-page: radial-gradient(1100px 520px at 50% -10%, rgba(255,253,240,.85), transparent 60%), linear-gradient(180deg, #f1edde, #e9e3cf);
-                --theme-pattern: ${_GRAIN('.05')}; --theme-pattern-size: 180px 180px;
-                --theme-decor: ${_CONTOUR} center / cover no-repeat;
-                --shadow-sm: 0 1px 2px rgba(50,60,30,.06); --shadow-md: 0 6px 18px rgba(50,60,30,.09); --shadow-lg: 0 14px 36px rgba(50,60,30,.15);
-                --theme-font: 'Bitter', Georgia, serif; --theme-font-wt: 700; --theme-hc-size: 12px; --theme-hc-track: .1em; --theme-brand-track: .01em;
-                --theme-navdeco: ${_RIDGE} 0 0 / 600px 16px repeat-x; --theme-navdeco-h: 16px; --theme-navdeco-gap: -1px;
-                --theme-scroll: #8c8a70; --theme-sel: rgba(196,85,31,.25);
-            }
-            :root[data-dti-theme="notebook"][data-mode][data-style] {
-                --bg: #fdfcf6; --surface: #ffffff; --surface-2: #fbfaf4; --surface-3: #f1efe6; --border: #dcdde6; --nav-bg: #2b4a9a;
-                --text: #1c2233; --text-muted: #4f5670; --text-sub: #9096aa;
-                --accent: #2350b0; --accent-dim: #1c4194; --accent-glow: rgba(35,80,176,.1); --accent-text: #2350b0; --accent-fg: #ffffff;
-                --nc: #b5521b; --np: #1f7a4f;
-                --solid-bg: #ffffff; --solid-fill: #ffffff;
-                --solid-fg: #1c2233; --solid-fg-2: rgba(28,34,51,.7); --solid-line: rgba(35,80,176,.25); --solid-hover: rgba(35,80,176,.07); --solid-active: rgba(35,80,176,.13);
-                --theme-btn: #2350b0;
-                --theme-page: none;
-                --theme-pattern: linear-gradient(90deg, transparent 0 62px, rgba(222,82,82,.55) 62px 64px, transparent 64px), repeating-linear-gradient(180deg, transparent 0 27px, rgba(80,130,210,.28) 27px 28px);
-                --theme-pattern-size: 100% 100%, 100% 28px; --theme-pattern-repeat: no-repeat, repeat;
-                --theme-decor: ${_NOTEBOOK} center / cover no-repeat;
-                --shadow-sm: 0 1px 0 rgba(0,0,0,.04), 0 2px 6px rgba(28,34,51,.05); --shadow-md: 0 1px 0 rgba(0,0,0,.04), 0 8px 20px rgba(28,34,51,.08); --shadow-lg: 0 16px 40px rgba(28,34,51,.14);
-                --theme-font: 'Caveat', 'Segoe Print', cursive; --theme-font-wt: 700; --theme-hc-size: 20px; --theme-hc-track: 0; --theme-hc-case: none; --theme-brand-track: 0;
-                --theme-navdeco: ${_SPIRAL} 6px 0 / 24px 18px repeat-x; --theme-navdeco-h: 18px; --theme-navdeco-gap: -8px;
-                --theme-scroll: #2350b0; --theme-sel: rgba(255,233,64,.75); --theme-sel-fg: #1c2233;
-            }
-            :root[data-dti-theme="terrazzo"][data-mode][data-style] {
-                --bg: #f3eee8; --surface: #fffdfa; --surface-2: #faf6f1; --surface-3: #f0e9e1; --border: #e3d9cd; --nav-bg: #ecd5c8;
-                --text: #2a2523; --text-muted: #615853; --text-sub: #a0958d;
-                --accent: #b35340; --accent-dim: #9a4534; --accent-glow: rgba(179,83,64,.12); --accent-text: #a64b39; --accent-fg: #ffffff;
-                --nc: #a0620f; --np: #4f7a6a;
-                --solid-bg: #e8cfc1; --solid-fill: linear-gradient(rgba(237,216,204,.55), rgba(237,216,204,.55)), ${_TERRAZZO} 0 0 / 260px 260px, linear-gradient(180deg, #edd8cc, #e5cabb);
-                --solid-fg: #2a2523; --solid-fg-2: rgba(42,37,35,.74); --solid-line: rgba(42,37,35,.18); --solid-hover: rgba(255,255,255,.4); --solid-active: rgba(255,255,255,.62);
-                --theme-btn: linear-gradient(180deg, #bd5a46, #a94c3a);
-                --theme-page: linear-gradient(180deg, #f5f0ea, #efe8e0);
-                --theme-pattern: ${_TERRAZZO}; --theme-pattern-size: 260px 260px;
-                --shadow-sm: 0 1px 3px rgba(90,60,40,.06); --shadow-md: 0 8px 24px rgba(90,60,40,.09); --shadow-lg: 0 18px 44px rgba(90,60,40,.15);
-                --theme-font: 'Syne', 'Poppins', sans-serif; --theme-font-wt: 800; --theme-hc-size: 13px; --theme-hc-track: 0; --theme-hc-case: none; --theme-brand-track: -.01em;
-                --theme-navdeco: linear-gradient(180deg, #f3dca0, #c49a4a 50%, #8f6a2c); --theme-navdeco-h: 3px;
-                --theme-scroll: #c9a49a; --theme-sel: rgba(179,83,64,.22);
-            }
-            :root[data-dti-theme="sampler"][data-mode][data-style] {
-                --bg: #f3eee2; --surface: #fbf8f0; --surface-2: #f6f2e7; --surface-3: #ece5d4; --border: #ddd3bd; --nav-bg: #8f2b2b;
-                --text: #2b2622; --text-muted: #5f574c; --text-sub: #9c9283;
-                --accent: #2f4a7a; --accent-dim: #263d66; --accent-glow: rgba(47,74,122,.12); --accent-text: #2b4370; --accent-fg: #ffffff;
-                --nc: #a35a12; --np: #2f6b47;
-                --solid-bg: #8f2b2b; --solid-fill: linear-gradient(180deg, #932d2d, #812626);
-                --solid-fg: #f8f1e3; --solid-fg-2: rgba(248,241,227,.8); --solid-line: rgba(248,241,227,.22); --solid-hover: rgba(248,241,227,.1); --solid-active: rgba(248,241,227,.18);
-                --theme-btn: linear-gradient(180deg, #34518a, #2f4a7a);
-                --theme-page: radial-gradient(1100px 520px at 50% -10%, rgba(255,252,242,.8), transparent 60%), linear-gradient(180deg, #f4efe4, #ede6d6);
-                --theme-pattern: radial-gradient(rgba(80,62,40,.14) .9px, transparent 1.3px), linear-gradient(90deg, rgba(120,100,70,.045) 1px, transparent 1px), linear-gradient(rgba(120,100,70,.045) 1px, transparent 1px);
-                --theme-pattern-size: 6px 6px, 6px 6px, 6px 6px; --theme-pattern-pos: 0 0, 3px 0, 0 3px;
-                --theme-decor: ${_SAMPLER} center / cover no-repeat;
-                --shadow-sm: 0 1px 2px rgba(70,50,30,.06); --shadow-md: 0 6px 18px rgba(70,50,30,.09); --shadow-lg: 0 14px 36px rgba(70,50,30,.15);
-                --theme-font: 'Fraunces', Georgia, serif; --theme-font-wt: 700; --theme-hc-size: 15px; --theme-hc-track: 0; --theme-hc-case: none;
-                --theme-navdeco: repeating-linear-gradient(90deg, rgba(248,241,227,.78) 0 7px, transparent 7px 12px); --theme-navdeco-h: 1.5px; --theme-navdeco-gap: -7px;
-                --theme-scroll: #b8a888; --theme-sel: rgba(184,49,47,.2);
-            }
-            :root[data-dti-theme="popart"][data-mode][data-style] {
-                --bg: #fff7d6; --surface: #ffffff; --surface-2: #fffbea; --surface-3: #fff2c2; --border: #111111; --nav-bg: #ffd400;
-                --text: #111111; --text-muted: #3d3d3d; --text-sub: #6e6e6e;
-                --accent: #d9221f; --accent-dim: #b81b18; --accent-glow: rgba(217,34,31,.12); --accent-text: #c41d1a; --accent-fg: #ffffff;
-                --nc: #c41d1a; --np: #0068a8;
-                --solid-bg: #ffd400; --solid-fill: radial-gradient(circle, rgba(217,34,31,.16) 28%, transparent 31%) 0 0 / 7px 7px, #ffd400;
-                --solid-fg: #111111; --solid-fg-2: rgba(17,17,17,.78); --solid-line: rgba(17,17,17,.35); --solid-hover: rgba(255,255,255,.5); --solid-active: #ffffff;
-                --theme-btn: #d9221f;
-                --theme-page: radial-gradient(circle at 50% 40%, #fffbe6, #fff3c4 80%);
-                --theme-pattern: radial-gradient(circle, rgba(0,163,224,.32) 30%, transparent 33%); --theme-pattern-size: 12px 12px;
-                --theme-decor: ${_BURST} right -50px top 64px / 330px 330px no-repeat, ${_SPEECH} left 18px bottom 18px / 200px 150px no-repeat;
-                --shadow-sm: 3px 3px 0 #111; --shadow-md: 5px 5px 0 #111; --shadow-lg: 7px 7px 0 #111;
-                --theme-font: 'Bangers', 'Impact', sans-serif; --theme-font-wt: 400; --theme-hc-size: 17px; --theme-hc-track: .06em; --theme-hc-case: uppercase; --theme-brand-track: .05em;
-                --theme-navdeco: #111111; --theme-navdeco-h: 3px;
-                --theme-scroll: #111111; --theme-scroll-track: #fff7d6; --theme-sel: #ffd400; --theme-sel-fg: #111111;
-            }
-            :root[data-dti-theme="zen"][data-mode][data-style] {
-                --bg: #ece6d8; --surface: #fbf9f3; --surface-2: #f5f2ea; --surface-3: #ebe6da; --border: #ddd5c4; --nav-bg: #2e2f2a;
-                --text: #2a2b26; --text-muted: #5c5e55; --text-sub: #9a9a8c;
-                --accent: #4f6b3c; --accent-dim: #425a32; --accent-glow: rgba(79,107,60,.12); --accent-text: #48633a; --accent-fg: #ffffff;
-                --nc: #9a5f1c; --np: #3f6a80;
-                --solid-bg: #2e2f2a; --solid-fill: ${_GRAIN('.06')}, linear-gradient(180deg, #34352f, #2a2b26);
-                --solid-fg: #f3f0e6; --solid-fg-2: rgba(243,240,230,.76); --solid-line: rgba(243,240,230,.18); --solid-hover: rgba(243,240,230,.08); --solid-active: rgba(243,240,230,.15);
-                --theme-btn: linear-gradient(180deg, #56743f, #4a6538);
-                --theme-page: linear-gradient(180deg, #eee8db, #e7e0d0);
-                --theme-pattern: ${_RAKE}, ${_GRAIN('.05')}; --theme-pattern-size: 200px 16px, 180px 180px;
-                --theme-decor: ${_ZEN} center / cover no-repeat;
-                --shadow-sm: 0 1px 2px rgba(60,50,30,.05); --shadow-md: 0 8px 26px rgba(60,50,30,.08); --shadow-lg: 0 18px 46px rgba(60,50,30,.14);
-                --theme-font: 'Zen Maru Gothic', 'Poppins', sans-serif; --theme-font-wt: 700; --theme-hc-size: 13px; --theme-hc-track: .08em; --theme-hc-case: none; --theme-brand-track: .02em;
-                --theme-navdeco: rgba(46,47,42,.4); --theme-navdeco-h: 1px; --theme-navdeco-gap: 3px;
-                --theme-scroll: #a8a08c; --theme-sel: rgba(79,107,60,.2);
             }
             :root[data-dti-theme="cathedral"][data-mode][data-style] {
                 --bg: #0c0a10; --surface: #16121b; --surface-2: #1d1824; --surface-3: #241e2d; --border: #342b3f; --nav-bg: #2a1452;
@@ -15064,102 +14230,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 --theme-navdeco: repeating-linear-gradient(90deg, rgba(63,216,255,.55) 0 1px, transparent 1px 10px) 0 0 / 100% 4px no-repeat, repeating-linear-gradient(90deg, rgba(63,216,255,.95) 0 1px, transparent 1px 50px) 0 0 / 100% 8px no-repeat; --theme-navdeco-h: 8px;
                 --theme-scroll: #22b8e0; --theme-scroll-track: #05080f; --theme-sel: #3fd8ff; --theme-sel-fg: #02121c;
             }
-            :root[data-dti-theme="cyberpunk"][data-mode][data-style] {
-                --bg: #0b0a14; --surface: #13111f; --surface-2: #1a1729; --surface-3: #221e35; --border: #2e2846; --nav-bg: #120d22;
-                --text: #f2edff; --text-muted: #a79fca; --text-sub: #6a6390;
-                --accent: #fcee0a; --accent-dim: #e0d200; --accent-glow: rgba(252,238,10,.13); --accent-text: #fff27a; --accent-fg: #0b0a14;
-                --nc: #ff4f8b; --np: #05d9e8; --success: #3dffb4; --danger: #ff3b5c;
-                --solid-bg: #fcee0a; --solid-fill: linear-gradient(180deg, #fff23a, #f0df00);
-                --solid-fg: #0b0a14; --solid-fg-2: rgba(11,10,20,.76); --solid-line: rgba(11,10,20,.28); --solid-hover: rgba(11,10,20,.08); --solid-active: rgba(11,10,20,.16);
-                --theme-btn: #fcee0a; --theme-btn-fg: #0b0a14;
-                --theme-page: radial-gradient(1200px 500px at 50% 110%, rgba(255,42,109,.22), transparent 60%), radial-gradient(900px 500px at 100% 0%, rgba(5,217,232,.1), transparent 60%), linear-gradient(180deg, #0a0912, #0e0b1c);
-                --theme-pattern: ${_RAIN}; --theme-pattern-size: 140px 180px;
-                --theme-decor: ${_SKYLINE} center bottom / 1600px 440px repeat-x;
-                --shadow-sm: 0 2px 8px rgba(0,0,0,.4); --shadow-md: 0 10px 28px rgba(0,0,0,.55); --shadow-lg: 0 18px 46px rgba(0,0,0,.7);
-                --theme-font: 'Rajdhani', 'Chakra Petch', sans-serif; --theme-font-wt: 700; --theme-hc-size: 15px; --theme-hc-track: .12em; --theme-brand-track: .06em;
-                --theme-navdeco: repeating-linear-gradient(-45deg, #fcee0a 0 7px, #0b0a14 7px 14px); --theme-navdeco-h: 5px;
-                --theme-scroll: #ff2a6d; --theme-scroll-track: #0b0a14; --theme-sel: #ff2a6d; --theme-sel-fg: #ffffff;
-            }
-            :root[data-dti-theme="folio"][data-mode][data-style] {
-                --bg: #17100d; --surface: #221814; --surface-2: #2a1e19; --surface-3: #33251f; --border: #44322a; --nav-bg: #5e1a25;
-                --text: #f1e6d2; --text-muted: #c7b092; --text-sub: #84705c;
-                --accent: #d1a54e; --accent-dim: #b58b38; --accent-glow: rgba(209,165,78,.16); --accent-text: #e0b965; --accent-fg: #1d1407;
-                --nc: #e0b965; --np: #8fbf9a;
-                --solid-bg: #5e1a25; --solid-fill: ${_LEATHER}, linear-gradient(180deg, #63202b, #4f1520);
-                --solid-fg: #f6e7c9; --solid-fg-2: rgba(246,231,201,.8); --solid-line: rgba(209,165,78,.35); --solid-hover: rgba(246,231,201,.09); --solid-active: rgba(246,231,201,.16);
-                --theme-btn: linear-gradient(180deg, #ebc877, #d1a54e 50%, #b58b38); --theme-btn-fg: #1d1407;
-                --theme-page: radial-gradient(1000px 600px at 50% -10%, rgba(209,165,78,.1), transparent 60%), linear-gradient(180deg, #1a120e, #120c0a);
-                --theme-pattern: ${_LEATHER}; --theme-pattern-size: 260px 260px;
-                --theme-decor: ${_SHELF} center bottom / 1300px 203px repeat-x;
-                --shadow-sm: 0 2px 6px rgba(0,0,0,.35); --shadow-md: 0 10px 26px rgba(0,0,0,.5); --shadow-lg: 0 18px 46px rgba(0,0,0,.65);
-                --theme-font: 'IM Fell English', Georgia, serif; --theme-font-wt: 400; --theme-hc-size: 16px; --theme-hc-track: .02em; --theme-hc-case: none; --theme-brand-track: 0;
-                --theme-navdeco: ${_FLEURON} 0 50% / 18px 8px repeat-x; --theme-navdeco-h: 8px; --theme-navdeco-gap: -11px;
-                --theme-scroll: #8a6a3a; --theme-scroll-track: #17100d; --theme-sel: rgba(209,165,78,.35);
-            }
-            :root[data-dti-theme="nocturne"][data-mode][data-style] {
-                --bg: #091114; --surface: #0f191c; --surface-2: #142125; --surface-3: #1a292e; --border: #23363b; --nav-bg: #0f1d22;
-                --text: #eef4f2; --text-muted: #a7bcb7; --text-sub: #627a76;
-                --accent: #c9dceb; --accent-dim: #a9c3d8; --accent-glow: rgba(201,220,235,.14); --accent-text: #d7e6f2; --accent-fg: #0b1417;
-                --nc: #f0d58a; --np: #9fe0c8;
-                --solid-bg: #0f1d22; --solid-fill: linear-gradient(180deg, #12232a, #0c181c);
-                --solid-fg: #eef4f2; --solid-fg-2: rgba(238,244,242,.75); --solid-line: rgba(201,220,235,.2); --solid-hover: rgba(201,220,235,.08); --solid-active: rgba(201,220,235,.15);
-                --theme-btn: linear-gradient(180deg, #eef5fa, #c9dceb 55%, #b3c9db); --theme-btn-fg: #0b1417;
-                --theme-page: radial-gradient(900px 600px at 86% 8%, rgba(160,190,220,.12), transparent 60%), radial-gradient(900px 600px at 0% 100%, rgba(40,90,80,.18), transparent 60%), linear-gradient(180deg, #0a1316, #070d0f);
-                --theme-pattern: ${_GRAIN('.04')}; --theme-pattern-size: 180px 180px;
-                --theme-decor: ${_NOCTURNE} center / cover no-repeat;
-                --shadow-sm: 0 2px 8px rgba(0,0,0,.35); --shadow-md: 0 10px 28px rgba(0,0,0,.5); --shadow-lg: 0 18px 46px rgba(0,0,0,.65);
-                --theme-font: 'Gilda Display', 'Cormorant Garamond', Georgia, serif; --theme-font-wt: 400; --theme-hc-size: 16px; --theme-hc-track: .04em; --theme-hc-case: none;
-                --theme-navdeco: radial-gradient(circle, rgba(225,236,245,.75) 0 1px, transparent 1.6px) 0 50% / 22px 4px repeat-x; --theme-navdeco-h: 4px; --theme-navdeco-gap: 3px;
-                --theme-scroll: #3d5a60; --theme-scroll-track: #091114; --theme-sel: rgba(201,220,235,.3);
-            }
-            :root[data-dti-theme="marquee"][data-mode][data-style] {
-                --bg: #12060a; --surface: #1d0b10; --surface-2: #260f16; --surface-3: #30141c; --border: #43202a; --nav-bg: #8e1a2a;
-                --text: #fbefe1; --text-muted: #d3b59d; --text-sub: #8e6a5c;
-                --accent: #f5c542; --accent-dim: #dcab2a; --accent-glow: rgba(245,197,66,.16); --accent-text: #f7d26a; --accent-fg: #1d0b10;
-                --nc: #f7d26a; --np: #8fd3c8;
-                --solid-bg: #7a1424; --solid-fill: repeating-linear-gradient(90deg, rgba(0,0,0,.16) 0 2px, transparent 2px 7px, rgba(255,255,255,.035) 7px 8px, transparent 8px 13px), linear-gradient(180deg, #951c2d, #6a1220);
-                --solid-fg: #fff3df; --solid-fg-2: rgba(255,243,223,.8); --solid-line: rgba(245,197,66,.35); --solid-hover: rgba(255,243,223,.1); --solid-active: rgba(255,243,223,.17);
-                --theme-btn: linear-gradient(180deg, #ffe08a, #f5c542 50%, #d9a52a); --theme-btn-fg: #2a0c12;
-                --theme-page: radial-gradient(70vw 60vh at 50% -10%, rgba(255,214,140,.16), transparent 60%), linear-gradient(180deg, #160709, #0d0406);
-                --theme-pattern: ${_GRAIN('.05')}; --theme-pattern-size: 180px 180px;
-                --theme-decor: ${_CURTAIN[0]} left top / 210px 100% no-repeat, ${_CURTAIN[1]} right top / 210px 100% no-repeat;
-                --shadow-sm: 0 2px 8px rgba(0,0,0,.4); --shadow-md: 0 10px 28px rgba(0,0,0,.55); --shadow-lg: 0 18px 46px rgba(0,0,0,.7);
-                --theme-font: 'Limelight', 'Poiret One', serif; --theme-font-wt: 400; --theme-hc-size: 13px; --theme-hc-track: .08em; --theme-brand-track: .04em;
-                --theme-navdeco: ${_BULBS} 0 50% / 66px 14px repeat-x, linear-gradient(180deg, #2a0a10, #1d070b); --theme-navdeco-h: 14px;
-                --theme-scroll: #c99a3a; --theme-scroll-track: #12060a; --theme-sel: #f5c542; --theme-sel-fg: #1d0b10;
-            }
-            :root[data-dti-theme="astrolabe"][data-mode][data-style] {
-                --bg: #070b17; --surface: #0d1426; --surface-2: #121b33; --surface-3: #18233f; --border: #23304f; --nav-bg: #0f1730;
-                --text: #ece7d8; --text-muted: #aba796; --text-sub: #6c6a62;
-                --accent: #c79a52; --accent-dim: #ab7f3c; --accent-glow: rgba(199,154,82,.16); --accent-text: #dcb06a; --accent-fg: #160f05;
-                --nc: #dcb06a; --np: #8fb4e8;
-                --solid-bg: #0f1730; --solid-fill: linear-gradient(180deg, #111a36, #0b1226);
-                --solid-fg: #efe9d8; --solid-fg-2: rgba(239,233,216,.76); --solid-line: rgba(199,154,82,.3); --solid-hover: rgba(199,154,82,.1); --solid-active: rgba(199,154,82,.18);
-                --theme-btn: linear-gradient(180deg, #e6c27e, #c79a52 50%, #a87c36); --theme-btn-fg: #160f05;
-                --theme-page: radial-gradient(1200px 700px at 50% -10%, rgba(60,80,150,.2), transparent 60%), linear-gradient(180deg, #080d1b, #050812);
-                --theme-pattern: ${_GRAIN('.04')}; --theme-pattern-size: 180px 180px;
-                --theme-decor: ${_STARCHART} center / cover no-repeat;
-                --shadow-sm: 0 2px 8px rgba(0,0,0,.35); --shadow-md: 0 10px 28px rgba(0,0,0,.5); --shadow-lg: 0 18px 46px rgba(0,0,0,.65);
-                --theme-font: 'Marcellus SC', 'Cinzel', Georgia, serif; --theme-font-wt: 400; --theme-hc-size: 13px; --theme-hc-track: .12em; --theme-hc-case: none; --theme-brand-track: .04em;
-                --theme-navdeco: ${_SCALE} 0 0 / 60px 10px repeat-x; --theme-navdeco-h: 10px;
-                --theme-scroll: #8a6a36; --theme-scroll-track: #070b17; --theme-sel: rgba(199,154,82,.35);
-            }
-            :root[data-dti-theme="groovy"][data-mode][data-style] {
-                --bg: #22140c; --surface: #2c1b11; --surface-2: #352116; --surface-3: #3f281b; --border: #4e3322; --nav-bg: #4a2c18;
-                --text: #f6e7cf; --text-muted: #d1b494; --text-sub: #8f7259;
-                --accent: #e8a33d; --accent-dim: #d48f2a; --accent-glow: rgba(232,163,61,.16); --accent-text: #f0b65a; --accent-fg: #22140c;
-                --nc: #f0b65a; --np: #a9c46a;
-                --solid-bg: #4a2c18; --solid-fill: linear-gradient(180deg, #4e2f1a, #3f2414);
-                --solid-fg: #f6e7cf; --solid-fg-2: rgba(246,231,207,.78); --solid-line: rgba(246,231,207,.2); --solid-hover: rgba(246,231,207,.09); --solid-active: rgba(246,231,207,.16);
-                --theme-btn: linear-gradient(180deg, #ee7a3e, #e26a32 50%, #cc5a24); --theme-btn-fg: #22140c;
-                --theme-page: radial-gradient(900px 600px at 100% 100%, rgba(217,98,43,.16), transparent 60%), radial-gradient(800px 500px at 0% 0%, rgba(232,163,61,.12), transparent 60%), linear-gradient(180deg, #25160d, #1c1009);
-                --theme-pattern: ${_GRAIN('.06')}; --theme-pattern-size: 180px 180px;
-                --theme-decor: ${_GROOVY} center / cover no-repeat;
-                --shadow-sm: 0 2px 8px rgba(0,0,0,.35); --shadow-md: 0 10px 28px rgba(0,0,0,.45); --shadow-lg: 0 18px 46px rgba(0,0,0,.6);
-                --theme-font: 'Shrikhand', Georgia, serif; --theme-font-wt: 400; --theme-hc-size: 15px; --theme-hc-track: .01em; --theme-hc-case: none; --theme-brand-track: 0;
-                --theme-navdeco: ${_WAVES} 0 0 / 120px 17px repeat-x; --theme-navdeco-h: 17px;
-                --theme-scroll: #c9772f; --theme-scroll-track: #22140c; --theme-sel: rgba(232,163,61,.4);
-            }
             /* (shared by the set, as the third's: the finish under the bar, the drawn layer, scrollbars and selection) */
             html:is(${_thm(_THEMES_4)}) #main-nav::after {
                 content: ''; position: absolute; left: 0; right: 0; top: calc(100% + var(--theme-navdeco-gap, 0px)); height: var(--theme-navdeco-h, 3px);
@@ -15170,10 +14240,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             html:is(${_thm(_THEMES_4)}) { scrollbar-color: var(--theme-scroll) var(--theme-scroll-track, transparent); }
             html:is(${_thm(_THEMES_4)}) ::selection { background: var(--theme-sel); }
-            html:is(${_thm(['bitmap', 'transit', 'notebook', 'popart', 'cathedral', 'cockpit', 'cyberpunk', 'marquee'])}) ::selection { color: var(--theme-sel-fg); }
+            html:is(${_thm(['bitmap', 'cathedral', 'cockpit'])}) ::selection { color: var(--theme-sel-fg); }
             @keyframes dti-radar { to { transform: rotate(360deg); } }
-            @keyframes dti-glow { from { opacity: .25; } to { opacity: 1; } }
-            @keyframes dti-chase { to { background-position: 66px 50%, 0 0; } }
             @media (prefers-reduced-motion: reduce) { html[data-dti-theme]::after, html[data-dti-theme] #main-nav::after { animation: none !important; } }
 
             /* Bitmap: a one-bit desktop — windows with black frames and a hard shadow, striped title bars, a menu bar that inverts what you
@@ -15193,91 +14261,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             html[data-dti-theme="bitmap"] :is(.btn-primary, .dti-nx-new):hover { background: #000 !important; color: #fff !important; }
             /* Transit: black signage with its thin white rule along the top; each card's icon a route bullet in its own line's color; the
                station's tiles behind, and the map, faint */
-            html[data-dti-theme="transit"] body::after { opacity: .3; }
-            html[data-dti-theme="transit"] #main-nav { box-shadow: inset 0 5px 0 #161616, inset 0 6.5px 0 rgba(255,255,255,.88), 0 3px 12px rgba(0,0,0,.18) !important; }
-            html[data-dti-theme="transit"] #dti-home-grid .dti-hc-head, html[data-dti-theme="transit"] :is(.dti-panel-label, .dti-list-section-head) { box-shadow: inset 0 4px 0 #161616, inset 0 5px 0 rgba(255,255,255,.8); }
-            html[data-dti-theme="transit"] :is(${_CARDS}) { border-radius: 6px !important; }
-            html[data-dti-theme="transit"] .dti-hc-ico { width: 26px; height: 26px; border-radius: 50% !important; background: #ee352e !important; color: #fff !important; }
-            html[data-dti-theme="transit"] #dti-sections-top > :nth-child(2) .dti-hc-ico { background: #00933c !important; }
-            html[data-dti-theme="transit"] #dti-sections-top > :nth-child(3) .dti-hc-ico { background: #fccc0a !important; color: #111 !important; }
-            html[data-dti-theme="transit"] #dti-below-grid > :nth-child(1) .dti-hc-ico { background: #0039a6 !important; }
-            html[data-dti-theme="transit"] #dti-below-grid > :nth-child(2) .dti-hc-ico { background: #ff6319 !important; }
-            html[data-dti-theme="transit"] #dti-sections-bot > :nth-child(1) .dti-hc-ico { background: #b933ad !important; }
-            html[data-dti-theme="transit"] :is(.btn-primary, .dti-nx-new) { border-radius: 6px !important; letter-spacing: -.01em; }
             /* Contour: the bar's lower edge a mountain ridge; cards ruled like a map's frame, ticked along two edges; summit markers for
                icons; a trail-orange line under each title bar */
-            html[data-dti-theme="contour"] #main-nav { box-shadow: none !important; }
-            html[data-dti-theme="contour"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) {
-                border: 1.5px solid rgba(42,64,47,.5) !important; border-radius: 3px !important;
-                background: repeating-linear-gradient(90deg, rgba(42,64,47,.4) 0 1px, transparent 1px 24px) left 12px bottom 0 / calc(100% - 24px) 5px no-repeat,
-                    repeating-linear-gradient(180deg, rgba(42,64,47,.4) 0 1px, transparent 1px 24px) left 0 top 56px / 5px calc(100% - 68px) no-repeat, var(--surface) !important;
-            }
-            html[data-dti-theme="contour"] :is(#dti-hero, ul#outfits > li, header.item-header) { border: 1.5px solid rgba(42,64,47,.5) !important; border-radius: 3px !important; }
-            html[data-dti-theme="contour"] #dti-home-grid .dti-hc-head { box-shadow: inset 0 -2px 0 #c55a22; }
-            html[data-dti-theme="contour"] .dti-hc-ico { width: 27px; height: 24px; border-radius: 0 !important; clip-path: polygon(50% 3%, 98% 95%, 2% 95%); background: #c55a22 !important; color: #fff !important; }
-            html[data-dti-theme="contour"] .dti-hc-ico svg { width: 10px; height: 10px; margin-top: 7px; }
-            html[data-dti-theme="contour"] :is(.btn-primary, .dti-nx-new) { border-radius: 3px !important; letter-spacing: .02em; }
             /* Notebook: the bar's the cover — blue board, the spiral's coils over its edge; ruled paper behind with a red margin and
                doodles; highlighted titles, ink-drawn icon rings, buttons with hand-drawn corners */
-            html[data-dti-theme="notebook"] #main-nav {
-                --solid-bg: #2b4a9a; --solid-fill: ${_GRAIN('.09')}, linear-gradient(180deg, #2f51a6, #284591);
-                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.8); --solid-line: rgba(255,255,255,.26); --solid-hover: rgba(255,255,255,.12); --solid-active: rgba(255,255,255,.2);
-                box-shadow: 0 3px 10px rgba(30,40,80,.22) !important;
-            }
-            html[data-dti-theme="notebook"] #dti-home-grid .dti-hc-head, html[data-dti-theme="notebook"] :is(.dti-panel-label, .dti-list-section-head) { box-shadow: inset 0 -1px 0 rgba(80,130,210,.45); }
-            html[data-dti-theme="notebook"] .dti-hc-title { padding: 0 4px; background: linear-gradient(100deg, transparent 2%, rgba(255,233,64,.7) 5% 93%, transparent 97%) 0 70% / 100% 48% no-repeat; }
-            html[data-dti-theme="notebook"] :is(${_CARDS}) { border-radius: 3px !important; }
-            html[data-dti-theme="notebook"] .dti-hc-ico { background: transparent !important; color: #2350b0 !important; box-shadow: inset 0 0 0 2px #2350b0; border-radius: 52% 48% 55% 45% / 47% 55% 45% 53% !important; transform: rotate(-8deg); }
-            html[data-dti-theme="notebook"] :is(.btn-primary, .dti-nx-new) { border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px !important; box-shadow: 0 0 0 1.5px #1c2233, 2px 2px 0 rgba(28,34,51,.25) !important; }
             /* Terrazzo: the bar a polished slab with a brass strip set in below it; soft cards with brass under their titles; stone-chip
                icons, each its own color */
-            html[data-dti-theme="terrazzo"] body::before { opacity: .6; }
-            html[data-dti-theme="terrazzo"] #main-nav { box-shadow: 0 4px 14px rgba(120,80,60,.14) !important; }
-            html[data-dti-theme="terrazzo"] :is(${_CARDS}) { border-color: transparent !important; border-radius: 18px !important; }
-            html[data-dti-theme="terrazzo"] #dti-home-grid .dti-hc-head, html[data-dti-theme="terrazzo"] :is(.dti-panel-label, .dti-list-section-head) { box-shadow: inset 0 -2px 0 #c49a4a; }
-            html[data-dti-theme="terrazzo"] .dti-hc-ico { border-radius: 42% 58% 63% 37% / 41% 44% 56% 59% !important; background: #c5664c !important; color: #fff !important; }
-            html[data-dti-theme="terrazzo"] :is(#dti-sections-top > :nth-child(2), #dti-below-grid > :nth-child(2)) .dti-hc-ico { background: #7f9478 !important; border-radius: 58% 42% 38% 62% / 52% 61% 39% 48% !important; }
-            html[data-dti-theme="terrazzo"] :is(#dti-sections-top > :nth-child(3), #dti-sections-bot > :nth-child(1)) .dti-hc-ico { background: #c8962e !important; border-radius: 47% 53% 41% 59% / 60% 38% 62% 40% !important; }
-            html[data-dti-theme="terrazzo"] #dti-below-grid > :nth-child(1) .dti-hc-ico { background: #4d4846 !important; }
-            html[data-dti-theme="terrazzo"] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; }
-            html[data-dti-theme="terrazzo"] #dti-hero-right h1 { font-size: 21px !important; letter-spacing: -.03em !important; }
-            html[data-dti-theme="terrazzo"] #dti-search-row :is(h1, .chakra-editable__preview, .chakra-editable__input) { font-size: 25px !important; letter-spacing: -.02em !important; }
             /* Sampler: linen with a running stitch along the bar; cards stitched round in red thread; embroidery hoops for icons; buttons
                stitched inside */
-            html[data-dti-theme="sampler"] #main-nav { box-shadow: 0 4px 14px rgba(110,30,30,.2) !important; }
-            html[data-dti-theme="sampler"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) {
-                border-radius: 8px !important;
-                background: repeating-linear-gradient(90deg, rgba(184,49,47,.55) 0 6px, transparent 6px 10px) left 7px bottom 6px / calc(100% - 14px) 1.5px no-repeat,
-                    repeating-linear-gradient(180deg, rgba(184,49,47,.55) 0 6px, transparent 6px 10px) left 6px top 7px / 1.5px calc(100% - 14px) no-repeat,
-                    repeating-linear-gradient(180deg, rgba(184,49,47,.55) 0 6px, transparent 6px 10px) right 6px top 7px / 1.5px calc(100% - 14px) no-repeat,
-                    repeating-linear-gradient(90deg, rgba(184,49,47,.55) 0 6px, transparent 6px 10px) left 7px top 6px / calc(100% - 14px) 1.5px no-repeat, var(--surface) !important;
-            }
-            html[data-dti-theme="sampler"] #dti-home-grid .dti-hc-head { background: repeating-linear-gradient(90deg, rgba(248,241,227,.6) 0 6px, transparent 6px 10px) left 7px bottom 5px / calc(100% - 14px) 1.5px no-repeat, var(--solid-fill) !important; }
-            html[data-dti-theme="sampler"] .dti-hc-ico { width: 26px; height: 26px; border-radius: 50% !important; background: radial-gradient(circle closest-side, #fbf8f0 0 62%, #d9b67a 64% 80%, #9a7442 82% 100%) !important; color: #b8312f !important; box-shadow: 0 1px 2px rgba(0,0,0,.25) !important; }
-            html[data-dti-theme="sampler"] :is(.btn-primary, .dti-nx-new) { border-radius: 6px !important; outline: 1.5px dashed rgba(255,255,255,.55); outline-offset: -5px; }
             /* Pop Art: comic panels — thick black frames with an offset print in red or blue; Ben-Day dots fading in from the edges, a burst
                and a speech balloon; caption-box titles; burst icons */
-            html[data-dti-theme="popart"] body::before { -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 45%, rgba(0,0,0,.15), #000 92%); mask-image: radial-gradient(ellipse 75% 65% at 50% 45%, rgba(0,0,0,.15), #000 92%); }
-            html[data-dti-theme="popart"] #main-nav { box-shadow: none !important; }
-            html[data-dti-theme="popart"] :is(${_CARDS}) { border: 3px solid #111 !important; border-radius: 3px !important; box-shadow: 6px 6px 0 #e8282b !important; }
-            html[data-dti-theme="popart"] :is(.dti-section-card:nth-child(even), ul#outfits > li:nth-child(even)) { box-shadow: 6px 6px 0 #00a3e0 !important; }
-            html[data-dti-theme="popart"] #dti-home-grid .dti-hc-head { border-bottom: 3px solid #111 !important; }
-            html[data-dti-theme="popart"] #dti-home-grid .dti-hc-title { background: #fff; border: 2px solid #111; padding: 2px 6px 0; line-height: 1.1; transform: rotate(-2deg); box-shadow: 2px 2px 0 #111; }
-            html[data-dti-theme="popart"] .dti-hc-ico { width: 30px; height: 30px; border-radius: 0 !important; background: #e8282b !important; color: #fff !important; clip-path: polygon(${_starPoly(10, 50, 37)}); }
-            html[data-dti-theme="popart"] .dti-hc-ico svg { width: 12px; height: 12px; }
-            html[data-dti-theme="popart"] :is(.btn-primary, .dti-nx-new) {
-                border: 2.5px solid #111 !important; border-radius: 4px !important; box-shadow: 3px 3px 0 #111 !important; transition: transform .1s, box-shadow .1s !important;
-                font-family: 'Bangers', 'Impact', sans-serif !important; font-weight: 400 !important; letter-spacing: .06em !important; font-size: 1.12em;
-            }
-            html[data-dti-theme="popart"] :is(.btn-primary, .dti-nx-new):hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 #111 !important; }
-            html[data-dti-theme="popart"] h1:not(#wardrobe-2020-root h1) { text-shadow: 3px 3px 0 #00a3e0; }
-            html[data-dti-theme="popart"] #dti-hero-right h1 span { background: none !important; -webkit-text-fill-color: #d9221f !important; }
-            /* Zen: raked sand and still stones; soft paper cards with no edge; an ink-brush circle round each icon; calm, wide-set titles */
-            html[data-dti-theme="zen"] #main-nav { box-shadow: 0 6px 22px rgba(40,40,30,.16) !important; }
-            html[data-dti-theme="zen"] :is(${_CARDS}) { border-color: transparent !important; border-radius: 12px !important; }
-            html[data-dti-theme="zen"] .dti-hc-ico { width: 30px; height: 30px; border-radius: 0 !important; background: ${_ENSO('rgba(243,240,230,.9)')} center / 100% 100% no-repeat !important; color: #f3f0e6 !important; }
-            html[data-dti-theme="zen"] .dti-hc-ico svg { width: 12px; height: 12px; }
-            html[data-dti-theme="zen"] :is(.btn-primary, .dti-nx-new) { border-radius: 8px !important; letter-spacing: .04em; }
             /* Cathedral: stained glass for the bar and title bars, leaded; a gilt arcade under the bar; the rose window and a lancet glowing
                behind, light falling in colors; cards arched at the top; quatrefoil icons; gilt headlines */
             html[data-dti-theme="cathedral"] body::after { opacity: .5; }
@@ -15325,84 +14318,431 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             html[data-dti-theme="cockpit"] :is(h1, h2, .dti-brand) { text-shadow: 0 0 12px rgba(63,216,255,.4); }
             /* Cyberpunk: neon in the rain over a city at night; a dark bar on hazard stripes; yellow title bars, hazard-edged; cards with a
                corner cut away; split-color glitch on the big type; cut-corner buttons */
-            html[data-dti-theme="cyberpunk"] #main-nav {
-                --solid-bg: #120d22; --solid-fill: linear-gradient(90deg, rgba(255,42,109,.18), transparent 32%, transparent 68%, rgba(5,217,232,.16)), linear-gradient(180deg, #17102b, #0e0a1c);
-                --solid-fg: #f2edff; --solid-fg-2: rgba(242,237,255,.76); --solid-line: rgba(255,42,109,.38); --solid-hover: rgba(255,42,109,.14); --solid-active: rgba(255,42,109,.24);
-                box-shadow: 0 0 24px rgba(255,42,109,.22) !important;
-            }
-            html[data-dti-theme="cyberpunk"] :is(h1, h2, .dti-brand) { text-shadow: -2px 0 rgba(255,42,109,.85), 2px 0 rgba(5,217,232,.85); }
-            html[data-dti-theme="cyberpunk"] #dti-hero-right h1 span { background: none !important; -webkit-text-fill-color: #fcee0a !important; }
-            html[data-dti-theme="cyberpunk"] :is(.dti-section-card, #dti-hero, .dti-panel-section, ul#outfits > li) { border-radius: 0 !important; border-color: rgba(255,42,109,.32) !important; clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%); }
-            html[data-dti-theme="cyberpunk"] #dti-home-grid .dti-hc-head { background: repeating-linear-gradient(-45deg, #0b0a14 0 4px, transparent 4px 8px) left bottom / 100% 3px no-repeat, var(--solid-fill) !important; }
-            html[data-dti-theme="cyberpunk"] .dti-hc-ico { border-radius: 0 !important; background: #0b0a14 !important; color: #fcee0a !important; clip-path: polygon(0 0, 100% 0, 100% 68%, 68% 100%, 0 100%); }
-            html[data-dti-theme="cyberpunk"] :is(.btn-primary, .dti-nx-new) { border-radius: 0 !important; clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px)); text-transform: uppercase; letter-spacing: .1em; font-family: 'Rajdhani', sans-serif !important; font-weight: 700 !important; }
             /* Folio: an old library — oxblood leather, gilt tooling along the bar, gilt corner pieces on the cards, small-capital titles in
                gilt, gilt medallion icons, a shelf of books below */
-            html[data-dti-theme="folio"] #main-nav { box-shadow: inset 0 -1px 0 rgba(209,165,78,.5), 0 6px 22px rgba(0,0,0,.45) !important; }
-            html[data-dti-theme="folio"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) {
-                border-color: rgba(209,165,78,.26) !important; border-radius: 6px !important;
-                background: ${_GILT[0]} top 5px left 5px / 30px 30px no-repeat, ${_GILT[1]} top 5px right 5px / 30px 30px no-repeat, ${_GILT[2]} bottom 5px right 5px / 30px 30px no-repeat, ${_GILT[3]} bottom 5px left 5px / 30px 30px no-repeat, var(--surface) !important;
-            }
-            html[data-dti-theme="folio"] :is(#dti-hero, ul#outfits > li, header.item-header) { border-color: rgba(209,165,78,.26) !important; }
-            html[data-dti-theme="folio"] #dti-home-grid .dti-hc-head, html[data-dti-theme="folio"] :is(.dti-panel-label, .dti-list-section-head) { box-shadow: inset 0 -1px 0 rgba(209,165,78,.5), inset 0 1px 0 rgba(255,255,255,.05); }
-            html[data-dti-theme="folio"] #dti-home-grid .dti-hc-title { font-family: 'IM Fell English SC', 'IM Fell English', Georgia, serif !important; color: #ecc97f !important; text-shadow: 0 1px 0 rgba(0,0,0,.5); }
-            html[data-dti-theme="folio"] .dti-hc-ico { width: 26px; height: 26px; border-radius: 50% !important; background: radial-gradient(circle at 35% 30%, #f6dea4, #d1a54e 55%, #8c6528) !important; color: #3a0f16 !important; box-shadow: 0 1px 2px rgba(0,0,0,.5), inset 0 0 0 1.5px rgba(90,60,20,.45) !important; }
-            html[data-dti-theme="folio"] :is(.btn-primary, .dti-nx-new) { border-radius: 3px !important; letter-spacing: .03em; box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 2px 6px rgba(0,0,0,.35) !important; }
             /* Nocturne: a moonlit garden — the moon, moonflowers and moths behind, fireflies glowing and dimming; cards lit from one corner;
                little moons for icons */
-            html[data-dti-theme="nocturne"]::after {
-                content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: ${_FIREFLIES} center / cover no-repeat;
-                animation: dti-glow 4.5s ease-in-out infinite alternate;
-            }
-            html[data-dti-theme="nocturne"] #main-nav { box-shadow: 0 6px 24px rgba(0,0,0,.45) !important; }
-            html[data-dti-theme="nocturne"] :is(${_CARDS}) { border-color: rgba(201,220,235,.13) !important; border-radius: 16px !important; }
-            html[data-dti-theme="nocturne"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) { background: radial-gradient(420px 240px at 100% 0%, rgba(201,220,235,.07), transparent 70%), var(--surface) !important; }
-            html[data-dti-theme="nocturne"] .dti-hc-ico { border-radius: 50% !important; background: radial-gradient(circle at 38% 34%, #f6f9fc, #c9dceb 60%, #9fb6c8) !important; color: #0b1417 !important; box-shadow: 0 0 10px rgba(201,220,235,.35) !important; }
-            html[data-dti-theme="nocturne"] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; box-shadow: 0 0 18px rgba(201,220,235,.22) !important; }
-            html[data-dti-theme="nocturne"] :is(h1, .dti-brand) { text-shadow: 0 0 18px rgba(201,220,235,.3); }
             /* Marquee: an old theatre — velvet curtains at the sides, a spotlight from above, a row of bulbs chasing under the bar; tickets for
                cards (notched, perforated under the title), gilt titles, glowing bulb icons, a lit frame round the hero */
-            html[data-dti-theme="marquee"] #main-nav::after { animation: dti-chase 1.2s steps(3) infinite; }
-            html[data-dti-theme="marquee"] #main-nav { box-shadow: 0 8px 26px rgba(0,0,0,.5) !important; }
-            html[data-dti-theme="marquee"] :is(${_CARDS}) { border-color: rgba(245,197,66,.22) !important; border-radius: 8px !important; }
-            html[data-dti-theme="marquee"] .dti-section-card {
-                -webkit-mask: radial-gradient(circle 8px at 0 44px, transparent 97%, #000) left / 51% 100% no-repeat, radial-gradient(circle 8px at 100% 44px, transparent 97%, #000) right / 51% 100% no-repeat;
-                mask: radial-gradient(circle 8px at 0 44px, transparent 97%, #000) left / 51% 100% no-repeat, radial-gradient(circle 8px at 100% 44px, transparent 97%, #000) right / 51% 100% no-repeat;
-            }
-            html[data-dti-theme="marquee"] #dti-home-grid .dti-hc-head { border-bottom: 2px dashed rgba(245,197,66,.4) !important; }
-            html[data-dti-theme="marquee"] #dti-hero { box-shadow: 0 0 0 2px #f5c542, 0 0 0 6px #12060a, 0 0 0 7px rgba(245,197,66,.45), 0 0 34px rgba(245,197,66,.14) !important; }
-            html[data-dti-theme="marquee"] .dti-hc-title { color: #f7d26a !important; text-shadow: 0 0 8px rgba(245,197,66,.35); }
-            html[data-dti-theme="marquee"] .dti-hc-ico { border-radius: 50% !important; background: radial-gradient(circle at 40% 35%, #fffbe8, #ffe08a 45%, #f5c542 75%) !important; color: #4a1018 !important; box-shadow: 0 0 10px rgba(255,214,94,.55) !important; }
-            html[data-dti-theme="marquee"] :is(.btn-primary, .dti-nx-new) { border-radius: 4px !important; font-family: 'Limelight', serif !important; font-weight: 400 !important; letter-spacing: .06em; box-shadow: 0 0 16px rgba(245,197,66,.3) !important; }
-            html[data-dti-theme="marquee"] h1:not(#wardrobe-2020-root h1) { color: #f7d26a !important; text-shadow: 0 0 14px rgba(245,197,66,.4); }
-            html[data-dti-theme="marquee"] #dti-search-row :is(h1, .chakra-editable__preview, .chakra-editable__input) { font-size: 27px !important; }
             /* Astrolabe: brass instruments under a chart of the stars — an engraved brass rule under the bar, riveted brass-edged panels,
                dial icons, brass small capitals */
-            html[data-dti-theme="astrolabe"] #main-nav { box-shadow: 0 8px 24px rgba(0,0,0,.5) !important; }
-            html[data-dti-theme="astrolabe"] :is(${_CARDS}) { border-color: rgba(199,154,82,.3) !important; border-radius: 4px !important; }
-            html[data-dti-theme="astrolabe"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) {
-                background: radial-gradient(circle, #f0d49a 0 1.4px, #7a5a2a 2px, transparent 2.6px) bottom 4px left 4px / 8px 8px no-repeat,
-                    radial-gradient(circle, #f0d49a 0 1.4px, #7a5a2a 2px, transparent 2.6px) bottom 4px right 4px / 8px 8px no-repeat,
-                    radial-gradient(circle, #f0d49a 0 1.4px, #7a5a2a 2px, transparent 2.6px) top 4px left 4px / 8px 8px no-repeat,
-                    radial-gradient(circle, #f0d49a 0 1.4px, #7a5a2a 2px, transparent 2.6px) top 4px right 4px / 8px 8px no-repeat, var(--surface) !important;
-            }
-            html[data-dti-theme="astrolabe"] #dti-home-grid .dti-hc-head, html[data-dti-theme="astrolabe"] :is(.dti-panel-label, .dti-list-section-head) { box-shadow: inset 0 -1px 0 rgba(199,154,82,.5); }
-            html[data-dti-theme="astrolabe"] .dti-hc-title { color: #dcb06a !important; }
-            html[data-dti-theme="astrolabe"] .dti-hc-ico {
-                width: 28px; height: 28px; border-radius: 50% !important; color: #dcb06a !important;
-                background: radial-gradient(circle closest-side, #0d1426 0 60%, transparent 62%), repeating-conic-gradient(#dcb06a 0 4deg, transparent 4deg 30deg), radial-gradient(circle closest-side, #1a2440 0 88%, #c79a52 90% 100%) !important;
-            }
-            html[data-dti-theme="astrolabe"] .dti-hc-ico svg { width: 12px; height: 12px; }
-            html[data-dti-theme="astrolabe"] :is(.btn-primary, .dti-nx-new) { border-radius: 3px !important; font-family: 'Marcellus SC', serif !important; letter-spacing: .08em; box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 2px 8px rgba(0,0,0,.35) !important; }
             /* Groovy: the 70s — wavy stripes under the bar, rainbow arcs in the corners, round cards with striped title bars, target icons,
                stacked-shadow headlines */
-            html[data-dti-theme="groovy"] #main-nav { box-shadow: none !important; }
-            html[data-dti-theme="groovy"] :is(${_CARDS}) { border-color: rgba(232,163,61,.2) !important; border-radius: 24px !important; }
-            html[data-dti-theme="groovy"] #dti-home-grid .dti-hc-head, html[data-dti-theme="groovy"] :is(.dti-panel-label, .dti-list-section-head) { background: linear-gradient(180deg, #e8a33d 0 2px, #d9622b 2px 4px, #8a4a22 4px 6px) left bottom / 100% 6px no-repeat, var(--solid-fill) !important; }
-            html[data-dti-theme="groovy"] .dti-hc-ico { border-radius: 50% !important; background: radial-gradient(circle closest-side, #f0b65a 0 58%, #d9622b 60% 78%, #8a4a22 80% 100%) !important; color: #22140c !important; }
-            html[data-dti-theme="groovy"] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; font-family: 'Shrikhand', Georgia, serif !important; font-weight: 400 !important; letter-spacing: .02em; }
-            html[data-dti-theme="groovy"] h1:not(#wardrobe-2020-root h1) { text-shadow: 2px 2px 0 #e8a33d, 4px 4px 0 #d9622b, 6px 6px 0 #8a4a22; }
-            html[data-dti-theme="groovy"] #dti-hero-right h1 span { background: none !important; -webkit-text-fill-color: #f6e7cf !important; }
+            /* ══ The fifth set — further again: stamp-perforated, carved, pixel-stepped and candy-striped cards; a chrome bar, a
+               newsprint masthead, an awning; a checkered floor in perspective; light drifting through water, a record turning,
+               marine snow sinking, lanterns rising, a far-off flash of lightning (each still, if you'd rather) ══ */
+            :root[data-dti-theme="prism"][data-mode][data-style] {
+                --bg: #0d0e12; --surface: #14161c; --surface-2: #191c23; --surface-3: #1f232b; --border: #2b303a; --nav-bg: #08090c;
+                --text: #f1f3f8; --text-muted: #a8afbf; --text-sub: #656c7c;
+                --accent: #e8ecff; --accent-dim: #cfd6f2; --accent-glow: rgba(232,236,255,.12); --accent-text: #f4f6ff; --accent-fg: #0d0e12;
+                --nc: #ffd27a; --np: #7fe7ff;
+                --solid-bg: #08090c; --solid-fill: linear-gradient(180deg, #0c0d11, #060709);
+                --solid-fg: #f1f3f8; --solid-fg-2: rgba(241,243,248,.74); --solid-line: rgba(255,255,255,.14); --solid-hover: rgba(255,255,255,.08); --solid-active: rgba(255,255,255,.14);
+                --theme-btn: linear-gradient(180deg, #ffffff, #e3e7f2); --theme-btn-fg: #0d0e12;
+                --theme-page: radial-gradient(1000px 600px at 20% 10%, rgba(255,255,255,.04), transparent 60%), linear-gradient(180deg, #0e0f14, #0a0b0e);
+                --theme-pattern: ${_GRAIN('.05')}; --theme-pattern-size: 180px 180px;
+                --theme-decor: ${_PRISM} center / cover no-repeat;
+                --shadow-sm: 0 2px 8px rgba(0,0,0,.35); --shadow-md: 0 10px 28px rgba(0,0,0,.5); --shadow-lg: 0 18px 46px rgba(0,0,0,.65);
+                --theme-font: 'Space Grotesk', 'Poppins', sans-serif; --theme-font-wt: 700; --theme-hc-size: 12px; --theme-hc-track: .1em; --theme-brand-track: -.01em;
+                --theme-navdeco: linear-gradient(90deg, #ff3b3b, #ff9a2e, #ffe14d, #4dff88, #2ee6ff, #5a6cff, #c04dff); --theme-navdeco-h: 2px;
+                --theme-scroll: #5a6170; --theme-scroll-track: #0d0e12; --theme-sel: rgba(232,236,255,.25);
+            }
+            /* (shared by the set) */
+            html:is(${_thm(_THEMES_5)}) #main-nav::after {
+                content: ''; position: absolute; left: 0; right: 0; top: calc(100% + var(--theme-navdeco-gap, 0px)); height: var(--theme-navdeco-h, 3px);
+                background: var(--theme-navdeco, none); pointer-events: none;
+            }
+            html:is(${_thm(_THEMES_5.filter(t => !['memphis', 'toile', 'vinyl', 'circuit', 'lantern'].includes(t)))}) body::after {
+                content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--theme-decor);
+            }
+            html:is(${_thm(_THEMES_5)}) { scrollbar-color: var(--theme-scroll) var(--theme-scroll-track, transparent); }
+            html:is(${_thm(_THEMES_5)}) ::selection { background: var(--theme-sel); }
+            /* (the slow motions — composited only, and still for reduced motion: the rule above it already stops html::after) */
+
+            /* Memphis: a black bar with yellow zigzag teeth; confetti everywhere; candy-striped card edges; each title bar its own pastel,
+               each icon its own shape */
+            /* Prism: a beam split into colors across the dark; a spectrum under the bar and each title bar; spectrum-ring icons */
+            html[data-dti-theme="prism"] #main-nav { box-shadow: 0 6px 24px rgba(0,0,0,.5) !important; }
+            html[data-dti-theme="prism"] #main-nav::after { filter: drop-shadow(0 0 4px rgba(255,255,255,.35)); }
+            html[data-dti-theme="prism"] :is(${_CARDS}) { border-color: rgba(255,255,255,.08) !important; border-radius: 10px !important; }
+            html[data-dti-theme="prism"] #dti-home-grid .dti-hc-head { background: linear-gradient(90deg, #ff3b3b, #ff9a2e, #ffe14d, #4dff88, #2ee6ff, #5a6cff, #c04dff) left bottom / 100% 1.5px no-repeat, var(--solid-fill) !important; }
+            html[data-dti-theme="prism"] .dti-hc-ico { border-radius: 50% !important; color: #f1f3f8 !important; background: radial-gradient(circle closest-side, #14161c 0 68%, transparent 71%), conic-gradient(#ff3b3b, #ff9a2e, #ffe14d, #4dff88, #2ee6ff, #5a6cff, #c04dff, #ff3b3b) !important; }
+            html[data-dti-theme="prism"] :is(.btn-primary, .dti-nx-new) { border-radius: 8px !important; box-shadow: -3px 0 12px rgba(255,59,59,.3), 3px 0 12px rgba(46,230,255,.3), 0 4px 12px rgba(192,77,255,.22) !important; }
+            /* ══ More of the simpler kind — a color story each, gradients and a soft backdrop, with small finishing touches:
+               tinted shadows, their own scrollbars and selection, a line or a glow under the bar ══ */
+            :root[data-dti-theme="daybreak"][data-mode][data-style] {
+                --bg: #fdf5ef; --surface: #ffffff; --surface-2: #fffaf6; --surface-3: #f9ebe4; --border: #f0dcd2; --nav-bg: #ffffff;
+                --text: #2a2238; --text-muted: #6b5d72; --text-sub: #a8979f;
+                --accent: #c9473a; --accent-dim: #b03c31; --accent-glow: rgba(201,71,58,.12); --accent-text: #bf4436; --accent-fg: #ffffff;
+                --nc: #a0600f; --np: #3d6f9e;
+                --solid-bg: #f7c9bd;
+                --solid-fill: linear-gradient(100deg, #ffd8a8 0%, #ffc4b2 35%, #f6c3d8 66%, #c8cdf5 100%);
+                --solid-fg: #2a2238; --solid-fg-2: rgba(42,34,56,.72); --solid-line: rgba(42,34,56,.16);
+                --solid-hover: rgba(255,255,255,.36); --solid-active: rgba(255,255,255,.56);
+                --theme-btn: linear-gradient(100deg, #d6603c, #c9465a 55%, #9b4a8c);
+                --theme-page: radial-gradient(1200px 560px at 50% -14%, rgba(255,214,160,.6), transparent 62%),
+                    radial-gradient(900px 520px at 100% 40%, rgba(246,195,216,.34), transparent 60%),
+                    radial-gradient(1000px 620px at 0% 100%, rgba(200,205,245,.5), transparent 62%),
+                    linear-gradient(180deg, #fff6ee, #fcf1f3 55%, #f3f2fc);
+                --shadow-sm: 0 1px 2px rgba(120,60,70,.06); --shadow-md: 0 6px 20px rgba(150,80,90,.09); --shadow-lg: 0 16px 40px rgba(110,60,100,.15);
+                --theme-scroll: #e5b4a6; --theme-sel: rgba(201,71,58,.2);
+            }
+            :root[data-dti-theme="hydrangea"][data-mode][data-style] {
+                --bg: #f3f4fc; --surface: #ffffff; --surface-2: #f8f9ff; --surface-3: #e8eafa; --border: #d9dcf2; --nav-bg: #ffffff;
+                --text: #1f2246; --text-muted: #555a84; --text-sub: #9397bb;
+                --accent: #4f56c9; --accent-dim: #4047ad; --accent-glow: rgba(79,86,201,.12); --accent-text: #464dbd; --accent-fg: #ffffff;
+                --nc: #a0600f; --np: #2f7a63;
+                --solid-bg: #c3c8f4;
+                --solid-fill: linear-gradient(100deg, #c9d4ff 0%, #bcc0f5 40%, #c9b8ef 75%, #dac7f1 100%);
+                --solid-fg: #1f2246; --solid-fg-2: rgba(31,34,70,.72); --solid-line: rgba(31,34,70,.16);
+                --solid-hover: rgba(255,255,255,.34); --solid-active: rgba(255,255,255,.54);
+                --theme-btn: linear-gradient(100deg, #5a62d6, #6a5bd0 55%, #8056c4);
+                --theme-page: radial-gradient(900px 520px at 0% 0%, rgba(199,210,255,.62), transparent 60%),
+                    radial-gradient(900px 560px at 100% 100%, rgba(218,199,241,.55), transparent 60%),
+                    radial-gradient(700px 420px at 100% 0%, rgba(210,234,218,.42), transparent 60%),
+                    linear-gradient(180deg, #f6f7ff, #f2f1fb);
+                --theme-pattern: ${_FLORETS}; --theme-pattern-size: 260px 260px;
+                --shadow-sm: 0 1px 2px rgba(60,70,150,.06); --shadow-md: 0 6px 20px rgba(70,80,170,.09); --shadow-lg: 0 16px 40px rgba(60,60,150,.15);
+                --theme-scroll: #b4b9e8; --theme-sel: rgba(79,86,201,.2);
+            }
+            :root[data-dti-theme="sorbet"][data-mode][data-style] {
+                --bg: #fff6f2; --surface: #ffffff; --surface-2: #fffaf7; --surface-3: #fdeae4; --border: #f6d6cc; --nav-bg: #ffffff;
+                --text: #3a1f29; --text-muted: #7a5763; --text-sub: #b5939e;
+                --accent: #d6336c; --accent-dim: #b82a5b; --accent-glow: rgba(214,51,108,.12); --accent-text: #c92e65; --accent-fg: #ffffff;
+                --nc: #a0600f; --np: #3a8a5a;
+                --solid-bg: #ffc0bd;
+                --solid-fill: linear-gradient(100deg, #ffcfa8 0%, #ffb8c2 38%, #fbc6dc 68%, #cfeccb 100%);
+                --solid-fg: #3a1f29; --solid-fg-2: rgba(58,31,41,.72); --solid-line: rgba(58,31,41,.16);
+                --solid-hover: rgba(255,255,255,.36); --solid-active: rgba(255,255,255,.56);
+                --theme-btn: linear-gradient(100deg, #e5486f, #d6336c 55%, #c23a8a);
+                --theme-page: radial-gradient(900px 500px at 0% 0%, rgba(255,207,168,.5), transparent 60%),
+                    radial-gradient(900px 500px at 100% 18%, rgba(255,184,194,.42), transparent 60%),
+                    radial-gradient(1000px 540px at 30% 110%, rgba(207,236,203,.55), transparent 60%),
+                    linear-gradient(180deg, #fff7f2, #fff3f4);
+                --shadow-sm: 0 1px 2px rgba(160,60,80,.06); --shadow-md: 0 6px 20px rgba(200,80,100,.1); --shadow-lg: 0 16px 40px rgba(160,60,90,.16);
+                --theme-scroll: #f3b3b9; --theme-sel: rgba(214,51,108,.2);
+            }
+            :root[data-dti-theme="rosewater"][data-mode][data-style] {
+                --bg: #f8f1f1; --surface: #fffbfb; --surface-2: #fcf6f6; --surface-3: #f1e3e4; --border: #e6d2d4; --nav-bg: #fffbfb;
+                --text: #33222a; --text-muted: #6d5560; --text-sub: #a68e98;
+                --accent: #a34a64; --accent-dim: #8c3c54; --accent-glow: rgba(163,74,100,.12); --accent-text: #9c4660; --accent-fg: #ffffff;
+                --nc: #9a5b12; --np: #4c7066;
+                --solid-bg: #9c5f72;
+                --solid-fill: linear-gradient(100deg, #9c566a 0%, #925370 50%, #80507a 100%);
+                --solid-fg: #fff8f8; --solid-fg-2: rgba(255,248,248,.82); --solid-line: rgba(255,248,248,.22);
+                --solid-hover: rgba(255,255,255,.1); --solid-active: rgba(255,255,255,.18);
+                --theme-btn: linear-gradient(100deg, #ad5470, #a34a64 55%, #8c3c54);
+                --theme-page: radial-gradient(1000px 520px at 100% 0%, rgba(214,170,180,.36), transparent 60%),
+                    radial-gradient(900px 500px at 0% 100%, rgba(228,204,192,.42), transparent 60%),
+                    linear-gradient(180deg, #faf3f2, #f5eced);
+                --theme-pattern: ${_GRAIN('.03')}; --theme-pattern-size: 180px 180px;
+                --theme-navdeco: linear-gradient(90deg, transparent, #dcb79a 15%, #dcb79a 85%, transparent); --theme-navdeco-h: 1px; --theme-navdeco-gap: 3px;
+                --shadow-sm: 0 1px 2px rgba(110,60,75,.06); --shadow-md: 0 6px 20px rgba(120,70,85,.09); --shadow-lg: 0 16px 40px rgba(100,50,70,.15);
+                --theme-scroll: #cfa7b1; --theme-sel: rgba(163,74,100,.2);
+            }
+            :root[data-dti-theme="rosegold"][data-mode][data-style] {
+                --bg: #141011; --surface: #1c1718; --surface-2: #231d1e; --surface-3: #2b2425; --border: #3b3132; --nav-bg: #171213;
+                --text: #f8eeec; --text-muted: #c9b3b0; --text-sub: #85716e;
+                --accent: #e8a598; --accent-dim: #d9907f; --accent-glow: rgba(232,165,152,.16); --accent-text: #f0b8ac; --accent-fg: #24100d;
+                --nc: #f2c879; --np: #9fd6c9;
+                --solid-bg: #d4998b;
+                --solid-fill: linear-gradient(90deg, #c27b6f 0%, #e0a596 25%, #f3c9bc 50%, #e0a596 75%, #c27b6f 100%);
+                --solid-fg: #24100d; --solid-fg-2: rgba(36,16,13,.74); --solid-line: rgba(36,16,13,.16);
+                --solid-hover: rgba(255,255,255,.2); --solid-active: rgba(255,255,255,.34);
+                --theme-btn: linear-gradient(100deg, #f3c9bc, #e0a596 50%, #c98576); --theme-btn-fg: #24100d;
+                --theme-page: radial-gradient(1000px 560px at 50% -10%, rgba(232,165,152,.14), transparent 60%),
+                    radial-gradient(800px 500px at 100% 100%, rgba(120,70,60,.16), transparent 60%),
+                    linear-gradient(180deg, #161213, #100c0d);
+                --theme-pattern: ${_GRAIN('.04')}; --theme-pattern-size: 180px 180px;
+                --shadow-sm: 0 2px 6px rgba(0,0,0,.3); --shadow-md: 0 10px 26px rgba(0,0,0,.42); --shadow-lg: 0 18px 44px rgba(0,0,0,.6);
+                --theme-scroll: #a9655c; --theme-scroll-track: #141011; --theme-sel: rgba(232,165,152,.3);
+            }
+            :root[data-dti-theme="sapphire"][data-mode][data-style] {
+                --bg: #070c1f; --surface: #0d1530; --surface-2: #121c3c; --surface-3: #182448; --border: #26345f; --nav-bg: #0a1128;
+                --text: #eef3ff; --text-muted: #a8b6dc; --text-sub: #6a78a2;
+                --accent: #7ea6ff; --accent-dim: #6a92f2; --accent-glow: rgba(126,166,255,.16); --accent-text: #a3c0ff; --accent-fg: #071030;
+                --nc: #f5cd6b; --np: #7fe3d2;
+                --solid-bg: #16307e;
+                --solid-fill: linear-gradient(90deg, #11235f 0%, #1a3a9e 25%, #2a4cb5 50%, #1a3a9e 75%, #11235f 100%);
+                --solid-fg: #f2f6ff; --solid-fg-2: rgba(242,246,255,.8); --solid-line: rgba(242,246,255,.2);
+                --solid-hover: rgba(255,255,255,.08); --solid-active: rgba(255,255,255,.14);
+                --theme-btn: linear-gradient(100deg, #a3c0ff, #7ea6ff 50%, #6a8ff0); --theme-btn-fg: #071030;
+                --theme-page: radial-gradient(1100px 600px at 50% -10%, rgba(40,80,200,.32), transparent 60%),
+                    radial-gradient(800px 500px at 100% 100%, rgba(80,60,180,.2), transparent 60%),
+                    linear-gradient(180deg, #08102a, #050917);
+                --theme-pattern: repeating-linear-gradient(60deg, rgba(150,180,255,.04) 0 1px, transparent 1px 96px), repeating-linear-gradient(-60deg, rgba(150,180,255,.04) 0 1px, transparent 1px 96px),
+                    repeating-linear-gradient(0deg, rgba(150,180,255,.03) 0 1px, transparent 1px 83px);
+                --theme-pattern-size: auto;
+                --shadow-sm: 0 2px 6px rgba(0,0,0,.35); --shadow-md: 0 10px 28px rgba(0,0,0,.48); --shadow-lg: 0 18px 46px rgba(0,0,0,.64);
+                --theme-scroll: #2f4c9e; --theme-scroll-track: #070c1f; --theme-sel: rgba(126,166,255,.35);
+            }
+            /* (shared by these) */
+            html:is(${_thm(_THEMES_S1)}) #main-nav::after {
+                content: ''; position: absolute; left: 0; right: 0; top: calc(100% + var(--theme-navdeco-gap, 0px)); height: var(--theme-navdeco-h, 3px);
+                background: var(--theme-navdeco, none); pointer-events: none;
+            }
+            html:is(${_thm(_THEMES_S1)}) { scrollbar-color: var(--theme-scroll) var(--theme-scroll-track, transparent); }
+            html:is(${_thm(_THEMES_S1)}) ::selection { background: var(--theme-sel); }
+            /* Each one's touch: a glow or a line under the bar; Rose Gold's, Obsidian's and Sapphire's sheen drifting slowly along it;
+               Sorbet's rounder corners; the fireflies, glowing on and off */
+            html:is(${_thm(['rosegold', 'sapphire'])}) #main-nav { background-size: 1600px 100% !important; animation: dti-theme-flow 26s linear infinite; }
+            html[data-dti-theme="daybreak"] #main-nav { box-shadow: 0 4px 20px rgba(214,95,74,.16) !important; }
+            html[data-dti-theme="hydrangea"] #main-nav { box-shadow: 0 4px 18px rgba(79,86,201,.14) !important; }
+            html[data-dti-theme="sorbet"] #main-nav { box-shadow: 0 4px 20px rgba(255,140,150,.22) !important; }
+            html[data-dti-theme="sorbet"] :is(${_CARDS}) { border-radius: 18px !important; }
+            html[data-dti-theme="sorbet"] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; }
+            html[data-dti-theme="rosewater"] #main-nav { box-shadow: 0 4px 18px rgba(132,86,122,.22) !important; }
+            html[data-dti-theme="rosegold"] #main-nav { box-shadow: inset 0 -1px 0 rgba(255,255,255,.35), 0 6px 26px rgba(0,0,0,.45) !important; }
+            html[data-dti-theme="sapphire"] #main-nav { box-shadow: inset 0 -1px 0 rgba(200,215,255,.3), 0 6px 26px rgba(20,40,120,.4) !important; }
+            @media (prefers-reduced-motion: reduce) { html[data-dti-theme] body::before, html[data-dti-theme] body::after { animation: none !important; } }
+            /* ══ The sixth set — watercolor, a pastry shop, Art Nouveau, glossy sky, Greek whitewash, raw concrete, manga panels,
+               a woodblock wave, cut paper, a green city; brass gears turning, glowing mushrooms, red lacquer, a glitch, tarot,
+               an agate, koi under lotus, spray paint, star tiles and denim ══ */
+            /* (shared by the set) */
+            @keyframes dti-glitch {
+                0% { opacity: 0; transform: none; } 11% { opacity: .9; transform: translate(-6px, -22vh); } 12% { opacity: .5; transform: translate(4px, 14vh); } 13% { opacity: 0; transform: none; }
+                47% { opacity: .8; transform: translate(3px, 30vh); } 48% { opacity: 0; transform: none; } 71% { opacity: .7; transform: translate(-3px, -8vh); } 72.5% { opacity: .4; transform: translate(5px, 2vh); } 74% { opacity: 0; transform: none; } 100% { opacity: 0; }
+            }
+            /* ══ The seventh set — a gingham picnic, a pinboard, balloons over a pastel sky, a low-poly dawn, soft pressed shapes,
+               kilim weaving, a circus tent, an old desktop, cherry blossom, a wildflower bank; Celtic knots, fireworks, chrome,
+               city lights out of focus, alchemy, mermaid scales, falling leaves, gold mosaic, Fair Isle knit and candlelight ══ */
+            :root[data-dti-theme="lowpoly"][data-mode][data-style] {
+                --bg: #dde6f7; --surface: #ffffff; --surface-2: #f6f8fd; --surface-3: #e8edf8; --border: #d3dbee; --nav-bg: #3b4483;
+                --text: #1c2142; --text-muted: #4c527a; --text-sub: #8a8fb0;
+                --accent: #4a54a8; --accent-dim: #3d4690; --accent-glow: rgba(74,84,168,.12); --accent-text: #444da0; --accent-fg: #ffffff;
+                --nc: #a0600f; --np: #2a7a5a;
+                --solid-bg: #444e94; --solid-fill: linear-gradient(115deg, #525ca6 0%, #4a54a0 33%, #434c95 33%, #3c448a 66%, #464f98 66%, #3f4890 100%);
+                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.84); --solid-line: rgba(255,255,255,.24); --solid-hover: rgba(255,255,255,.1); --solid-active: rgba(255,255,255,.18);
+                --theme-btn: linear-gradient(120deg, #ffbe98 0 50%, #ffa77f 50%); --theme-btn-fg: #3a1a0a;
+                --theme-page: #c4d6f5;
+                --theme-decor: ${_LOWPOLY} center / cover no-repeat;
+                --shadow-sm: 0 1px 2px rgba(40,40,100,.08); --shadow-md: 0 8px 22px rgba(40,40,100,.12); --shadow-lg: 0 18px 44px rgba(40,40,100,.2);
+                --theme-font: 'Lexend', 'Poppins', sans-serif; --theme-font-wt: 700; --theme-hc-size: 14px; --theme-hc-track: .02em; --theme-hc-case: none; --theme-brand-track: -.01em;
+                --theme-navdeco: linear-gradient(90deg, #ffb38a, #8a8ccf); --theme-navdeco-h: 3px;
+                --theme-scroll: #8a90c8; --theme-sel: rgba(255,179,138,.4);
+            }
+            :root[data-dti-theme="retroos"][data-mode][data-style] {
+                --bg: #1b8f8f; --surface: #c0c0c0; --surface-2: #c6c6c6; --surface-3: #b8b8b8; --border: #808080; --nav-bg: #000080;
+                --text: #000000; --text-muted: #303030; --text-sub: #5a5a5a;
+                --accent: #000080; --accent-dim: #00006a; --accent-glow: rgba(0,0,128,.15); --accent-text: #000080; --accent-fg: #ffffff;
+                --nc: #7a3a00; --np: #005a00;
+                --solid-bg: #000080; --solid-fill: linear-gradient(90deg, #000080, #0f74bd);
+                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.86); --solid-line: rgba(255,255,255,.25); --solid-hover: rgba(255,255,255,.14); --solid-active: rgba(255,255,255,.22);
+                --theme-btn: #c0c0c0; --theme-btn-fg: #000000;
+                --theme-page: #1b8f8f;
+                --theme-decor: ${_DESKTOP} left 8px top 70px / 100px 600px no-repeat;
+                --shadow-sm: none; --shadow-md: 2px 2px 0 rgba(0,0,0,.25); --shadow-lg: 3px 3px 0 rgba(0,0,0,.35);
+                --theme-font: 'Silkscreen', 'Courier New', monospace; --theme-font-wt: 400; --theme-hc-size: 12px; --theme-hc-track: 0; --theme-hc-case: none; --theme-brand-track: 0;
+                --theme-navdeco: linear-gradient(#dfdfdf, #dfdfdf) 0 0 / 100% 1px no-repeat, linear-gradient(#808080, #808080) 0 1px / 100% 1px no-repeat; --theme-navdeco-h: 2px;
+                --theme-scroll: #808080; --theme-scroll-track: #c0c0c0; --theme-sel: #000080; --theme-sel-fg: #ffffff;
+            }
+            :root[data-dti-theme="y2k"][data-mode][data-style] {
+                --bg: #120b24; --surface: #1b1335; --surface-2: #21183f; --surface-3: #281e4a; --border: #3c2f66; --nav-bg: #b9bccb;
+                --text: #f4f0ff; --text-muted: #c4bce0; --text-sub: #8478a8;
+                --accent: #9ee8ff; --accent-dim: #7fdcf7; --accent-glow: rgba(158,232,255,.16); --accent-text: #b4eeff; --accent-fg: #120b24;
+                --nc: #ffd59e; --np: #c6ff9e;
+                --solid-bg: #c9ccd8; --solid-fill: linear-gradient(180deg, #f7f8fc 0%, #dcdfe9 46%, #b4b8c9 52%, #eceef4 100%);
+                --solid-fg: #1a1530; --solid-fg-2: rgba(26,21,48,.84); --solid-line: rgba(26,21,48,.18); --solid-hover: rgba(255,255,255,.3); --solid-active: rgba(255,255,255,.45);
+                --theme-btn: linear-gradient(100deg, #ff9ef0, #9ee8ff 40%, #c6ff9e 70%, #ffd59e); --theme-btn-fg: #120b24;
+                --theme-page: radial-gradient(circle at 80% 20%, rgba(255,158,240,.22), transparent 50%), radial-gradient(circle at 20% 80%, rgba(158,232,255,.18), transparent 50%), linear-gradient(180deg, #150d2a, #0e081c);
+                --theme-decor: ${_Y2K} center / cover no-repeat;
+                --shadow-sm: 0 2px 6px rgba(0,0,0,.4); --shadow-md: 0 10px 30px rgba(0,0,0,.5); --shadow-lg: 0 18px 46px rgba(0,0,0,.66);
+                --theme-font: 'Audiowide', 'Orbitron', sans-serif; --theme-font-wt: 400; --theme-hc-size: 13px; --theme-hc-track: .04em; --theme-hc-case: none; --theme-brand-track: 0;
+                --theme-navdeco: linear-gradient(90deg, #ff9ef0, #9ee8ff, #c6ff9e, #ffd59e); --theme-navdeco-h: 3px;
+                --theme-scroll: #6a5aa8; --theme-scroll-track: #120b24; --theme-sel: rgba(158,232,255,.3);
+            }
+            /* (shared by the set) */
+            html:is(${_thm(_THEMES_7)}) #main-nav::after {
+                content: ''; position: absolute; left: 0; right: 0; top: calc(100% + var(--theme-navdeco-gap, 0px)); height: var(--theme-navdeco-h, 3px);
+                background: var(--theme-navdeco, none); pointer-events: none;
+            }
+            html:is(${_thm(_THEMES_7)}) body::after {
+                content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--theme-decor);
+            }
+            html:is(${_thm(_THEMES_7)}) { scrollbar-color: var(--theme-scroll) var(--theme-scroll-track, transparent); }
+            html:is(${_thm(_THEMES_7)}) ::selection { background: var(--theme-sel); }
+            html[data-dti-theme="retroos"] ::selection { color: var(--theme-sel-fg); }
+            /* Low Poly: a dawn landscape cut in facets; a faceted bar; cards with one corner cut; hexagon icons */
+            html[data-dti-theme="lowpoly"] #main-nav { box-shadow: 0 4px 18px rgba(40,40,100,.25) !important; }
+            html[data-dti-theme="lowpoly"] :is(${_CARDS}) { border-color: rgba(255,255,255,.7) !important; border-radius: 4px !important; }
+            html[data-dti-theme="lowpoly"] :is(.dti-section-card, #dti-hero, .dti-panel-section, ul#outfits > li) { clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%); }
+            html[data-dti-theme="lowpoly"] .dti-hc-ico { border-radius: 0 !important; clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); background: linear-gradient(120deg, #ffbe98 0 50%, #ffa77f 50%) !important; color: #3a1a0a !important; }
+            html[data-dti-theme="lowpoly"] :is(.btn-primary, .dti-nx-new) { border-radius: 2px !important; }
+            /* Retro OS: a teal desktop with its icons; grey bevelled windows with blue title bars; bevelled buttons */
+            html[data-dti-theme="retroos"] #main-nav { box-shadow: none !important; }
+            html[data-dti-theme="retroos"] :is(${_CARDS}) {
+                border: 2px solid !important; border-color: #ffffff #404040 #404040 #ffffff !important; border-radius: 0 !important;
+                box-shadow: inset -1px -1px 0 #808080, inset 1px 1px 0 #dfdfdf, 2px 2px 0 rgba(0,0,0,.25) !important;
+            }
+            html[data-dti-theme="retroos"] .dti-hc-ico { border-radius: 0 !important; background: #c0c0c0 !important; color: #000000 !important; box-shadow: inset -1px -1px 0 #404040, inset 1px 1px 0 #ffffff !important; }
+            html[data-dti-theme="retroos"] :is(.btn-primary, .dti-nx-new) { border-radius: 0 !important; border: 1px solid #000000 !important; box-shadow: inset -1px -1px 0 #404040, inset 1px 1px 0 #ffffff, inset -2px -2px 0 #808080, inset 2px 2px 0 #dfdfdf !important; }
+            /* Y2K: a chrome bar and chrome title bars; liquid-chrome blobs, holographic rings and sparkles; holographic buttons */
+            html[data-dti-theme="y2k"] #main-nav { box-shadow: 0 6px 24px rgba(0,0,0,.5), inset 0 1px 0 #ffffff !important; }
+            html[data-dti-theme="y2k"] :is(${_CARDS}) { border-color: rgba(158,232,255,.2) !important; border-radius: 18px !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.12), var(--shadow-md) !important; }
+            html[data-dti-theme="y2k"] .dti-hc-ico { border-radius: 50% !important; background: radial-gradient(circle at 35% 30%, #ffffff, #c9ccd8 40%, #6c7088 75%, #e8eaf2) !important; color: #1a1530 !important; }
+            html[data-dti-theme="y2k"] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 4px 16px rgba(158,232,255,.25) !important; }
+            html[data-dti-theme="retroos"] #dti-search-row :is(h1, .chakra-editable__preview, .chakra-editable__input) { font-size: 23px !important; }
+            html[data-dti-theme="y2k"] #dti-search-row :is(h1, .chakra-editable__preview, .chakra-editable__input) { font-size: 27px !important; }
+            /* ══ A second batch of the simpler kind ══ */
+            :root[data-dti-theme="heather"][data-mode][data-style] {
+                --bg: #f4f1f5; --surface: #ffffff; --surface-2: #faf8fb; --surface-3: #ebe5ee; --border: #ddd4e2; --nav-bg: #6f5e7e;
+                --text: #2a2230; --text-muted: #5f5468; --text-sub: #9b90a2;
+                --accent: #7a5a8c; --accent-dim: #684a78; --accent-glow: rgba(122,90,140,.13); --accent-text: #70528a; --accent-fg: #ffffff;
+                --nc: #9a5b12; --np: #4a7a5a;
+                --solid-bg: #6f5e7e; --solid-fill: linear-gradient(100deg, #776686 0%, #6f5e7e 50%, #635470 100%);
+                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.84); --solid-line: rgba(255,255,255,.24); --solid-hover: rgba(255,255,255,.1); --solid-active: rgba(255,255,255,.18);
+                --theme-btn: linear-gradient(100deg, #86669a, #7a5a8c 55%, #684a78);
+                --theme-page: radial-gradient(1000px 520px at 100% 0%, rgba(196,176,210,.35), transparent 60%), radial-gradient(900px 520px at 0% 100%, rgba(190,210,190,.3), transparent 60%), linear-gradient(180deg, #f6f3f7, #f0ecf2);
+                --theme-pattern: ${_GRAIN('.04')}; --theme-pattern-size: 180px 180px;
+                --theme-navdeco: linear-gradient(90deg, transparent, #9fb894 20%, #9fb894 80%, transparent); --theme-navdeco-h: 2px;
+                --shadow-sm: 0 1px 2px rgba(80,60,90,.06); --shadow-md: 0 6px 20px rgba(80,60,90,.09); --shadow-lg: 0 16px 40px rgba(80,60,90,.15);
+                --theme-scroll: #bba9c6; --theme-sel: rgba(122,90,140,.2);
+            }
+            :root[data-dti-theme="mist"][data-mode][data-style] {
+                --bg: #e9eef3; --surface: #ffffff; --surface-2: #f6f8fa; --surface-3: #e2e8ee; --border: #d3dce5; --nav-bg: #5e7186;
+                --text: #1b2633; --text-muted: #4d5b6a; --text-sub: #8592a0;
+                --accent: #4a6a8a; --accent-dim: #3e5a76; --accent-glow: rgba(74,106,138,.13); --accent-text: #44627f; --accent-fg: #ffffff;
+                --nc: #a0600f; --np: #3a7a64;
+                --solid-bg: #5a6d82; --solid-fill: linear-gradient(100deg, #56697e 0%, #5e7186 50%, #52647a 100%);
+                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.84); --solid-line: rgba(255,255,255,.24); --solid-hover: rgba(255,255,255,.1); --solid-active: rgba(255,255,255,.18);
+                --theme-btn: linear-gradient(100deg, #55759a, #4a6a8a 55%, #3e5a76);
+                --theme-page: linear-gradient(180deg, #dde5ed, #eef2f6 60%, #f4f6f8);
+                --theme-decor: ${_MIST} center / cover no-repeat;
+                --shadow-sm: 0 1px 2px rgba(40,60,80,.06); --shadow-md: 0 6px 20px rgba(40,60,80,.09); --shadow-lg: 0 16px 40px rgba(40,60,80,.15);
+                --theme-scroll: #a9b8c7; --theme-sel: rgba(74,106,138,.2);
+            }
+            :root[data-dti-theme="smoke"][data-mode][data-style] {
+                --bg: #121010; --surface: #1b1817; --surface-2: #211d1c; --surface-3: #282322; --border: #3a3331; --nav-bg: #161312;
+                --text: #f2eeec; --text-muted: #bfb6b2; --text-sub: #7d7470;
+                --accent: #e0b8a0; --accent-dim: #d0a488; --accent-glow: rgba(224,184,160,.16); --accent-text: #ecc9b4; --accent-fg: #241812;
+                --nc: #f2c879; --np: #9fd6c9;
+                --solid-bg: #2a2624; --solid-fill: linear-gradient(100deg, #2a2624, #34302d 50%, #2a2624);
+                --solid-fg: #f4f0ee; --solid-fg-2: rgba(244,240,238,.76); --solid-line: rgba(244,240,238,.16); --solid-hover: rgba(255,255,255,.07); --solid-active: rgba(255,255,255,.13);
+                --theme-btn: linear-gradient(100deg, #ecc9b4, #e0b8a0 50%, #c99a80); --theme-btn-fg: #241812;
+                --theme-page: radial-gradient(ellipse 120% 80% at 50% 100%, #2a2522, #121010 70%);
+                --theme-pattern: ${_GRAIN('.05')}; --theme-pattern-size: 180px 180px;
+                --theme-decor: ${_SMOKE} center / cover no-repeat;
+                --shadow-sm: 0 2px 6px rgba(0,0,0,.4); --shadow-md: 0 10px 28px rgba(0,0,0,.5); --shadow-lg: 0 18px 46px rgba(0,0,0,.66);
+                --theme-scroll: #4a4240; --theme-scroll-track: #121010; --theme-sel: rgba(224,184,160,.3);
+            }
+            :root[data-dti-theme="ultraviolet"][data-mode][data-style] {
+                --bg: #0c0618; --surface: #140b26; --surface-2: #1a0f31; --surface-3: #22143d; --border: #33205a; --nav-bg: #10081f;
+                --text: #f3edff; --text-muted: #b9a8e0; --text-sub: #75659e;
+                --accent: #b388ff; --accent-dim: #9a6bff; --accent-glow: rgba(179,136,255,.18); --accent-text: #c6a5ff; --accent-fg: #160a2e;
+                --nc: #ffd36b; --np: #6fe8ff;
+                --solid-bg: #3b1590; --solid-fill: linear-gradient(90deg, #2a0d5e 0%, #4a17a8 50%, #2a0d5e 100%);
+                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.82); --solid-line: rgba(255,255,255,.22); --solid-hover: rgba(255,255,255,.1); --solid-active: rgba(255,255,255,.17);
+                --theme-btn: linear-gradient(100deg, #c6a5ff, #b388ff 50%, #9a6bff); --theme-btn-fg: #160a2e;
+                --theme-page: radial-gradient(900px 600px at 50% 0%, rgba(110,50,255,.28), transparent 60%), radial-gradient(800px 600px at 100% 100%, rgba(200,60,255,.16), transparent 60%), linear-gradient(180deg, #0d0619, #080410);
+                --theme-pattern: linear-gradient(rgba(179,136,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(179,136,255,.045) 1px, transparent 1px); --theme-pattern-size: 48px 48px;
+                --shadow-sm: 0 2px 6px rgba(0,0,0,.4); --shadow-md: 0 10px 28px rgba(0,0,0,.5); --shadow-lg: 0 18px 46px rgba(0,0,0,.66);
+                --theme-scroll: #5a2fb0; --theme-scroll-track: #0c0618; --theme-sel: rgba(179,136,255,.35);
+            }
+            /* (shared by these) */
+            html:is(${_thm(_THEMES_S2)}) #main-nav::after {
+                content: ''; position: absolute; left: 0; right: 0; top: calc(100% + var(--theme-navdeco-gap, 0px)); height: var(--theme-navdeco-h, 3px);
+                background: var(--theme-navdeco, none); pointer-events: none;
+            }
+            html:is(${_thm(['mist', 'smoke'])}) body::after {
+                content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--theme-decor);
+            }
+            html:is(${_thm(_THEMES_S2)}) { scrollbar-color: var(--theme-scroll) var(--theme-scroll-track, transparent); }
+            html:is(${_thm(_THEMES_S2)}) ::selection { background: var(--theme-sel); }
+            html:is(${_thm(['ultraviolet'])}) #main-nav { background-size: 1600px 100% !important; animation: dti-theme-flow 28s linear infinite; }
+            html[data-dti-theme="heather"] #main-nav { box-shadow: 0 4px 18px rgba(80,60,90,.22) !important; }
+            html[data-dti-theme="mist"] #main-nav { box-shadow: 0 4px 18px rgba(40,60,80,.22) !important; }
+            html[data-dti-theme="smoke"] #main-nav { box-shadow: 0 6px 24px rgba(0,0,0,.5) !important; }
+            html[data-dti-theme="ultraviolet"] #main-nav { box-shadow: 0 0 30px rgba(140,80,255,.45) !important; }
+            html[data-dti-theme="ultraviolet"] :is(.btn-primary, .dti-nx-new) { box-shadow: 0 0 18px rgba(179,136,255,.4) !important; }
+            /* ══ The eighth set — an old sea chart, the periodic table, kawaii clouds, a scrapbook, succulents in clay pots, ballet ribbons,
+               chalk on the pavement, painted tiles, a Scandinavian corner, letterpress and wax; a ringed planet with its moon going round,
+               rain on a window, chess, a campfire, a glowing tide, a turning kaleidoscope, black opal, a maze, a carnival, a sunken ship ══ */
+            :root[data-dti-theme="kawaii"][data-mode][data-style] {
+                --bg: #fbeef6; --surface: #ffffff; --surface-2: #fff8fc; --surface-3: #f7e8f2; --border: #f1d9ea; --nav-bg: #ffffff;
+                --text: #3d2a47; --text-muted: #6e5878; --text-sub: #a993b0;
+                --accent: #b43f8e; --accent-dim: #9c3479; --accent-glow: rgba(180,63,142,.12); --accent-text: #a83a86; --accent-fg: #ffffff;
+                --nc: #a0600f; --np: #2a8a6a;
+                --solid-bg: #ffc4dc; --solid-fill: linear-gradient(90deg, #ffb3d1, #d9c2ff 50%, #a8e6cf);
+                --solid-fg: #3d2a47; --solid-fg-2: rgba(61,42,71,.74); --solid-line: rgba(61,42,71,.16); --solid-hover: rgba(255,255,255,.35); --solid-active: rgba(255,255,255,.55);
+                --theme-btn: linear-gradient(100deg, #ff9cc7, #c9a6ff); --theme-btn-fg: #3d2a47;
+                --theme-page: linear-gradient(135deg, #ffe4f0, #efe6ff 50%, #e2f8ee);
+                --theme-pattern: radial-gradient(circle, rgba(255,255,255,.75) 2px, transparent 2.5px); --theme-pattern-size: 36px 36px;
+                --theme-decor: ${_KAWAII} center / cover no-repeat;
+                --shadow-sm: 0 2px 6px rgba(200,120,180,.1); --shadow-md: 0 8px 22px rgba(200,120,180,.14); --shadow-lg: 0 18px 44px rgba(180,100,170,.2);
+                --theme-font: 'Mochiy Pop One', 'Nunito', sans-serif; --theme-font-wt: 400; --theme-hc-size: 13px; --theme-hc-track: .02em; --theme-hc-case: none; --theme-brand-track: 0;
+                --theme-navdeco: ${_CLOUDEDGE} 0 0 / 40px 16px repeat-x; --theme-navdeco-h: 16px;
+                --theme-scroll: #e9b3d6; --theme-sel: rgba(255,179,209,.5);
+            }
+            /* (shared by the set) */
+            html:is(${_thm(_THEMES_8)}) #main-nav::after {
+                content: ''; position: absolute; left: 0; right: 0; top: calc(100% + var(--theme-navdeco-gap, 0px)); height: var(--theme-navdeco-h, 3px);
+                background: var(--theme-navdeco, none); pointer-events: none;
+            }
+            html:is(${_thm(_THEMES_8)}) body::after {
+                content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--theme-decor);
+            }
+            html:is(${_thm(_THEMES_8)}) { scrollbar-color: var(--theme-scroll) var(--theme-scroll-track, transparent); }
+            html:is(${_thm(_THEMES_8)}) ::selection { background: var(--theme-sel); }
+            @media (prefers-reduced-motion: reduce) { html[data-dti-theme]::before { animation: none !important; } }
+            /* Kawaii: a cloudy edge under the pastel bar; soft round cards; little blushing faces for icons */
+            html[data-dti-theme="kawaii"] #main-nav { box-shadow: 0 4px 18px rgba(200,120,180,.18) !important; }
+            html[data-dti-theme="kawaii"] :is(${_CARDS}) { border-color: #f6dcea !important; border-radius: 24px !important; }
+            html[data-dti-theme="kawaii"] .dti-hc-ico { border-radius: 50% !important; background: radial-gradient(ellipse 4px 2.6px at 24% 66%, #ff9ec4 0 100%, transparent 100%), radial-gradient(ellipse 4px 2.6px at 76% 66%, #ff9ec4 0 100%, transparent 100%), #fff1a8 !important; color: #3d2a47 !important; }
+            html[data-dti-theme="kawaii"] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; box-shadow: 0 3px 0 rgba(180,100,170,.3) !important; }
+            html[data-dti-theme="kawaii"] #dti-search-row :is(h1, .chakra-editable__preview, .chakra-editable__input) { font-size: 26px !important; }
+            html[data-dti-theme="kawaii"] #dti-right-large-card .dti-hc-head .dti-hc-title { font-size: 12px !important; }
+            /* ══ A third batch of the simpler kind ══ */
+            /* (shared by these) */
+            /* ══ Ninth set ══ */
+            /* (shared by these) */
+            /* ══ A fourth batch of the simpler kind: materials, each with its own way of setting a card ══ */
+            :root[data-dti-theme="pewter"][data-mode][data-style] {
+                --bg: #262b30; --surface: #2e343a; --surface-2: #343a41; --surface-3: #3a4148; --border: #464e57; --nav-bg: #1d2125;
+                --text: #eef1f3; --text-muted: #b9c0c6; --text-sub: #7d868e;
+                --accent: #c9a65c; --accent-dim: #b8954c; --accent-glow: rgba(201,166,92,.16); --accent-text: #d8b878; --accent-fg: #241a06;
+                --nc: #f5c86b; --np: #8fd8c0;
+                --solid-bg: #3a4048; --solid-fill: linear-gradient(180deg, #454c55, #353b42);
+                --solid-fg: #f2f4f6; --solid-fg-2: rgba(242,244,246,.78); --solid-line: rgba(242,244,246,.14); --solid-hover: rgba(255,255,255,.07); --solid-active: rgba(255,255,255,.12);
+                --theme-btn: linear-gradient(180deg, #dcbd7c, #b8954c); --theme-btn-fg: #241a06;
+                --theme-page: linear-gradient(160deg, #2b3137, #22272c);
+                --theme-pattern: ${_PEWTER}; --theme-pattern-size: 260px 260px;
+                --theme-navdeco: linear-gradient(180deg, rgba(255,255,255,.16), rgba(0,0,0,.45)); --theme-navdeco-h: 2px;
+                --shadow-sm: 0 2px 6px rgba(0,0,0,.3); --shadow-md: 0 10px 28px rgba(0,0,0,.4); --shadow-lg: 0 18px 46px rgba(0,0,0,.55);
+                --theme-scroll: #4a525c; --theme-scroll-track: #262b30; --theme-sel: rgba(201,166,92,.3);
+            }
+            /* (shared by these) */
+            html:is(${_thm(_THEMES_S4)}) #main-nav::after {
+                content: ''; position: absolute; left: 0; right: 0; top: calc(100% + var(--theme-navdeco-gap, 0px)); height: var(--theme-navdeco-h, 3px);
+                background: var(--theme-navdeco, none); pointer-events: none;
+            }
+            html:is(${_thm(_THEMES_S4)}) { scrollbar-color: var(--theme-scroll) var(--theme-scroll-track, transparent); }
+            html:is(${_thm(_THEMES_S4)}) ::selection { background: var(--theme-sel); }
+            /* Pewter: hammered metal; bevelled cards; brass buttons */
+            html[data-dti-theme="pewter"] #main-nav { box-shadow: 0 6px 22px rgba(0,0,0,.45) !important; }
+            html[data-dti-theme="pewter"] :is(${_CARDS}) { border-color: #464e57 !important; border-radius: 8px !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.08), inset 0 -1px 0 rgba(0,0,0,.3), var(--shadow-md) !important; }
+            html[data-dti-theme="pewter"] .dti-hc-ico { border-radius: 6px !important; background: linear-gradient(180deg, #dcbd7c, #b8954c) !important; color: #241a06 !important; }
+            html[data-dti-theme="pewter"] :is(.btn-primary, .dti-nx-new) { border-radius: 6px !important; }
+
+            /* ── Redesigned themes (shared): the bar's under-rule, scrollbars, selection ── */
+
+
+
+
+
+
+            /* ── Candidate batch C1 (shared): the bar's under-rule, scrollbars, selection ── */
+
+
+
+
+
+
+
+
+
+
+
+
 
             /* ── Badge visibility toggles ──────────────────────────────────── */
             /* Newest Items' NC / NP switch: both badges, whatever the settings above say */
@@ -28707,7 +28047,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             // on its own (user asked): its picture, item names and zone labels (the words can be hidden). Kept apart for the full page
             // and the pop-up window (its panel is far narrower). CSS reads them from variables on the root. ──
             const LAY_KEY = 'dti_ed_layout' + (window.top !== window ? '_pop' : '');
-            const LAY_DEF = { lcols: 1, zones: 0, items: 0, size: 100, hideKind: 0, pic: 100, nm: 2, lb: 2 };
+            const LAY_DEF = { lcols: 1, zones: 0, items: 0, size: 100, hideKind: 0, caps: 0, pic: 100, nm: 2, lb: 2 };
             const LAY_TXT = [0, 0.85, 1, 1.2, 1.4];   // (words: Off, S, M — the usual — L, XL)
             const LAY_TXT_SEG = [[0, 'Off'], [1, 'S'], [2, 'M'], [3, 'L'], [4, 'XL']];
             const layVal = (k, v) => v + '%';   // (the sliders: tile size, picture)
@@ -28727,6 +28067,29 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 cancelAnimationFrame(_layRaf);
                 _layRaf = requestAnimationFrame(() => { _applyEdLayout(); _paintLayFit(); });
             });
+            // ── Cap values on the tiles (user asked): an NC item's value in caps — a badge on its picture on DTI's tiles, beside its labels
+            // on every page's — once "Cap values" is on in the layout menu (no values looked up while it's off) ──
+            function _paintCapsSoon() { if (_edLay.caps && !root._dtiCapT) root._dtiCapT = setTimeout(() => { root._dtiCapT = 0; _paintCaps(); }, 250); }
+            function _paintCaps() {
+                if (!_edLay.caps) return;
+                const put = (name, set) => lookupNcValue(name, val => { const v = capNums(val) ? String(val).trim().replace(/\*$/, '') : ''; set(v ? v + (v === '1' ? ' cap' : ' caps') : ''); });
+                root.querySelectorAll('.item-container').forEach(ic => {
+                    if (ic.closest('#dti-cs')) return;
+                    const nc = [...ic.querySelectorAll('.chakra-wrap__listitem')].some(li => li.textContent.trim() === 'NC');
+                    const name = nc ? (ic.querySelector('[id*="-item-"][id$="-name"]')?.textContent?.trim() || ic.querySelector('img')?.alt?.replace(/^Thumbnail art for /, '').trim() || ic.title || '') : '';
+                    let b = ic.querySelector(':scope > .dti-capv');
+                    if (!name) { b?.remove(); return; }
+                    if (b?.dataset.n === name) return;
+                    if (!b) { b = document.createElement('span'); b.className = 'dti-capv'; ic.appendChild(b); }
+                    b.dataset.n = name; b.hidden = true;
+                    put(name, txt => { if (b.dataset.n !== name) return; b.textContent = txt; b.hidden = !txt; b.title = txt ? 'NC value: ' + txt : ''; });
+                });
+                root.querySelectorAll('#dti-cs .dti-cs-tile:not([data-capv])').forEach(t => {
+                    t.dataset.capv = '1';
+                    if (!t.querySelector('.b .k.nc')) return;
+                    put(t.title, txt => { if (txt) t.querySelector('.b')?.insertAdjacentHTML('afterbegin', `<i class="c" title="NC value">${noteEsc(txt)}</i>`); });
+                });
+            }
             function _applyEdLayout() {
                 const { lcols, zones, items, size } = _edLay;
                 // (a tile: as wide as its picture needs, its picture's area, and the words under it — a name of up to 3 lines, a row of
@@ -28752,6 +28115,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 const zoneW = Math.ceil(items * TW * z + (items - 1) * 7 + 20);   // (a zone exactly that many tiles wide)
                 root.classList.toggle('dti-lay-lcols', lcols > 1);
                 root.classList.toggle('dti-hide-kind', !!_edLay.hideKind);
+                root.classList.toggle('dti-show-caps', !!_edLay.caps);
+                _paintCapsSoon();
                 root.classList.toggle('dti-hide-name', !nm);
                 root.classList.toggle('dti-hide-zone', !lb);
                 root.classList.toggle('dti-tile-nolbl', !lblH);
@@ -28789,6 +28154,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     <div class="dti-lay-row"><span>Items per row</span>${perRow}</div>${parts}`
                     : `<div class="dti-lay-row"><span>Items per row</span>${seg('lcols', [[1, '1'], [2, '2'], [3, '3']])}</div>`}
                     <div class="dti-lay-row"><span>NC / NP labels</span>${seg('hideKind', [[0, 'Show'], [1, 'Hide']])}</div>
+                    <div class="dti-lay-row"><span>Cap values</span>${seg('caps', [[1, 'Show'], [0, 'Hide']], 'An NC item’s value in caps, on its tile')}</div>
                     ${!tile && csOn() ? `<div class="dti-lay-sub">Every page’s tiles</div><div class="dti-lay-row"><span>Items per row</span>${perRow}</div>${parts}` : ''}`;
                 _paintLayFit();
             }
@@ -28980,6 +28346,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 _stampTileGrid();
                 if (_edView === 'tile') _stampItemTitles();
                 _injectEdItemBtns();
+                _paintCapsSoon();
             });
             _tObs.observe(root, { childList: true, subtree: true });
             _setEdView(_edView);
@@ -29336,7 +28703,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 const m = e.target.closest('.dti-cs-mode button');
                 if (m) { CS.mode = m.dataset.m; GM_setValue('dti_cs_mode', CS.mode); CS.page = 1; return csPaint(); }
                 const pg = e.target.closest('.dti-cs-pg');
-                if (pg) { CS.page += +pg.dataset.d; csPaint(); p.scrollIntoView({ block: 'start' }); return; }
+                if (pg) { CS.page += +pg.dataset.d; csPaint(); p.scrollTop = 0; p.scrollIntoView({ block: 'start' }); return; }
                 if (e.target.closest('.dti-cs-clear')) {   // (zones or colors picked: those cleared — else back to DTI's pages, A–Z)
                     if (filtersOn()) return csClearAll();
                     csAll = false; GM_setValue('dti_cs_all', false);
@@ -30989,7 +30356,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #wardrobe-2020-root .dti-cs-hide { display: none !important; }
             /* NC / NP labels hidden (the layout menu) */
             #wardrobe-2020-root.dti-hide-kind :is(.dti-kind-badge, .dti-cs-tile .b .k) { display: none !important; }
+            #wardrobe-2020-root:not(.dti-show-caps) :is(.dti-capv, .dti-cs-tile .b .c) { display: none !important; }
+            #wardrobe-2020-root .dti-capv { position: absolute; z-index: 2; right: 6px; top: calc(var(--dti-th, 114px) - 24px); padding: 1px 7px; border-radius: 99px; pointer-events: none; white-space: nowrap;
+                font-size: 10.5px; font-weight: 800; line-height: 1.5; letter-spacing: .01em; background: var(--accent); color: var(--accent-fg, #fff); box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+            #wardrobe-2020-root .dti-capv[hidden] { display: none !important; }
+            #wardrobe-2020-root:not(.dti-tile-mode) .dti-capv { top: 7px; right: 32px; }
+            #wardrobe-2020-root .dti-cs-tile .b .c { color: var(--accent-text, var(--accent)); text-transform: none; }
             #dti-cs { padding: 10px 10px 18px; }
+            /* (standing in for DTI's list, it scrolls on its own as that did — the custom on the left and the search above stay put) */
+            #wardrobe-2020-root #dti-cs { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
             .dti-cs-head { display: flex; align-items: center; gap: 6px 9px; }   /* (one line: a long title is cut short) */
             .dti-cs-head > :not(.dti-cs-title) { flex: none; }
             .dti-cs-sw { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--text-sub); }
@@ -31133,7 +30508,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 flex-direction: column !important; width: 100% !important;
                 height: auto !important; flex: 1 0 auto !important; overflow: hidden !important; align-items: stretch !important;
             }
-            #wardrobe-2020-root.dti-tile-mode .item-container > :last-child:not(:first-child):not(.dti-ed-remove-btn):not(.dti-ed-info-btn):not(.dti-note-btn):not(.dti-list-btn) { display: none !important; }
+            #wardrobe-2020-root.dti-tile-mode .item-container > :last-child:not(:first-child):not(.dti-ed-remove-btn):not(.dti-ed-info-btn):not(.dti-note-btn):not(.dti-list-btn):not(.dti-capv) { display: none !important; }
             /* (DTI's own buttons' box — they're hidden, ours are over the tile: gone, or it'd add a strip under the words) */
             #wardrobe-2020-root.dti-tile-mode .item-container > :not(:first-child):is(:has(> a[aria-label="More info"]), :has(> button[aria-label="Remove"])) { display: none !important; }
 
@@ -31196,7 +30571,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #wardrobe-2020-root.dti-tile-mode.dti-tile-nolbl .item-container > :first-child > :first-child > :last-child:not(:only-child) > :not(:first-child),
             #wardrobe-2020-root.dti-tile-mode.dti-tile-notext .item-container > :first-child > :first-child > :last-child:not(:only-child),
             #wardrobe-2020-root.dti-hide-name .dti-cs-tile .n,
-            #wardrobe-2020-root.dti-hide-zone .dti-cs-tile .b i:not(.k) { display: none !important; }
+            #wardrobe-2020-root.dti-hide-zone .dti-cs-tile .b i:not(.k):not(.c) { display: none !important; }
         `);
     }
 
