@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      2.5
+// @version      2.6
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -1362,6 +1362,32 @@
         'Glasses', 'Gloves', 'Hat', 'Higher Foreground Item', 'Hind Cover', 'Jacket', 'Left-hand Item', 'Lower Foreground Item',
         'Markings', 'Music', 'Necklace', 'Right-hand Item', 'Shirt/Dress', 'Shoes', 'Sound Effects', 'Static', 'Thought Bubble',
         'Trousers', 'Wings'];
+    // A filter's picks (the color and zone filters — user asked for several at once, and for some to be left out): { inc: shown,
+    // exc: left out, all: with several shown, things must be all of them (else any one does) }
+    const Picks = {
+        none: () => ({ inc: [], exc: [], all: false }),
+        of: v => typeof v === 'string' || v == null ? { inc: v ? [v] : [], exc: [], all: false }   // (one key, as kept before)
+            : { inc: [...(v.inc || [])], exc: [...(v.exc || [])], all: !!v.all },
+        on: p => !!p && (p.inc?.length || 0) + (p.exc?.length || 0) > 0,
+        // does something pass? has(key): is it that color, in that zone… — anything left out wins
+        pass: (p, has) => !p.exc.some(has) && (!p.inc.length || (p.all ? p.inc.every(has) : p.inc.some(has))),
+        // "Red", "Red or Blue", "Red and Blue", "3 colors", "Not Black", "Red, not Black" — name(key) → what it's called
+        text(p, name, noun) {
+            const grp = (ks, conj) => ks.length > 2 ? `${ks.length} ${noun}s` : ks.map(name).join(` ${conj} `);
+            const inc = p.inc.length ? (p.all && p.inc.length > 2 ? 'All ' : '') + grp(p.inc, p.all ? 'and' : 'or') : '';
+            const exc = p.exc.length ? grp(p.exc, 'or') : '';
+            return inc && exc ? `${inc}, not ${exc}` : inc || (exc ? `Not ${exc}` : '');
+        },
+    };
+    // A color's name and the shade its swatch shows (one picked by hand: its code), and a pick's swatches (the first few — a
+    // color left out struck through)
+    const itemColorName = k => (ITEM_COLORS.find(c => c[0] === k) || [])[1] || String(k || '').toUpperCase();
+    const itemColorShade = k => (ITEM_COLORS.find(c => c[0] === k) || [])[2] || k;
+    const pickChips = (p, max = 4) => [...p.inc, ...p.exc].slice(0, max)
+        .map(k => `<i class="dti-cpk-chip${p.exc.includes(k) ? ' out' : ''}" style="--c:${itemColorShade(k)}"></i>`).join('');
+    // (the zone filter's icon; the pick pop-ups' tip — here, before any page's filters are made)
+    const ZONE_ICO = '<svg class="dti-zpk-ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M8 2 14 5.2 8 8.4 2 5.2z"/><path d="m2 8 6 3.2L14 8"/><path d="m2 10.8 6 3.2 6-3.2"/></svg>';
+    const PICK_TIP = '<div class="dti-pk-tip">Once <i class="dti-pk-m in"></i> to show · twice <i class="dti-pk-m out"></i> to leave out</div>';
     const ItemColors = (() => {
         const [RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, PINK, BROWN, WHITE, GREY, BLACK] = ITEM_COLORS.map(c => c[0]);
         const NEUTRAL = new Set([WHITE, GREY, BLACK]);
@@ -1387,6 +1413,16 @@
             if (h < 290) return PURPLE;
             return h >= 318 || l >= 0.62 ? PINK : PURPLE;
         }
+        // Light, warm and barely colored — cream, ivory, beige: partly white, the way people name them (a pale cloudy scene is
+        // "white", though every pixel of it has a tint). → how much of the pixel counts as white, 0–1
+        function paleWhite(r, g, b) {
+            const mx = Math.max(r, g, b), mn = Math.min(r, g, b), c = mx - mn;
+            if (mx < 200 || !c) return 0;   // (not that light — or grey, counted as such already)
+            const h = ((mx === r ? ((g - b) / c) % 6 : mx === g ? (b - r) / c + 2 : (r - g) / c + 4) * 60 + 360) % 360;
+            if (h < 15 || h >= 75) return 0;
+            const [L, A, B] = labRgb(r, g, b), C = Math.hypot(A, B);
+            return L >= 84 && C < 26 ? Math.min(1, (26 - C) / 14) : 0;
+        }
         // A picture → { t: its main named color, sh: { color: share }, m / s / v: main, secondary and vibrant colors }
         function analyse(pic) {
             const N = 48, cv = document.createElement('canvas');
@@ -1411,14 +1447,18 @@
             const whole = kept < N * N * 0.06;   // (next to nothing left: an all-white picture — count all of it)
             const n = {}, sum = {}, cells = new Map();
             let total = 0;
+            const add = (k, w, o) => {   // (a pixel, or part of one, to a named color)
+                n[k] = (n[k] || 0) + w;
+                const t = sum[k] || (sum[k] = [0, 0, 0]);
+                t[0] += px[o] * w; t[1] += px[o + 1] * w; t[2] += px[o + 2] * w;
+            };
             for (let p = 0; p < N * N; p++) {
                 const o = p * 4;
                 if (px[o + 3] < 40 || (bg[p] && !whole)) continue;
-                const k = classify(px[o], px[o + 1], px[o + 2]);
+                const k = classify(px[o], px[o + 1], px[o + 2]), w = NEUTRAL.has(k) ? 0 : paleWhite(px[o], px[o + 1], px[o + 2]);
                 total++;
-                n[k] = (n[k] || 0) + 1;
-                const t = sum[k] || (sum[k] = [0, 0, 0]);
-                t[0] += px[o]; t[1] += px[o + 1]; t[2] += px[o + 2];
+                if (w) add(WHITE, w, o);
+                if (w < 1) add(k, 1 - w, o);
                 // (and its place in a coarse grid of colors, 5 steps a channel: the picture's own few colors, for one picked by hand)
                 const q = ((px[o] * 5) >> 8) * 25 + ((px[o + 1] * 5) >> 8) * 5 + ((px[o + 2] * 5) >> 8);
                 const cq = cells.get(q) || cells.set(q, [0, 0, 0, 0]).get(q);
@@ -1434,26 +1474,31 @@
             const vivid = ranked.find(k => !NEUTRAL.has(k));
             const pal = [...cells.values()].sort((a, b) => b[3] - a[3]).slice(0, 8)
                 .map(c => [hex(c[0] / c[3], c[1] / c[3], c[2] / c[3]), Math.round(c[3] / total * 100) / 100]).filter(c => c[1] >= 0.02);
-            return { t: ranked[0], sh, m: avg(ranked[0]), s: ranked[1] ? avg(ranked[1]) : '', v: vivid ? avg(vivid) : '', pal };
+            return { t: ranked[0], sh, m: avg(ranked[0]), s: ranked[1] ? avg(ranked[1]) : '', v: vivid ? avg(vivid) : '', pal, r: RV };
         }
-        // How close two colors look (CIE Lab distance: ~2 barely different, ~10 close, ~30 another shade)
+        // How a color looks (CIE Lab: its lightness, 0–100, and how colored it is), and how close two colors look (Lab distance:
+        // ~2 barely different, ~10 close, ~30 another shade)
+        function labRgb(r, g, b) {
+            const c = [r, g, b].map(x => (x /= 255) <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4);
+            const f = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+            const X = f((c[0] * 0.4124 + c[1] * 0.3576 + c[2] * 0.1805) / 0.95047), Y = f(c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722), Z = f((c[0] * 0.0193 + c[1] * 0.1192 + c[2] * 0.9505) / 1.08883);
+            return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)];
+        }
         const labs = new Map();
         const labOf = h => {
             let v = labs.get(h);
-            if (v) return v;
-            const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(x => x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4);
-            const f = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
-            const X = f((c[0] * 0.4124 + c[1] * 0.3576 + c[2] * 0.1805) / 0.95047), Y = f(c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722), Z = f((c[0] * 0.0193 + c[1] * 0.1192 + c[2] * 0.9505) / 1.08883);
-            labs.set(h, v = [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)]);
+            if (!v) labs.set(h, v = labRgb(...[1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))));
             return v;
         };
         // A color picked by hand (any #rrggbb that isn't one of the named ones)
         const isCustom = k => !!k && /^#[0-9a-f]{6}$/i.test(k) && !ITEM_COLORS.some(c => c[0] === k);
-        // How strict a match is — the picker's Strict–Loose slider, the same for every picker: 1 strictest … 5 loosest, 3 the usual
-        const clampLv = v => Math.min(5, Math.max(1, Math.round(+v) || 3));
-        let level = clampLv(GM_getValue('dti_color_match', 3)), needPal = false;   // (needPal: a hand-picked color in use — older readings lack the picture's own colors)
-        if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('dti_color_match', (key, o, v, remote) => { if (remote) level = clampLv(v); });
-        const stale = p => needPal && p && !p.pal;
+        // How strict a match is — the picker's Strict–Loose slider, the same for every picker: 1 strictest … 7 loosest, 4 the usual
+        // (it had 5 steps: the one picked then is kept — a step further along now)
+        const clampLv = v => Math.min(7, Math.max(1, Math.round(+v) || 4));
+        let level = clampLv(GM_getValue('dti_color_level', null) ?? (+GM_getValue('dti_color_match', 3) || 3) + 1);
+        if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('dti_color_level', (key, o, v, remote) => { if (remote) level = clampLv(v); });
+        // (a picture read before it was read this way — creams as white, its own few colors kept: read again when next needed)
+        const RV = 2, stale = p => !!p && p.r !== RV;
         // undefined = couldn't fetch it now (asked again another time); false = not a picture we can read (kept)
         const decode = async blob => {
             try { const bmp = await createImageBitmap(blob); const pr = analyse(bmp); bmp.close?.(); return pr; } catch (_) { return false; }
@@ -1491,8 +1536,8 @@
         };
         return {
             ready,
-            // A picture's colors, once read (after ready()): an object; false = unreadable; undefined = not read yet (or read before
-            // pictures' own colors were kept, while a hand-picked color is in use — read again)
+            // A picture's colors, once read (after ready()): an object; false = unreadable; undefined = not read yet (or read the old
+            // way — read again)
             get: src => { const p = map ? map[keyOf(src)] : undefined; return stale(p) ? undefined : p; },
             async profile(src) {
                 await ready();
@@ -1508,13 +1553,12 @@
             matches(pr, key) {
                 if (!pr || !key) return false;
                 if (isCustom(key)) {
-                    needPal = true;
                     if (!pr.pal) return false;
                     // (how close, and how much of the picture: tuned on ~3,400 items so each step of the slider is a real step. A
                     // colored pick counts only the picture's colored parts — every item's white shine and dark outlines would
                     // otherwise count towards any light or dark color; a white / grey / black pick needs much more of it, and closer)
                     const t = labOf(key.toLowerCase()), ct = Math.hypot(t[1], t[2]), grey = ct <= 12;
-                    const R = [12, 16, 21, 26, 31][level - 1] * (grey ? 0.8 : 1), need = Math.min(0.8, [0.25, 0.15, 0.1, 0.06, 0.04][level - 1] * (grey ? 3.2 : 1));
+                    const R = [10, 12, 16, 21, 26, 31, 37][level - 1] * (grey ? 0.8 : 1), need = Math.min(0.8, [0.32, 0.25, 0.15, 0.1, 0.06, 0.04, 0.025][level - 1] * (grey ? 3.2 : 1));
                     let got = 0;
                     for (const [h, sh] of pr.pal) {
                         const c = labOf(h);
@@ -1523,14 +1567,18 @@
                     }
                     return got >= need;
                 }
+                // (the strictest three: its main color, and that much of it; the rest: its main color, or that much of it — tuned on
+                // ~400 items so each step of the slider is a real step)
                 const share = pr.sh[key] || 0, main = pr.t === key, neutral = NEUTRAL.has(key);
-                return level === 1 ? main && share >= 0.5 : level === 2 ? main && share >= 0.35 : level === 3 ? main || share >= (neutral ? 0.45 : 0.3)
-                    : level === 4 ? main || share >= (neutral ? 0.32 : 0.15) : main || share >= (neutral ? 0.22 : 0.07);
+                if (level <= 3) return main && share >= [0.65, 0.5, 0.35][level - 1];
+                return main || share >= [[0.45, 0.3], [0.32, 0.15], [0.22, 0.07], [0.15, 0.03]][level - 4][neutral ? 0 : 1];
             },
+            // A pick of colors (Picks): any of those shown (or all of them), none of those left out. A picture that can't be read:
+            // only when nothing's asked to show.
+            pass(pr, p) { return pr ? Picks.pass(p, k => this.matches(pr, k)) : !p.inc.length; },
             isCustom,
             get level() { return level; },
-            setLevel(v) { level = clampLv(v); GM_setValue('dti_color_match', level); },
-            wantPalette() { needPal = true; },
+            setLevel(v) { level = clampLv(v); GM_setValue('dti_color_level', level); },
             // The Color sort: rainbow order of the main color, lighter shades first within each
             rank(pr) {
                 if (!pr) return [99, 0];
@@ -4632,6 +4680,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         const ui = Object.assign({ view: 'mine', kind: '', state: '', q: '', species: '', series: '', color: '', pcolor: '', style: '', pz: '', ess: '', tlist: '', match: '', sort: 'name', group: false, size: 'big', avail: false, barMin: false }, GM_getValue('dti_tok_ui', {}) || {});   // (Big tiles until another size is picked)
         ui.q = '';
         if (share) Object.assign(ui, { view: 'mine', kind: '', state: '', species: '', series: '', color: '', pcolor: '', style: '', pz: '', ess: '', tlist: '', match: '', sort: 'name', avail: false });   // (someone's shared list: from the start, with your tile size and grouping)
+        ui.pcolor = Picks.of(ui.pcolor);   // (by look: the colors picked — Picks; one color, as kept before, is read as one)
+        const pcOn = () => Picks.on(ui.pcolor);
         if (ui.sort === 'group') { ui.sort = 'name'; ui.group = true; }   // (it was an order for a while)
         const app = document.createElement('div');
         app.id = 'dti-tokens-app';
@@ -5079,7 +5129,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         }));
         // By look (user asked): the token picture's colors — the same color picker as everywhere else (named colors, your own
         // color, Strict–Loose). Pictures are read once and kept; a token not read yet shows as soon as it is.
-        const tkCpk = makeColorPicker(k => { ui.pcolor = k; saveUi(); render(); }, { value: ui.pcolor || '', cls: 'dti-cpk-tk' });
+        const tkCpk = makeColorPicker(p => { ui.pcolor = p; saveUi(); render(); }, { value: ui.pcolor, cls: 'dti-cpk-tk' });
         $('.dti-tk-cpk-slot').replaceWith(tkCpk.el);
         const tkNeed = new Set(), tkAsked = new Set();   // (to read; asked already this visit — one that fails isn't asked again in a loop)
         let tkReading = false;
@@ -5100,10 +5150,10 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             tkReading = false; st.hidden = true;
             render();
         }
-        ItemColors.ready().then(() => { if (ui.pcolor) render(); });
+        ItemColors.ready().then(() => { if (pcOn()) render(); });
         $('.dti-tk-clear').addEventListener('click', () => {   // (every filter back to all; the view, order and tile size stay)
-            Object.assign(ui, { kind: '', state: '', species: '', series: '', color: '', pcolor: '', style: '', pz: '', ess: '', tlist: '', match: '', q: '', avail: false });
-            tkCpk.set('');
+            Object.assign(ui, { kind: '', state: '', species: '', series: '', color: '', pcolor: Picks.none(), style: '', pz: '', ess: '', tlist: '', match: '', q: '', avail: false });
+            tkCpk.set(ui.pcolor);
             searchInp.value = ''; saveUi(); fillSelects(); render();
         });
         $('.dti-tk-grpbtn').addEventListener('click', () => { ui.group = !ui.group; saveUi(); render(); });
@@ -5117,7 +5167,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             if (ui.view === 'mine' && ui.state) parts.push({ own: share ? 'Has' : 'Owned', want: share ? 'Wants' : 'Wanted', uft: 'Up for trade' }[ui.state] || '');
             if (ui.kind) parts.push(ui.kind === 'essence' ? 'Essences' : 'Styles');
             [ui.species, ui.series, ui.color].forEach(v => { if (v) parts.push(v); });
-            if (ui.pcolor) parts.push(`Looks ${(ITEM_COLORS.find(c => c[0] === ui.pcolor) || [])[1]?.toLowerCase() || 'like ' + ui.pcolor.toUpperCase()}`);
+            if (pcOn()) parts.push(`Looks: ${Picks.text(ui.pcolor, k => ItemColors.isCustom(k) ? 'like ' + k.toUpperCase() : itemColorName(k).toLowerCase(), 'color').replace(/^(All|Not) /, m => m.toLowerCase())}`);
             if (ui.avail) parts.push('Available now');
             if (ui.q) parts.push(`\u201c${ui.q}\u201d`);
             parts.push(`${list.length} token${list.length === 1 ? '' : 's'}`);
@@ -5321,7 +5371,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 cs.classList.toggle('set', !!cs.querySelector('select')?.value);
                 cs.style.display = ui.kind === 'essence' && /^(series|color)$/.test(cs.querySelector('select')?.dataset.ui) ? 'none' : '';   // (essences: by species and kind)
             });
-            $('.dti-tk-clear').hidden = !(ui.kind || (ui.view === 'mine' && ui.state) || ui.species || ui.series || ui.color || ui.pcolor || ui.q || ui.match || ui.avail);
+            $('.dti-tk-clear').hidden = !(ui.kind || (ui.view === 'mine' && ui.state) || ui.species || ui.series || ui.color || pcOn() || ui.q || ui.match || ui.avail);
             const ac = acctActive() !== 'all' && acctGet(acctActive());   // (side accounts: whose tokens these are)
             if (ac) injectAcctCSS();
             $('.dti-tk-acct').innerHTML = ac ? `<button type="button" class="dti-acct-chip" style="--ac:${noteEsc(ac.color)}" title="Only ${noteEsc(acctName(ac))}\u2019s tokens \u2014 click to switch"><i class="dti-acct-dot"></i>${noteEsc(acctName(ac))}</button>` : '';
@@ -5352,10 +5402,10 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 if (ui.series && i.series !== ui.series) return false;
                 if (ui.color && !i.colors.includes(ui.color)) return false;   // (Baby Chocolate: under Baby and Chocolate)
                 if (q && !`${i.name} ${i.series} ${i.colors.join(' ')} ${i.species}`.toLowerCase().includes(q)) return false;
-                if (ui.pcolor) {   // (by look — not read yet: read, and shown once it is)
+                if (pcOn()) {   // (by look — not read yet: read, and shown once it is)
                     const pr = ItemColors.get(i.img);
                     if (pr === undefined) { if (i.img) tkNeed.add(i.img); return false; }
-                    if (!ItemColors.matches(pr, ui.pcolor)) return false;
+                    if (!ItemColors.pass(pr, ui.pcolor)) return false;
                 }
                 return true;
             });
@@ -5398,9 +5448,9 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             if (ui.view === 'mine' && cat) tokEnsureDates(list.map(i => cat.byKey.get(i.key)).filter(Boolean), cat, paintDates);
             empty.hidden = list.length > 0;
             if (!list.length) {
-                const filtered = ui.kind || ui.species || ui.series || ui.color || ui.pcolor || ui.style || ui.pz || ui.q || (ui.view === 'mine' && ui.state) || ui.avail;
-                const listOnly = !share && ui.view === 'mine' && ui.state === 'want' && ui.tlist && ui.tlist !== '-' && !(ui.kind || ui.species || ui.series || ui.color || ui.pcolor || ui.style || ui.pz || ui.q);
-                const stateOnly = !share && ui.view === 'mine' && ui.state && !ui.tlist && !(ui.kind || ui.species || ui.series || ui.color || ui.pcolor || ui.style || ui.pz || ui.q);
+                const filtered = ui.kind || ui.species || ui.series || ui.color || pcOn() || ui.style || ui.pz || ui.q || (ui.view === 'mine' && ui.state) || ui.avail;
+                const listOnly = !share && ui.view === 'mine' && ui.state === 'want' && ui.tlist && ui.tlist !== '-' && !(ui.kind || ui.species || ui.series || ui.color || pcOn() || ui.style || ui.pz || ui.q);
+                const stateOnly = !share && ui.view === 'mine' && ui.state && !ui.tlist && !(ui.kind || ui.species || ui.series || ui.color || pcOn() || ui.style || ui.pz || ui.q);
                 empty.innerHTML = ui.avail && !studioMap ? (studioState === 'error' ? '<b>Couldn\u2019t read the Studio\u2019s rotation</b><span>itemdb didn\u2019t answer \u2014 try again in a moment.</span>' : '<b>Reading the Styling Studio\u2019s rotation\u2026</b>')
                     : ui.avail && ui.view === 'mine' && !(ui.kind || ui.species || ui.series || ui.color || ui.style || ui.pz || ui.q) ? '<b>None of yours are in the Studio now</b><span>Nothing you own or want is in its current rotation.</span><div><button type="button" class="dti-tk-btn" data-go="all">See everything in the Studio</button></div>'
                     : share ? (filtered || ui.match ? '<b>Nothing matches</b><span>Try another search or filter.</span>' : '<b>Nothing in this share</b>')
@@ -12290,6 +12340,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['2.6', [
+            'Filters: pick several colors or zones at once — click once to show, twice to leave out',
+            'Colors: with two or more picked, show items with any of them or all of them',
+            'Colors: Strict ↔ Loose goes a step further each way, and pale cream scenes count as white (pictures are read once more as you filter)',
+            'Customs: zones show matches from every page of a search, and “All in one list” by the page number shows any search without pages',
+            'Customs: brand-new customs show the full search bar right away',
+            'Fixes: the NC / NP switch keeps what you typed, plus smaller fixes',
+        ]],
         ['2.5', [
             'Customs: pick a color to see every match from every page of a search — one list or full pages — and click to try one on',
             'Customs: All / NC / NP switch for search results, and an option to hide the NC / NP labels',
@@ -18203,14 +18261,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 -webkit-mask: var(--dti-ico) center / contain no-repeat; mask: var(--dti-ico) center / contain no-repeat;
             }
             #dti-center-filterbar .dti-csel-ico .dti-csel-trigger > span:first-child { flex: 1; }
-            .dti-csel-zone { --dti-ico: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linejoin='round'><path d='M8 2 14 5.2 8 8.4 2 5.2z'/><path d='m2 8 6 3.2L14 8'/><path d='m2 10.8 6 3.2 6-3.2'/></svg>"); }
             .dti-csel-sort { --dti-ico: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M5 3v10M2.5 10.5 5 13l2.5-2.5M11 13V3M8.5 5.5 11 3l2.5 2.5'/></svg>"); }
-            #dti-sort-sel, #dti-zone-filter {
+            #dti-sort-sel {
                 padding: 7px 12px; border-radius: 8px; flex-shrink: 0;
                 background: var(--surface); border: 1.5px solid var(--border);
                 color: var(--text); font-size: 13px; cursor: pointer; outline: none;
             }
-            #dti-sort-sel:focus, #dti-zone-filter:focus { border-color: var(--accent); }
+            #dti-sort-sel:focus { border-color: var(--accent); }
             #dti-closet-scan-status {
                 font-size: 11px; color: var(--text-muted); flex-shrink: 0; white-space: nowrap;
                 min-width: 120px; font-variant-numeric: tabular-nums;   /* (a steady width as the count runs down — the bar doesn't shift) */
@@ -19544,10 +19601,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     <button class="dti-type-pill" data-type="np">NP</button>
                 </div>
                 <span id="dti-closet-color-slot"></span>
-                <select id="dti-zone-filter" title="Filter by zone">
-                    <option value="">All zones</option>
-                    ${isOwnPage ? DTI_ZONES.map(z => `<option value="${z}">${z}</option>`).join('') : `<option value="Background">Background</option><option value="Foreground">Foreground</option><option value="Trinket">Trinket</option><option value="Hat">Hat</option><option value="Wig">Wig</option><option value="Wings">Wings</option><option value="Glasses">Glasses</option><option value="Necklace">Necklace</option><option value="Earrings">Earrings</option><option value="Shoes">Shoes</option><option value="Jacket">Jacket</option><option value="Lower Body">Lower Body</option><option value="Shirt/Dress">Shirt/Dress</option><option value="Gloves">Gloves</option><option value="Markings">Markings</option><option value="Music">Music</option>`}
-                </select>
+                <span id="dti-closet-zone-slot"></span>
                 <span id="dti-closet-scan-status" hidden></span>
                 <select id="dti-sort-sel">
                     <option value="default">Default</option>
@@ -19992,7 +20046,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // ── Interactions ───────────────────────────────────────────────────────
         let activeLists = []; // [{lst, section}] — all currently selected lists
         let activeItems = []; // flat cache: activeLists.flatMap(al => al.lst.items)
-        let filterQ = '', filterType = 'all', sortMode = 'default', filterColor = '', filterZone = '';
+        let filterQ = '', filterType = 'all', sortMode = 'default', filterColor = Picks.none(), filterZone = Picks.none(), closetZonePick = null;
         const CLOSET_COLOR_KEYWORDS = {
             '#ef4444': ['red','crimson','scarlet','rose','ruby','garnet','cherry','flame','fire','coral','brick','maroon','burgundy','wine','cardinal','lava','magma'],
             '#f97316': ['orange','amber','copper','bronze','rust','tangerine','autumn','pumpkin','citrus','sunset','apricot','marigold','harvest','terra'],
@@ -20723,15 +20777,22 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         }
 
         // Your items in a zone, from DTI's own search ("occupies:<zone> user:owns" and "…user:wants", 50 a page) —
-        // remembered for a day (GM dti_zone_items) or until how many you own changes. Until they're in, all show.
-        const zoneIds = new Map();
-        let zoneAsk = '';
+        // remembered for a day (GM dti_zone_items) or until how many you own changes. Several zones picked: looked up one at a time;
+        // a zone not in yet doesn't count yet (the zones shown: all show till every one is in).
+        const zoneIds = new Map(), zoneWait = [];
+        let zoneBusy = '';
+        const zonePicked = z => filterZone.inc.includes(z) || filterZone.exc.includes(z);
         function zoneIdsFor(z) {
             if (zoneIds.has(z)) return zoneIds.get(z);
             const e = (GM_getValue('dti_zone_items', null) || {})[z];
             if (e && e.owned === ownedCopies.size && Date.now() - e.at < 864e5) { const set = new Set(e.ids); zoneIds.set(z, set); return set; }
-            if (zoneAsk === z) return null;
-            zoneAsk = z;
+            if (zoneBusy !== z && !zoneWait.includes(z)) { zoneWait.push(z); setTimeout(zoneNext, 0); }
+            return null;
+        }
+        function zoneNext() {
+            while (zoneWait.length && !zonePicked(zoneWait[0])) zoneWait.shift();   // (no longer picked: not looked up)
+            if (zoneBusy || !zoneWait.length) return;
+            const z = zoneBusy = zoneWait.shift();
             const all = async who => {
                 const ids = [], q = encodeURIComponent(`occupies:"${z.toLowerCase()}" user:${who}`);
                 for (let p = 1; p <= 60; p++) {
@@ -20752,26 +20813,19 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 Object.keys(saved).forEach(k => { if (Date.now() - (saved[k]?.at || 0) > 864e5) delete saved[k]; });
                 saved[z] = { at: Date.now(), owned: ownedCopies.size, ids };
                 GM_setValue('dti_zone_items', saved);
-            }).catch(() => dtiToast(`Couldn\u2019t look up the ${z} zone \u2014 pick it again in a moment`, { variant: 'error' }))
+            }).catch(() => { if (zonePicked(z)) dtiToast(`Couldn\u2019t look up the ${z} zone \u2014 pick it again in a moment`, { variant: 'error' }); })
               .finally(() => {
                   if (st && st.textContent === msg) st.hidden = true;
-                  if (zoneAsk === z) zoneAsk = '';
-                  if (filterZone === z) renderGrid();
+                  zoneBusy = '';
+                  if (zonePicked(z)) renderGrid();
+                  zoneNext();
               });
-            return null;
         }
-        // The zone menu, set from elsewhere (a zone in the Zones list)
+        // The zone filter, set from elsewhere (a zone in the Zones list: just that zone)
         function setZoneFilter(z) {
-            const sel = document.getElementById('dti-zone-filter');
-            if (!sel) return;
-            sel.value = z;
-            sel.dispatchEvent(new Event('change', { bubbles: true }));
-            const w = sel.closest('.dti-csel');
-            if (w) {
-                const t = w.querySelector('.dti-csel-trigger > span');
-                if (t) t.textContent = sel.options[sel.selectedIndex]?.text || 'All zones';
-                w.querySelectorAll('.dti-csel-opt').forEach(d => d.classList.toggle('selected', d.dataset.value === sel.value));
-            }
+            filterZone = Picks.of(z);
+            closetZonePick?.set(filterZone);
+            renderGrid();
         }
 
         function filterAndSort(items) {
@@ -20780,25 +20834,29 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (filterQ) out = out.filter(i => i.name.toLowerCase().includes(filterQ));
             // (one scan at a time: this runs for every list on show — several at once each took the pictures to read, and the one
             // left to redraw had none, so the grid stayed as it was till the next redraw)
-            if ((filterColor || sortMode === 'color') && !_closetColorBusy && !_closetScanSoon && needsColors(items)) {
+            if ((Picks.on(filterColor) || sortMode === 'color') && !_closetColorBusy && !_closetScanSoon && needsColors(items)) {
                 _closetScanSoon = true;
                 setTimeout(() => { _closetScanSoon = false; runClosetColorScan(activeItems); }, 0);
             }
-            if (filterColor) {   // by the picture's colors (ItemColors); the name only when the picture can't be read
-                const kws = CLOSET_COLOR_KEYWORDS[filterColor] || [];
+            if (Picks.on(filterColor)) {   // by the picture's colors (ItemColors) — not read yet: shown once it is; the name only when the picture can't be read
                 out = out.filter(i => {
                     const pr = i.imgSrc ? ItemColors.get(i.imgSrc) : false;
-                    if (pr) return ItemColors.matches(pr, filterColor);
-                    return pr === false && kws.some(kw => i.name.toLowerCase().includes(kw));
+                    if (pr) return ItemColors.pass(pr, filterColor);
+                    const nm = i.name.toLowerCase();
+                    return pr === false && Picks.pass(filterColor, k => (CLOSET_COLOR_KEYWORDS[k] || []).some(kw => nm.includes(kw)));
                 });
             }
-            if (filterZone) {
+            if (Picks.on(filterZone)) {
                 if (isOwnPage) {   // (yours: DTI's real zones — looked up once, then remembered)
-                    const ids = zoneIdsFor(filterZone);
-                    if (ids) out = out.filter(i => ids.has(String(i.itemId || i.href?.match(/\/items\/(\d+)/)?.[1] || '')));
+                    const sets = new Map([...filterZone.inc, ...filterZone.exc].map(z => [z, zoneIdsFor(z)]));
+                    const shown = filterZone.inc.every(z => sets.get(z));   // (the zones shown: once every one is in)
+                    const idOf = i => String(i.itemId || i.href?.match(/\/items\/(\d+)/)?.[1] || '');
+                    out = out.filter(i => {
+                        const id = idOf(i);
+                        return !filterZone.exc.some(z => sets.get(z)?.has(id)) && (!filterZone.inc.length || !shown || filterZone.inc.some(z => sets.get(z).has(id)));
+                    });
                 } else {   // (someone else's: DTI can't search their items by zone — guessed from the names)
-                    const kws = CLOSET_ZONE_KEYWORDS[filterZone] || [];
-                    out = out.filter(i => kws.some(kw => i.name.toLowerCase().includes(kw)));
+                    out = out.filter(i => { const nm = i.name.toLowerCase(); return Picks.pass(filterZone, z => (CLOSET_ZONE_KEYWORDS[z] || []).some(kw => nm.includes(kw))); });
                 }
             }
             if (filterType === 'nc') out = out.filter(i => i.nc);
@@ -20992,7 +21050,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const empty = totalVisible === 0 && (!multi || compareOn);
             ph.hidden = !empty; grid.hidden = empty;
             if (empty) {
-                const filtering = filterQ || filterColor || filterZone || filterType !== 'all';
+                const filtering = filterQ || Picks.on(filterColor) || Picks.on(filterZone) || filterType !== 'all';
                 const sp = ph.querySelector('span');
                 if (sp) sp.textContent = compareOn ? `No matches with your items${filtering ? ' and these filters' : ''}`
                     : activeItems.length ? 'No items match your filters' : 'This list is empty';
@@ -21267,10 +21325,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         if (sortNative) {
             makeCustomSelect(sortNative, { style: 'flex-shrink:0;min-width:110px;', className: 'dti-csel-ico dti-csel-sort' });
         }
-        const zoneNative = document.getElementById('dti-zone-filter');
-        if (zoneNative) {
-            makeCustomSelect(zoneNative, { style: 'flex-shrink:0;min-width:120px;', className: 'dti-csel-ico dti-csel-zone' });
-        }
 
         let searchTimer = 0;
         document.getElementById('dti-item-search').addEventListener('input', e => {
@@ -21293,12 +21347,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // Sort change fires on the hidden native select via makeCustomSelect
         document.getElementById('dti-sort-sel')?.addEventListener('change', e => { sortMode = e.target.value; renderGrid(); });
 
-        // Color filter
-        const colorPick = makeColorPicker(k => { filterColor = k; if (ItemColors.isCustom(k)) _colorAsked.clear(); renderGrid(); });   // (colors not read yet are read from there)
+        // Color and zone filters (colors not read yet are read from there; a zone of yours looked up from there)
+        const colorPick = makeColorPicker(p => { filterColor = p; renderGrid(); });
         document.getElementById('dti-closet-color-slot')?.replaceWith(colorPick.el);
-        document.getElementById('dti-zone-filter')?.addEventListener('change', e => {
-            filterZone = e.target.value; renderGrid();
-        });
+        closetZonePick = makeZonePicker(p => { filterZone = p; renderGrid(); }, { zones: isOwnPage ? DTI_ZONES : Object.keys(CLOSET_ZONE_KEYWORDS) });
+        document.getElementById('dti-closet-zone-slot')?.replaceWith(closetZonePick.el);
 
         document.getElementById('dti-grid-cols-slider')?.addEventListener('input', e => {
             applyGridCols(parseInt(e.target.value, 10));
@@ -26270,35 +26323,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         }
     }
 
-    // ── The color filter (My Items, the outfit editor): a button that names the color picked ("Color" when none), opening
-    // a palette — "Any" and every color, each a named swatch in a clear shade of its color. onChange(key) with the color's
-    // ITEM_COLORS key ('' = any). → { el, set(key), close() }
-    function makeColorPicker(onChange, { value = '', cls = '' } = {}) {
-        injectColorPickerCSS();
-        const shade = k => (ITEM_COLORS.find(c => c[0] === k) || [])[2] || k;
-        const nameOf = k => (ITEM_COLORS.find(c => c[0] === k) || [])[1] || (k ? k.toUpperCase() : '');   // (one picked by hand: its code)
-        const chip = k => k ? `<i class="dti-cpk-chip" style="--c:${shade(k)}"></i>` : '<i class="dti-cpk-chip any"></i>';
-        const normHex = v => {
-            v = String(v || '').trim().toLowerCase();
-            if (!v.startsWith('#')) v = '#' + v;
-            if (/^#[0-9a-f]{3}$/.test(v)) v = '#' + [...v.slice(1)].map(c => c + c).join('');
-            return /^#[0-9a-f]{6}$/.test(v) ? v : null;
-        };
-        const LV = ['Only this color', 'Mostly this color', 'Normal', 'Some of it', 'A little of it'];
-        const btn = document.createElement('button');
-        btn.type = 'button'; btn.className = 'dti-cpk' + (cls ? ' ' + cls : '');
-        btn.setAttribute('aria-label', 'Filter by color'); btn.setAttribute('aria-haspopup', 'listbox'); btn.setAttribute('aria-expanded', 'false');
-        let cur = value || '', pop = null;
-        const paint = () => {
-            btn.innerHTML = `${chip(cur)}<span class="dti-cpk-name">${cur ? nameOf(cur) : 'Color'}</span><span class="dti-cpk-arrow" aria-hidden="true">\u25be</span>`;
-            btn.classList.toggle('on', !!cur);
-            btn.title = cur ? (ItemColors.isCustom(cur) ? `Showing items close to ${nameOf(cur)} \u2014 click to change` : `Showing ${nameOf(cur).toLowerCase()} items \u2014 click to change`) : 'Show only items of one color';
-        };
+    // ── A filter button's pop-up (the color and zone filters): under the button (above it when there's no room below), closed by a
+    // click anywhere else or Esc. build(pop) fills it; onClose() once it's gone. → { close, place, pop() }
+    function pickPopup(btn, build, onClose) {
+        let pop = null;
         const place = () => {
             if (!pop) return;
             const r = btn.getBoundingClientRect(), h = pop.offsetHeight;
             const below = r.bottom + 6 + h <= innerHeight - 8 || r.top - 6 - h < 8;   // (no room below: above)
-            pop.style.top = Math.round(below ? r.bottom + 6 : r.top - 6 - h) + 'px';
+            pop.style.top = Math.round(below ? Math.max(8, Math.min(r.bottom + 6, innerHeight - 8 - h)) : r.top - 6 - h) + 'px';
             pop.style.left = Math.round(Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))) + 'px';
         };
         const onDown = e => { if (!btn.isConnected || (pop && !pop.contains(e.target) && !btn.contains(e.target))) close(); };
@@ -26312,50 +26345,136 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             document.removeEventListener('keydown', onKey, true);
             window.removeEventListener('resize', close);
             window.removeEventListener('scroll', onScroll, true);
+            onClose?.();
         }
         btn.addEventListener('click', e => {
             e.preventDefault(); e.stopPropagation();
             if (pop) return close();
             pop = document.createElement('div');
-            pop.className = 'dti-cpk-pop'; pop.setAttribute('role', 'listbox'); pop.setAttribute('aria-label', 'Item color');
-            const recent = (GM_getValue('dti_color_recent', []) || []).filter(h => /^#[0-9a-f]{6}$/.test(h)).slice(0, 6);
-            const customVal = ItemColors.isCustom(cur) ? cur : (recent[0] || '#f7a8c4');
+            build(pop);
+            document.body.appendChild(pop);
+            btn.classList.add('open'); btn.setAttribute('aria-expanded', 'true');
+            place();
+            document.addEventListener('mousedown', onDown, true);
+            document.addEventListener('keydown', onKey, true);
+            window.addEventListener('resize', close);
+            window.addEventListener('scroll', onScroll, true);
+        });
+        return { close, place, pop: () => pop };
+    }
+    // A filter's picks as they're clicked — each one off → shown → left out → off — told onChange(picks) a moment after the last
+    // click (at once when the pop-up closes)
+    function pickState(value, onChange) {
+        const st = { cur: Picks.of(value), sent: '', t: 0 };
+        const key = () => JSON.stringify(st.cur);
+        st.sent = key();
+        st.of = k => st.cur.inc.includes(k) ? 'in' : st.cur.exc.includes(k) ? 'out' : '';
+        st.cycle = k => {
+            const was = st.of(k);
+            st.cur.inc = st.cur.inc.filter(x => x !== k);
+            st.cur.exc = st.cur.exc.filter(x => x !== k);
+            if (!was) st.cur.inc.push(k); else if (was === 'in') st.cur.exc.push(k);
+        };
+        st.clear = () => { st.cur.inc = []; st.cur.exc = []; };
+        st.send = now => {
+            clearTimeout(st.t);
+            const go = () => { const v = key(); if (v !== st.sent) { st.sent = v; onChange(Picks.of(st.cur)); } };
+            if (now) go(); else st.t = setTimeout(go, 160);
+        };
+        st.set = p => { clearTimeout(st.t); st.cur = Picks.of(p); st.sent = key(); };
+        return st;
+    }
+    // (the pop-up's options as picked: ✓ shown, ⊖ left out — "Any" / "All zones" lit when nothing is; tip(key, state) → its title)
+    function pickMarks(pop, st, tip) {
+        const none = !Picks.on(st.cur);
+        pop.querySelectorAll('[data-k]').forEach(o => {
+            const k = o.dataset.k, s = k ? st.of(k) : '';
+            o.classList.toggle('in', s === 'in'); o.classList.toggle('out', s === 'out');
+            if (!k) o.classList.toggle('on', none);
+            o.setAttribute('aria-pressed', !k ? String(none) : s === 'in' ? 'true' : s === 'out' ? 'mixed' : 'false');
+            o.title = tip(k, s);
+        });
+    }
+
+    // ── The color filter (My Items, the outfit editor, My Tokens): a button naming the colors picked ("Color" when none), opening a
+    // palette — each color a named swatch in a clear shade of it. A click shows that color, a second leaves it out, a third neither
+    // (user asked: several colors at once, and some left out); with several shown, items with any one of them — or all of them.
+    // Your own color too (a color grid, or a code), and how close a match (Strict–Loose). onChange(picks) — Picks.
+    // → { el, set(picks), close() }
+    function makeColorPicker(onChange, { value = '', cls = '' } = {}) {
+        injectColorPickerCSS();
+        const chip = k => k ? `<i class="dti-cpk-chip" style="--c:${itemColorShade(k)}"></i>` : '<i class="dti-cpk-chip any"></i>';
+        const normHex = v => {
+            v = String(v || '').trim().toLowerCase();
+            if (!v.startsWith('#')) v = '#' + v;
+            if (/^#[0-9a-f]{3}$/.test(v)) v = '#' + [...v.slice(1)].map(c => c + c).join('');
+            return /^#[0-9a-f]{6}$/.test(v) ? v : null;
+        };
+        const lc = k => ItemColors.isCustom(k) ? `close to ${k.toUpperCase()}` : itemColorName(k).toLowerCase();
+        const LV = ['Almost all this color', 'Mostly this color', 'Its main color', 'Normal', 'Some of it', 'A little of it', 'A touch of it'];
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'dti-cpk' + (cls ? ' ' + cls : '');
+        btn.setAttribute('aria-label', 'Filter by color'); btn.setAttribute('aria-haspopup', 'dialog'); btn.setAttribute('aria-expanded', 'false');
+        const st = pickState(value, onChange);
+        const paint = () => {
+            const p = st.cur, on = Picks.on(p);
+            btn.innerHTML = `<span class="dti-cpk-chips">${on ? pickChips(p) : chip('')}</span><span class="dti-cpk-name">${on ? noteEsc(Picks.text(p, itemColorName, 'color')) : 'Color'}</span><span class="dti-cpk-arrow" aria-hidden="true">▾</span>`;
+            btn.classList.toggle('on', on);
+            btn.title = on ? `${p.inc.length ? `Showing items that are ${p.inc.map(lc).join(p.all ? ' and ' : ' or ')}` : 'Showing items of any color'}${p.exc.length ? `, not ${p.exc.map(lc).join(' or ')}` : ''} — click to change`
+                : 'Show items of some colors — or leave some out';
+        };
+        const tip = (k, s) => !k ? 'Items of any color' : `${itemColorName(k)}: ${s === 'in' ? 'shown — click to leave it out' : s === 'out' ? 'left out — click to clear' : 'click to show it, twice to leave it out'}`;
+        const sync = () => {
+            const pop = ui.pop();
+            if (!pop) return;
+            pickMarks(pop, st, tip);
+            const two = st.cur.inc.length >= 2;
+            pop.querySelector('.dti-cpk-both').classList.toggle('off', !two);
+            pop.querySelectorAll('.dti-pk-seg button').forEach(b => { b.classList.toggle('on', (b.dataset.all === '1') === st.cur.all); b.disabled = !two; });
+        };
+        const changed = () => { sync(); paint(); st.send(); };
+        const recents = () => (GM_getValue('dti_color_recent', []) || []).filter(h => /^#[0-9a-f]{6}$/.test(h));
+        const ownRow = () => [...new Set([...st.cur.inc, ...st.cur.exc].filter(ItemColors.isCustom).concat(recents()))].slice(0, 8)   // (the ones picked, then the last few used)
+            .map(h => `<button type="button" class="dti-cpk-rc" data-k="${h}" aria-label="${h.toUpperCase()}">${chip(h)}</button>`).join('');
+        const ui = pickPopup(btn, pop => {
+            pop.className = 'dti-cpk-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Item colors');
+            const customVal = [...st.cur.inc, ...st.cur.exc].find(ItemColors.isCustom) || recents()[0] || '#f7a8c4';
             pop.innerHTML = `<div class="dti-cpk-head">Item color</div><div class="dti-cpk-grid">${[['', 'Any'], ...ITEM_COLORS].map(([k, label]) =>
-                `<button type="button" class="dti-cpk-opt${k === cur ? ' on' : ''}" data-k="${k}" role="option" aria-selected="${k === cur}" title="${k ? label + ' items' : 'Items of any color'}">${chip(k)}<span>${label}</span></button>`).join('')}</div>
+                `<button type="button" class="dti-cpk-opt" data-k="${k}">${chip(k)}<span>${label}</span></button>`).join('')}</div>${PICK_TIP}
+                <div class="dti-cpk-sec dti-cpk-both"><span class="dti-cpk-sub">With two or more colors</span>
+                    <div class="dti-pk-seg" role="group" aria-label="With two or more colors"><button type="button" data-all="0" title="Items with any one of the colors shown">Any of them</button><button type="button" data-all="1" title="Items with every color shown — two-tone and more">All of them</button></div>
+                </div>
                 <div class="dti-cpk-sec"><span class="dti-cpk-sub">Your own color</span>
                     <div class="dti-cpk-crow">
                         <label class="dti-cpk-well" title="Pick any color"><input type="color" value="${customVal}" aria-label="Pick any color"><i class="dti-cpk-chip" style="--c:${customVal}"></i></label>
                         <input type="text" class="dti-cpk-hex" value="${customVal.toUpperCase()}" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Color code, like #F7A8C4">
-                        <button type="button" class="dti-cpk-use">Use</button>
+                        <button type="button" class="dti-cpk-use" title="Show items close to this color">Add</button>
                     </div>
-                    ${recent.length ? `<div class="dti-cpk-recent">${recent.map(h => `<button type="button" class="dti-cpk-rc${h === cur ? ' on' : ''}" data-hex="${h}" title="${h.toUpperCase()}" aria-label="${h.toUpperCase()}">${chip(h)}</button>`).join('')}</div>` : ''}
+                    <div class="dti-cpk-recent">${ownRow()}</div>
                 </div>
                 <div class="dti-cpk-sec dti-cpk-match"><span class="dti-cpk-sub">Match <b>${LV[ItemColors.level - 1]}</b></span>
-                    <input type="range" min="1" max="5" step="1" value="${ItemColors.level}" aria-label="How close a match">
+                    <input type="range" min="1" max="7" step="1" value="${ItemColors.level}" aria-label="How close a match">
                     <div class="dti-cpk-ends"><span>Strict</span><span>Loose</span></div>
                 </div>`;
-            document.body.appendChild(pop);
-            btn.classList.add('open'); btn.setAttribute('aria-expanded', 'true');
-            place();
             pop.addEventListener('click', ev => {
                 ev.stopPropagation();
-                const o = ev.target.closest('.dti-cpk-opt');
-                if (!o) return;
-                const k = o.dataset.k;
-                close();
-                if (k === cur) return;
-                cur = k; paint(); onChange(cur);
+                const o = ev.target.closest('[data-k]');
+                if (o) { if (o.dataset.k) st.cycle(o.dataset.k); else st.clear(); return changed(); }
+                const a = ev.target.closest('.dti-pk-seg button');
+                if (a && !a.disabled) { st.cur.all = a.dataset.all === '1'; return changed(); }
+                if (ev.target.closest('.dti-cpk-use')) useHex(hexIn.value);
             });
-            // Your own color: the well (the full color grid, with a code box and eyedropper) or a typed code; the last few kept
+            // Your own color: the well (the full color grid, with a code box and eyedropper) or a typed code — shown, and kept with the
+            // last few used
             const well = pop.querySelector('.dti-cpk-well input'), wellChip = pop.querySelector('.dti-cpk-well .dti-cpk-chip'), hexIn = pop.querySelector('.dti-cpk-hex');
             const useHex = v => {
                 const h = normHex(v);
                 if (!h) { hexIn.classList.add('bad'); hexIn.focus(); return; }
-                ItemColors.wantPalette();
-                GM_setValue('dti_color_recent', [h, ...recent.filter(x => x !== h)].slice(0, 6));
-                close();
-                if (h === cur) return;
-                cur = h; paint(); onChange(cur);
+                GM_setValue('dti_color_recent', [h, ...recents().filter(x => x !== h)].slice(0, 6));
+                if (st.of(h) !== 'in') { st.cur.exc = st.cur.exc.filter(x => x !== h); st.cur.inc.push(h); }
+                pop.querySelector('.dti-cpk-recent').innerHTML = ownRow();
+                changed();
+                ui.place();
             };
             well.addEventListener('input', () => { hexIn.value = well.value.toUpperCase(); hexIn.classList.remove('bad'); wellChip.style.setProperty('--c', well.value); });
             well.addEventListener('change', () => useHex(well.value));
@@ -26365,25 +26484,57 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (h) { well.value = h; wellChip.style.setProperty('--c', h); }
             });
             hexIn.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); useHex(hexIn.value); } ev.stopPropagation(); });
-            pop.querySelector('.dti-cpk-use').addEventListener('click', ev => { ev.stopPropagation(); useHex(hexIn.value); });
-            pop.querySelectorAll('.dti-cpk-rc').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); useHex(b.dataset.hex); }));
-            // How strict: shown at once (a color picked: filtered again as it moves)
+            // How strict: shown at once (colors picked: filtered again as it moves)
             const rng = pop.querySelector('.dti-cpk-match input');
             let rngT = 0;
             rng.addEventListener('input', () => {
                 ItemColors.setLevel(+rng.value);
                 pop.querySelector('.dti-cpk-match b').textContent = LV[ItemColors.level - 1];
                 clearTimeout(rngT);
-                if (cur) rngT = setTimeout(() => onChange(cur), 140);
+                if (Picks.on(st.cur)) rngT = setTimeout(() => onChange(Picks.of(st.cur)), 140);
             });
-            document.addEventListener('mousedown', onDown, true);
-            document.addEventListener('keydown', onKey, true);
-            window.addEventListener('resize', close);
-            window.addEventListener('scroll', onScroll, true);
-            pop.querySelector('.dti-cpk-opt.on')?.focus({ preventScroll: true });
-        });
+            sync();
+            requestAnimationFrame(() => pop.querySelector('.dti-cpk-opt')?.focus({ preventScroll: true }));
+        }, () => st.send(true));
         paint();
-        return { el: btn, set(k) { cur = k || ''; paint(); }, close };
+        return { el: btn, set(p) { st.set(p); paint(); sync(); }, close: ui.close };
+    }
+
+    // ── The zone filter (My Items, the outfit editor): a button naming the zones picked ("All zones" when none), opening every zone —
+    // a click shows that zone's items, a second leaves them out, a third neither (user asked: several zones at once, and some left
+    // out); with several shown, items in any of them. zones: the zones offered (or a function giving them). onChange(picks) — Picks.
+    // → { el, set(picks), close() }
+    function makeZonePicker(onChange, { zones = [], value = '', cls = '' } = {}) {
+        injectColorPickerCSS();
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'dti-cpk dti-zpk' + (cls ? ' ' + cls : '');
+        btn.setAttribute('aria-label', 'Filter by zone'); btn.setAttribute('aria-haspopup', 'dialog'); btn.setAttribute('aria-expanded', 'false');
+        const st = pickState(value, onChange);
+        const paint = () => {
+            const p = st.cur, on = Picks.on(p);
+            btn.innerHTML = `${ZONE_ICO}<span class="dti-cpk-name">${on ? noteEsc(Picks.text(p, z => z, 'zone')) : 'All zones'}</span><span class="dti-cpk-arrow" aria-hidden="true">▾</span>`;
+            btn.classList.toggle('on', on);
+            btn.title = on ? `${p.inc.length ? `Showing ${p.inc.join(', ')} items` : 'Showing every zone'}${p.exc.length ? `, leaving out ${p.exc.join(', ')}` : ''} — click to change`
+                : 'Show items in some zones — or leave some out';
+        };
+        const tip = (z, s) => !z ? 'Items in every zone' : `${z}: ${s === 'in' ? 'shown — click to leave it out' : s === 'out' ? 'left out — click to clear' : 'click to show it, twice to leave it out'}`;
+        const ui = pickPopup(btn, pop => {
+            pop.className = 'dti-cpk-pop dti-zpk-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Item zones');
+            const list = [...new Set([...(typeof zones === 'function' ? zones() : zones), ...st.cur.inc, ...st.cur.exc])];
+            pop.innerHTML = `<div class="dti-cpk-head">Zones</div><div class="dti-zpk-list"><button type="button" class="dti-zpk-opt" data-k="">All zones</button>${
+                list.map(z => `<button type="button" class="dti-zpk-opt" data-k="${noteEsc(z)}">${noteEsc(z)}</button>`).join('')}</div>${PICK_TIP}`;
+            pop.addEventListener('click', ev => {
+                ev.stopPropagation();
+                const o = ev.target.closest('[data-k]');
+                if (!o) return;
+                if (o.dataset.k) st.cycle(o.dataset.k); else st.clear();
+                pickMarks(pop, st, tip); paint(); st.send();
+            });
+            pickMarks(pop, st, tip);
+            requestAnimationFrame(() => pop.querySelector('.dti-zpk-opt')?.focus({ preventScroll: true }));
+        }, () => st.send(true));
+        paint();
+        return { el: btn, set(p) { st.set(p); paint(); const pop = ui.pop(); if (pop) pickMarks(pop, st, tip); }, close: ui.close };
     }
     function injectColorPickerCSS() {
         if (window.__dtiCpkCSS) return;
@@ -26447,14 +26598,61 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-cpk-opt:is(:hover, :focus-visible) { background: var(--surface-2); color: var(--text); outline: none; }
             .dti-cpk-opt:hover .dti-cpk-chip { transform: translateY(-1px); }
             .dti-cpk-opt.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); color: var(--text); font-weight: 700; }
+            /* Several picked: their swatches overlapping on the button (one left out struck through), the names cut short if long */
+            .dti-cpk-chips { display: inline-flex; align-items: center; flex: none; }
+            .dti-cpk-chips .dti-cpk-chip + .dti-cpk-chip { margin-left: -5px; }
+            .dti-cpk-chips .dti-cpk-chip:not(:only-child) { outline: 1.5px solid var(--surface); }
+            .dti-cpk-name { min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+            .dti-cpk-chip.out, .dti-cpk-opt.out .dti-cpk-chip, .dti-cpk-rc.out .dti-cpk-chip { position: relative; }
+            .dti-cpk-chip.out::after, .dti-cpk-opt.out .dti-cpk-chip::after, .dti-cpk-rc.out .dti-cpk-chip::after {
+                content: ''; position: absolute; inset: 0; border-radius: inherit; --w: 1.2px;
+                background: linear-gradient(135deg, transparent calc(50% - var(--w)), var(--danger, #e11d48) calc(50% - var(--w)), var(--danger, #e11d48) calc(50% + var(--w)), transparent calc(50% + var(--w)));
+            }
+            .dti-cpk-opt.out .dti-cpk-chip::after { --w: 1.8px; }
+            /* ✓ shown · ⊖ left out — on each option, and in the tip */
+            .dti-cpk-opt, .dti-cpk-rc { position: relative; }
+            .dti-cpk-opt.in, .dti-cpk-rc.in { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); color: var(--text); font-weight: 700; }
+            .dti-cpk-opt.out, .dti-cpk-rc.out { border-color: color-mix(in srgb, var(--danger, #e11d48) 65%, transparent); background: color-mix(in srgb, var(--danger, #e11d48) 7%, var(--surface)); color: var(--danger, #e11d48); }
+            .dti-cpk-opt:is(.in, .out)::after, .dti-cpk-rc:is(.in, .out)::after, .dti-zpk-opt:is(.in, .out)::before, .dti-pk-m {
+                content: ''; display: block; width: 15px; height: 15px; border-radius: 50%; flex: none; box-shadow: 0 0 0 2px var(--surface);
+            }
+            .dti-cpk-opt:is(.in, .out)::after { position: absolute; top: 3px; left: calc(50% + 6px); }
+            .dti-cpk-rc:is(.in, .out)::after { position: absolute; top: -4px; right: -4px; width: 12px; height: 12px; }
+            :is(.dti-cpk-opt, .dti-cpk-rc).in::after, .dti-zpk-opt.in::before, .dti-pk-m.in {
+                background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.6 8.3 7 10.7l4.5-5.2'/%3E%3C/svg%3E") center / 100% no-repeat, var(--accent);
+            }
+            :is(.dti-cpk-opt, .dti-cpk-rc).out::after, .dti-zpk-opt.out::before, .dti-pk-m.out {
+                background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M4.8 8h6.4'/%3E%3C/svg%3E") center / 100% no-repeat, var(--danger, #e11d48);
+            }
+            .dti-pk-m { display: inline-block; width: 13px; height: 13px; vertical-align: -2px; box-shadow: none; }
+            .dti-pk-tip { padding: 8px 4px 0; font-size: 10.5px; font-weight: 600; line-height: 1.5; color: var(--text-muted); text-align: center; }
+            .dti-cpk-rc { border-radius: 8px; }
+            /* With two or more colors: any of them / all of them (dimmed till two are shown) */
+            .dti-pk-seg { display: flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); }
+            .dti-pk-seg button { flex: 1; margin: 0; padding: 5px 6px; border: none; border-radius: 7px; background: none; box-shadow: none; color: var(--text-muted); font-family: inherit; font-size: 11.5px; font-weight: 700; line-height: 1.2; cursor: pointer; }
+            .dti-pk-seg button:hover:not(.on):not(:disabled) { color: var(--text); background: var(--surface); }
+            .dti-pk-seg button.on { background: var(--accent); color: var(--accent-fg, #fff); }
+            .dti-pk-seg button:disabled { cursor: default; }
+            .dti-cpk-both.off .dti-pk-seg { opacity: .45; }
+            .dti-cpk-pop { max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain; }
+            /* The zone filter: the same button, with the zones icon; the zones as pills */
+            .dti-zpk .dti-zpk-ico { flex: none; color: var(--text-sub); }
+            .dti-zpk.on .dti-zpk-ico { color: var(--accent-text, var(--accent)); }
+            .dti-zpk-pop { width: 340px; }
+            .dti-zpk-list { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 2px; }
+            .dti-zpk-opt {
+                display: inline-flex; align-items: center; gap: 5px; margin: 0; padding: 5px 10px; border: 1.5px solid var(--border); border-radius: 99px;
+                background: var(--surface); box-shadow: none; color: var(--text-muted); font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1.2;
+                cursor: pointer; transition: background .12s, color .12s, border-color .12s;
+            }
+            .dti-zpk-opt:is(:hover, :focus-visible) { color: var(--text); border-color: var(--text-sub); outline: none; }
+            .dti-zpk-opt:is(.on, .in) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); color: var(--text); }
+            .dti-zpk-opt.out { border-color: color-mix(in srgb, var(--danger, #e11d48) 65%, transparent); background: color-mix(in srgb, var(--danger, #e11d48) 7%, var(--surface)); color: var(--danger, #e11d48); text-decoration: line-through; text-decoration-thickness: 1.5px; }
+            .dti-zpk-opt:is(.in, .out)::before { width: 14px; height: 14px; margin-left: -4px; box-shadow: none; }
         `);
     }
 
     function initEditorFilters(root) {
-        const KNOWN_ZONES = ['Background','Background Item','Collar','Dress Layer','Face',
-            'Foreground Item','Hair','Hat','Hind Cover','Left-hand Item','Lower-body',
-            'Makeup','Markings','Mouth','Necklace/String','Shoes','Shirt/Dress',
-            'Skirt/Trousers','Tail','Upper-body'];
         const COLOR_KEYWORDS = {
             '#ef4444': ['red','crimson','scarlet','rose','ruby','garnet','cherry','flame','fire','coral','brick','maroon','burgundy','wine','cardinal','lava','magma'],
             '#f97316': ['orange','amber','copper','bronze','rust','tangerine','autumn','pumpkin','citrus','sunset','apricot','marigold','harvest','terra'],
@@ -26468,15 +26666,18 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             '#7c4a1e': ['brown','chocolate','chestnut','mahogany','caramel','hazel','wooden','wood','sienna','walnut','cocoa','mocha','bark','tan'],
             '#9ca3af': ['grey','gray','silver','steel','ash','slate','smoke','stone','iron','pewter'],
         };   // (only when a picture can't be read: the colors come from the pictures — ItemColors)
-        const BADGE_NOISE = new Set(['NC','NP','Static','Animated','Own','Wanted']);
 
-        let activeZone = '', activeColor = '', csClearColor = () => {}, kindPaintSoon = () => {};
+        // The zones and colors picked (Picks: several of each, some left out — user asked); a plain search's every page in one list
+        // (user asked — kept till you go back to DTI's pages)
+        let edZones = Picks.none(), edColors = Picks.none(), csAll = !!GM_getValue('dti_cs_all', false);
+        let csClearAll = () => {}, kindPaintSoon = () => {};
+        const filtersOn = () => Picks.on(edZones) || Picks.on(edColors);
 
         // Phase 1: wait for the search box + first item to exist, then inject once
         const mountObs = new MutationObserver(() => {
             const autoContainer = root.querySelector('.react-autosuggest__container');
-            const firstItem = root.querySelector('.item-container');
-            if (!autoContainer || !firstItem || document.getElementById('dti-zone-color-filter')) return;
+            const drawn = root.querySelector('.item-container, h1');   // (its first item — or its name: a new custom has no items yet)
+            if (!autoContainer || !drawn || document.getElementById('dti-zone-color-filter')) return;
 
             mountObs.disconnect(); // stop watching — we only need to inject once
 
@@ -26487,10 +26688,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     <div id="dti-kind" role="group" aria-label="NC or NP items" title="Search results: NC or NP items only (DTI's own filter — full pages)">
                         <button type="button" data-k="" class="on">All</button><button type="button" data-k="NC">NC</button><button type="button" data-k="NP">NP</button>
                     </div>
-                    <div class="dti-zcf-zone-wrap">
-                        <select id="dti-zcf-zone"><option value="">All zones</option></select>
-                        <span class="dti-zcf-chevron">▾</span>
-                    </div>
+                    <span id="dti-zcf-zone-slot"></span>
                     <span id="dti-zcf-color-slot"></span>
                     <div id="dti-view-toggle" style="margin-left:auto">
                         <button class="dti-vt-btn" data-view="list" title="List view" aria-label="List view"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="2" width="12" height="2" rx="1"/><rect x="1" y="6" width="12" height="2" rx="1"/><rect x="1" y="10" width="12" height="2" rx="1"/></svg></button>
@@ -26598,15 +26796,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
             mountOutfitAlts(row);   // (alternate outfits in this custom)
 
-            // Populate zone list once from what's visible right now
-            populateZones();
-
-            // Wire up events
-            document.getElementById('dti-zcf-zone').addEventListener('change', e => {
-                activeZone = e.target.value;
-                applyFilters();
-                csPaintSoon();
-            });
+            // The zone and color filters: several of each, some left out — searching, their matches from every page show instead
+            const zonePick = makeZonePicker(p => { edZones = p; csSync(); applyFilters(); }, { zones: zoneList, cls: 'dti-cpk-ed' });
+            document.getElementById('dti-zcf-zone-slot')?.replaceWith(zonePick.el);
             // NC / NP: DTI's own search filter (so its pages stay full, and the color's every-page view follows) — the switch
             // shows what DTI has, however it was set (its suggestions too)
             const kindSeg = bar.querySelector('#dti-kind');
@@ -26619,9 +26811,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (!csBr.setKind(b.dataset.k)) return dtiToast('Couldn’t change the search — try again', { variant: 'error' });
                 kindPaintSoon();
             });
-            const colorPick = makeColorPicker(k => { activeColor = k; csSync(); applyFilters(); }, { cls: 'dti-cpk-ed' });
-            csClearColor = () => { colorPick.set(''); activeColor = ''; csSync(); applyFilters(); };
+            const colorPick = makeColorPicker(p => { edColors = p; csSync(); applyFilters(); }, { cls: 'dti-cpk-ed' });
             document.getElementById('dti-zcf-color-slot')?.replaceWith(colorPick.el);
+            csClearAll = () => {
+                edZones = Picks.none(); edColors = Picks.none();
+                zonePick.set(edZones); colorPick.set(edColors);
+                csSync(); applyFilters();
+            };
 
             // ── View toggle (list / tile) ────────────────────────────────
             let _edView = GM_getValue('dti_editor_view', 'list');
@@ -26801,6 +26997,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             const _tObs = new MutationObserver(() => {
                 kindPaintSoon();
+                csAllPaint();
                 _stampTileGrid();
                 if (_edView === 'tile') _stampItemTitles();
                 _injectEdItemBtns();
@@ -26814,29 +27011,19 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             let refilterT = 0;
             const isItems = n => n.nodeType === 1 && (n.classList.contains('item-container') || !!n.querySelector('.item-container') || !!n.closest('.item-container'));
             new MutationObserver(ms => {
-                if (!activeZone && !activeColor) return;
+                if (!filtersOn() && !csAll) return;
                 if (!ms.some(m => m.type === 'attributes' ? !!m.target.closest('.item-container') : [...m.addedNodes].some(isItems))) return;
                 clearTimeout(refilterT);
-                refilterT = setTimeout(() => { if (activeColor) csSync(); applyFilters(); }, 60);
+                refilterT = setTimeout(() => { csSync(); applyFilters(); }, 60);
             }).observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
         });
         mountObs.observe(root, { childList: true, subtree: true });
 
-        function populateZones() {
-            const sel = document.getElementById('dti-zcf-zone');
-            if (!sel) return;
-            const fromDOM = new Set();
-            root.querySelectorAll('.chakra-wrap__listitem').forEach(li => {
-                const t = li.textContent.trim();
-                if (!BADGE_NOISE.has(t) && t.length > 1 && t.length < 50) fromDOM.add(t);
-            });
-            const allZones = [...new Set([...KNOWN_ZONES, ...fromDOM])].sort();
-            const current = sel.value;
-            // Build options without touching the DOM until we have the full list
-            const html = '<option value="">All zones</option>' +
-                allZones.map(z => `<option value="${z}">${z}</option>`).join('');
-            sel.innerHTML = html;
-            if (current) sel.value = current;
+        // The zones offered: DTI's item zones (as its own search lists them), and any others the search's items are in
+        function zoneList() {
+            const seen = new Set(DTI_ZONES);
+            CS.items.forEach(r => r.zones.forEach(z => seen.add(z)));
+            return [...seen].sort((a, b) => a.localeCompare(b));
         }
 
         let _filterGen = 0;
@@ -26849,22 +27036,26 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
         async function applyFilters() {
             const gen = ++_filterGen;
+            const colorsOn = Picks.on(edColors), zonesOn = Picks.on(edZones);
             let colorMatchCount = 0;
             const noMatch = document.getElementById('dti-zcf-nomatch');
             const items = [...root.querySelectorAll('.item-container')];
             const toAnalyze = [];
-            if (activeColor) await ItemColors.ready();
+            if (colorsOn) await ItemColors.ready();
             if (gen !== _filterGen) return;
             // by the picture's colors (ItemColors); the name only when the picture can't be read
-            const isColor = (pr, name) => pr ? ItemColors.matches(pr, activeColor) : (COLOR_KEYWORDS[activeColor] || []).some(kw => name.includes(kw));
-            if (activeColor && csOn()) { if (noMatch) noMatch.hidden = true; return; }   // (searching: the color's every page shows instead)
+            const isColor = (pr, name) => pr ? ItemColors.pass(pr, edColors) : Picks.pass(edColors, k => (COLOR_KEYWORDS[k] || []).some(kw => name.includes(kw)));
+            if (csOn()) { if (noMatch) noMatch.hidden = true; return; }   // (searching: every page shows instead)
 
             for (const item of items) {
-                const badges = [...item.querySelectorAll('.chakra-wrap__listitem')].map(b=>b.textContent.trim());
                 const name = (item.querySelector('.chakra-wrap')?.previousElementSibling?.textContent || item.textContent||'').toLowerCase();
-                const zoneOk = !activeZone || badges.includes(activeZone);
-                if (!zoneOk) { showTile(item, false); continue; }
-                if (!activeColor) { showTile(item, true); continue; }
+                if (zonesOn) {   // (its zones: its badges — and in the outfit's own list, the zone it's listed under)
+                    const zs = [...item.querySelectorAll('.chakra-wrap__listitem')].map(b => b.textContent.trim());
+                    const head = item.closest('div:has(> h2.chakra-heading)')?.querySelector(':scope > h2.chakra-heading')?.textContent.trim();
+                    if (head) zs.push(head);
+                    if (!Picks.pass(edZones, z => zs.includes(z))) { showTile(item, false); continue; }
+                }
+                if (!colorsOn) { showTile(item, true); continue; }
                 const src = item.querySelector('img')?.src, pr = src ? ItemColors.get(src) : false;
                 if (pr === undefined) { showTile(item, false); toAnalyze.push([item, src, name]); continue; }   // (shown once read, if it matches)
                 const ok = isColor(pr, name);
@@ -26873,7 +27064,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             tidyZones();
 
-            if (!activeColor) { if (noMatch) noMatch.hidden = true; populateZones(); return; }
+            if (!colorsOn) { if (noMatch) noMatch.hidden = true; return; }
 
             if (toAnalyze.length > 0 && noMatch) {
                 noMatch.hidden = false;
@@ -26891,50 +27082,79 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             tidyZones();
             if (noMatch) {
                 noMatch.hidden = colorMatchCount > 0;
-                if (colorMatchCount === 0) noMatch.textContent = 'No items match that color';
+                if (colorMatchCount === 0) noMatch.textContent = 'No items match these filters';
             }
-            // Refresh zones after page change (outside the observer, so no loop risk)
-            populateZones();
         }
 
-        // ── A color across every page of a search (user asked: search "background", pick a color, see every one of them — in one
-        // list, or in pages full of that color, 30 a page): DTI's own search asked for every page (50 a time, its most), each
-        // picture's colors read once (kept), the matches shown where DTI's pages were; a click puts one on (or takes it off) through
-        // DTI's own step. Zone filter applies too. ──
+        // ── Every page of a search (user asked: search "background", pick a color, see every one of them — in one list, or in pages
+        // full of them, 30 a page): with zones or colors picked — or for any search, if you like (user asked: a plain search with no
+        // pages). DTI's own search asked for every page (50 a time, its most), each picture's colors read once (kept) when a color is
+        // picked, the matches shown where DTI's pages were; a click puts one on (or takes it off) through DTI's own step. ──
         const CS_PER_PAGE = 30, CS_MAX_PAGES = 80;   // (80 × 50 = the first 4,000 items)
         const csBr = edBridge();
         const CS = { base: '', gen: 0, items: [], pages: 0, allPages: 0, fetched: 0, failed: 0, checked: 0, next: 0, active: 0, page: 1,
             mode: GM_getValue('dti_cs_mode', 'list') === 'pages' ? 'pages' : 'list', tiles: new Map(), memo: new Map() };   // (memo: the last few searches, whole)
         let csPanel = null, csPaintT = 0, csWornT = 0;
-        const csColor = () => ITEM_COLORS.find(c => c[0] === activeColor) || [activeColor, (activeColor || '').toUpperCase(), activeColor || '#999'];
-        // (read: by the picture's colors; the name only when the picture can't be read; not read yet: not shown yet)
-        const csMatch = r => r.pr !== undefined && (r.pr ? ItemColors.matches(r.pr, activeColor) : (COLOR_KEYWORDS[activeColor] || []).some(kw => r.name.toLowerCase().includes(kw)));
+        const LIST_ICO = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>';
+        // (its zones; its colors — by the picture's colors, the name only when the picture can't be read; not read yet: not yet)
+        const csMatch = r => Picks.pass(edZones, z => r.zones.includes(z)) && (!Picks.on(edColors) || r.pr !== undefined
+            && (r.pr ? ItemColors.pass(r.pr, edColors) : Picks.pass(edColors, k => (COLOR_KEYWORDS[k] || []).some(kw => r.name.toLowerCase().includes(kw)))));
         const csOn = () => !!csPanel?.isConnected;
         function csOff() {
             CS.gen++; CS.base = '';
             clearInterval(csWornT); csWornT = 0;
             csPanel?.remove();
             root.querySelectorAll('.dti-cs-hide').forEach(el => el.classList.remove('dti-cs-hide'));
+            csAllPaint();
         }
         // The search on screen, as DTI asks for it (without its page): a new one starts over
+        // (a real search: words to look for, or one of DTI's own filters — NC / NP, a zone, yours — besides fitting the pet)
+        const isSearch = u => {
+            for (let i = 0; u.has(`q[${i}][key]`); i++) {
+                const k = u.get(`q[${i}][key]`);
+                if (k === 'name' ? (u.get(`q[${i}][value]`) || '').trim() : k !== 'fits') return true;
+            }
+            return false;
+        };
         function csSync() {
-            if (!activeColor) return csOff();
-            const p = csBr.search()[0];
-            if (!p) return csOff();
-            const u = new URLSearchParams(p);
+            if (!filtersOn() && !csAll) return csOff();
+            const p = csBr.search()[0], u = p && new URLSearchParams(p);
+            if (!u || !isSearch(u)) return csOff();
             u.delete('page'); u.delete('per_page');
             const base = u.toString();
             csPlace();
             if (base !== CS.base) return csStart(base);
-            // (a hand-picked color: what was read before pictures' own colors were kept is read again)
-            if (ItemColors.isCustom(activeColor) && CS.items.some(r => r.pr && !r.pr.pal)) {
-                CS.items.forEach(r => { if (r.pr && !r.pr.pal) r.pr = undefined; });
-                CS.checked = CS.items.filter(r => r.pr !== undefined).length;
-                CS.next = 0;
-                csPump(CS.gen);
-            }
+            csPump(CS.gen);   // (a color picked since: the pictures read now)
             csPaintSoon();
         }
+        // A plain search's pages: a button by DTI's own ("Page 2 of 13") for every page in one list — kept for your searches after
+        // this too, till ✕ takes you back to DTI's pages
+        function csAllPaint() {
+            if (csAll || csOn()) return;
+            const ic = root.querySelector('.item-container');
+            const list = ic && (ic.parentElement?.tagName === 'LABEL' ? ic.parentElement : ic).parentElement;
+            const pager = list?.parentElement?.firstElementChild;
+            const sel = pager && pager !== list ? pager.querySelector('select') : null;
+            const mid = sel?.closest('.chakra-select__wrapper')?.parentElement;
+            if (!mid || sel.options.length < 2 || mid.querySelector('#dti-cs-all')) return;   // (one page: nothing to put together)
+            const b = document.createElement('button');
+            b.type = 'button'; b.id = 'dti-cs-all';
+            b.title = 'Every page of this search in one list — and for your searches after this, till you go back to pages';
+            b.setAttribute('aria-label', 'Every page in one list');
+            b.innerHTML = `${LIST_ICO}All in one list`;
+            b.addEventListener('click', e => {
+                e.preventDefault(); e.stopPropagation();
+                csAll = true; GM_setValue('dti_cs_all', true);
+                b.remove(); csSync();
+            });
+            mid.appendChild(b);
+        }
+        // (the search box changed — cleared, most of all: looked at once DTI has its search, sooner than the check above)
+        let csInT = 0;
+        root.addEventListener('input', e => {
+            if (!csOn() || !e.target.matches?.('input.react-autosuggest__input')) return;
+            clearTimeout(csInT); csInT = setTimeout(csSync, 450);
+        }, true);
         // Where DTI's results are (its pager and the items): the panel there, DTI's own pages hidden under it
         function csPlace() {
             const ic = root.querySelector('.item-container');
@@ -26945,7 +27165,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (csPanel.nextElementSibling !== wrap) wrap.before(csPanel);
             root.querySelectorAll('.dti-cs-hide').forEach(el => { if (el !== wrap) el.classList.remove('dti-cs-hide'); });
             wrap.classList.add('dti-cs-hide');
-            if (!csWornT) csWornT = setInterval(() => { if (!csOn()) { clearInterval(csWornT); csWornT = 0; return; } csPaintWorn(); }, 1200);
+            if (!csWornT) csWornT = setInterval(() => {
+                if (!csOn()) { clearInterval(csWornT); csWornT = 0; return; }
+                const sp = csBr.search()[0];
+                if (!sp || !isSearch(new URLSearchParams(sp))) return csOff();   // (not searching any more: DTI's own list again)
+                csPaintWorn();
+            }, 1200);
         }
         const CS_KEEP = 12 * 3600e3;
         async function csStart(base, fresh) {
@@ -26965,7 +27190,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 }
             }
             if (had && gen === CS.gen) {
-                if (ItemColors.isCustom(activeColor)) had.items.forEach(r => { if (r.pr && !r.pr.pal) r.pr = undefined; });
                 Object.assign(CS, { items: had.items, pages: had.pages, allPages: had.allPages, fetched: had.pages, failed: 0, next: 0,
                     checked: had.items.filter(r => r.pr !== undefined).length });
                 csPump(gen);
@@ -27014,8 +27238,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             csPump(gen);
             csPaintSoon();
         }
-        // (pictures' colors: the ones already read at once, the rest a few dozen at a time — a newer search drops the older one's)
+        // (pictures' colors, a color picked: the ones already read at once, the rest a few dozen at a time — a newer search drops the
+        // older one's)
         function csPump(gen) {
+            if (!Picks.on(edColors)) return;   // (no color picked: no need)
             while (gen === CS.gen && CS.active < 32 && CS.next < CS.items.length) {
                 const r = CS.items[CS.next++];
                 if (r.pr !== undefined) continue;   // (read already)
@@ -27034,16 +27260,20 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const pager = '<div class="dti-cs-pager" hidden><button type="button" class="dti-cs-pg" data-d="-1">← Prev</button><span></span><button type="button" class="dti-cs-pg" data-d="1">Next →</button></div>';
             const p = document.createElement('div');
             p.id = 'dti-cs';
-            p.innerHTML = `<div class="dti-cs-head"><i class="dti-cs-sw"></i><b class="dti-cs-title"></b><span class="dti-cs-count"></span>
+            p.innerHTML = `<div class="dti-cs-head"><span class="dti-cs-sw"></span><b class="dti-cs-title"></b><span class="dti-cs-count"></span>
                 <span class="dti-cs-mode" role="group" aria-label="Show them as"><button type="button" data-m="list" title="Every one in one list">One list</button><button type="button" data-m="pages" title="${CS_PER_PAGE} a page, all of this color">Pages</button></span>
-                <button type="button" class="dti-cs-again" title="Look through the search again (for items added since)" aria-label="Look through the search again">↻</button><button type="button" class="dti-cs-clear" title="Back to DTI’s own pages (no color)" aria-label="Back to DTI’s own pages">✕</button></div>
+                <button type="button" class="dti-cs-again" title="Look through the search again (for items added since)" aria-label="Look through the search again">↻</button><button type="button" class="dti-cs-clear">✕</button></div>
                 <div class="dti-cs-sub"></div><div class="dti-cs-bar"><i></i></div>${pager}<div class="dti-cs-grid"></div><div class="dti-cs-empty" hidden></div>${pager}`;
             p.addEventListener('click', async e => {
                 const m = e.target.closest('.dti-cs-mode button');
                 if (m) { CS.mode = m.dataset.m; GM_setValue('dti_cs_mode', CS.mode); CS.page = 1; return csPaint(); }
                 const pg = e.target.closest('.dti-cs-pg');
                 if (pg) { CS.page += +pg.dataset.d; csPaint(); p.scrollIntoView({ block: 'start' }); return; }
-                if (e.target.closest('.dti-cs-clear')) return csClearColor();
+                if (e.target.closest('.dti-cs-clear')) {   // (zones or colors picked: those cleared — else back to DTI's pages)
+                    if (filtersOn()) return csClearAll();
+                    csAll = false; GM_setValue('dti_cs_all', false);
+                    return csSync();
+                }
                 if (e.target.closest('.dti-cs-again')) { CS.memo.delete(CS.base); DTICache.del('cs:' + CS.base); return csStart(CS.base, true); }
                 const t = e.target.closest('.dti-cs-tile');
                 if (!t) return;
@@ -27071,7 +27301,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             t = document.createElement('div');
             t.className = 'dti-cs-tile'; t.tabIndex = 0; t.setAttribute('role', 'button');
             t.dataset.id = r.id; t.dataset.dtiItem = r.id; t.title = r.name;
-            t.innerHTML = `<img src="${noteEsc(r.img)}" alt="" loading="lazy"><span class="n">${noteEsc(r.name)}</span>`
+            t.innerHTML = `<img src="${noteEsc(r.img.replace(/^http:/, 'https:'))}" alt="" loading="lazy"><span class="n">${noteEsc(r.name)}</span>`
                 + `<span class="b">${r.nc ? '<i class="k nc">NC</i>' : r.pb ? '<i class="k pb">PB</i>' : '<i class="k">NP</i>'}${r.zones[0] ? `<i>${noteEsc(r.zones[0])}</i>` : ''}</span>`
                 + '<button type="button" class="dti-cs-i" title="Item info" aria-label="Item info">?</button>';
             paintMineMark(t);   // (✓ / ♥: you own it, it's on your wishlist)
@@ -27081,35 +27311,48 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         function csPaintSoon() { if (!csPaintT) csPaintT = setTimeout(() => { csPaintT = 0; csPaint(); }, 180); }
         function csPaint() {
             if (!csOn()) return;
-            const p = csPanel, [, label, shade] = csColor(), custom = ItemColors.isCustom(activeColor), lc = custom ? `close to ${label}` : label.toLowerCase();
-            const all = CS.items.length, loading = !!CS.base && (CS.fetched < CS.pages || CS.checked < all || !CS.pages);
-            const matches = CS.items.filter(r => (!activeZone || r.zones.includes(activeZone)) && csMatch(r)).sort((a, b) => a.ord - b.ord);
+            const p = csPanel, colorsOn = Picks.on(edColors), zonesOn = Picks.on(edZones), filtered = colorsOn || zonesOn;
+            const all = CS.items.length, loading = !!CS.base && (CS.fetched < CS.pages || !CS.pages || (colorsOn && CS.checked < all));
+            const matches = (filtered ? CS.items.filter(csMatch) : [...CS.items]).sort((a, b) => a.ord - b.ord);
             const expect = CS.fetched < CS.pages || !CS.pages ? Math.max(all, CS.pages * 50) : all;
-            p.querySelector('.dti-cs-sw').style.background = shade;
-            p.querySelector('.dti-cs-title').textContent = `${label} — every page`;
-            p.querySelector('.dti-cs-count').textContent = `${matches.length.toLocaleString()} ${loading ? 'so far' : 'found'}`;
-            p.querySelectorAll('.dti-cs-mode button').forEach(b => b.classList.toggle('on', b.dataset.m === CS.mode));
+            const what = [colorsOn ? Picks.text(edColors, itemColorName, 'color') : '', zonesOn ? Picks.text(edZones, z => z, 'zone') : ''].filter(Boolean).join(' · ');
+            p.querySelector('.dti-cs-sw').innerHTML = colorsOn ? pickChips(edColors, 3) : zonesOn ? ZONE_ICO : LIST_ICO;
+            const title = p.querySelector('.dti-cs-title');
+            title.textContent = filtered ? `${what} — every page` : 'Every page';
+            title.title = filtered ? what : '';
+            p.querySelector('.dti-cs-count').textContent = `${matches.length.toLocaleString()} ${loading ? 'so far' : filtered ? 'found' : `item${matches.length === 1 ? '' : 's'}`}`;
+            const mode = filtered ? CS.mode : 'list';   // (a plain search: one list — its pages are DTI's own)
+            const seg = p.querySelector('.dti-cs-mode');
+            seg.hidden = !filtered;
+            seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === mode));
+            const clr = p.querySelector('.dti-cs-clear');
+            clr.title = !filtered ? 'Back to DTI’s own pages' : csAll ? 'Clear the zone and color filters' : 'Back to DTI’s own pages (no zone or color filter)';
+            clr.setAttribute('aria-label', clr.title);
             p.querySelector('.dti-cs-sub').textContent = loading
-                ? (CS.pages ? `Reading colors… ${CS.checked.toLocaleString()} of ${expect.toLocaleString()} items` : 'Looking through the search…')
-                : `${matches.length.toLocaleString()} ${lc} of ${all.toLocaleString()} item${all === 1 ? '' : 's'} in this search${activeZone ? ` · ${activeZone} only` : ''}`
+                ? (!CS.pages ? 'Looking through the search…' : colorsOn ? `Reading colors… ${CS.checked.toLocaleString()} of ${expect.toLocaleString()} items` : `Looking through the search… ${CS.fetched} of ${CS.pages} pages`)
+                : `${filtered ? `${matches.length.toLocaleString()} of ${all.toLocaleString()}` : all.toLocaleString()} item${all === 1 ? '' : 's'} in this search`
                     + (CS.allPages > CS.pages ? ` · the first ${(CS.pages * 50).toLocaleString()} (narrow the search for the rest)` : '')
                     + (CS.failed ? ` · ${CS.failed} page${CS.failed === 1 ? '' : 's'} didn’t load` : '');
             const bar = p.querySelector('.dti-cs-bar');
             bar.hidden = !loading;
-            bar.firstElementChild.style.width = (expect ? Math.min(100, CS.checked / expect * 100) : 4) + '%';
+            bar.firstElementChild.style.width = (colorsOn ? (expect ? Math.min(100, CS.checked / expect * 100) : 4) : (CS.pages ? CS.fetched / CS.pages * 100 : 4)) + '%';
             const pages = Math.max(1, Math.ceil(matches.length / CS_PER_PAGE));
             CS.page = Math.min(Math.max(1, CS.page), pages);
-            const shown = CS.mode === 'pages' ? matches.slice((CS.page - 1) * CS_PER_PAGE, CS.page * CS_PER_PAGE) : matches;
-            p.querySelector('.dti-cs-grid').replaceChildren(...shown.map(csTile));
+            const shown = (mode === 'pages' ? matches.slice((CS.page - 1) * CS_PER_PAGE, CS.page * CS_PER_PAGE) : matches).map(csTile);
+            // (the tiles: only the new ones added when the list just grew — a whole search can be thousands)
+            const grid = p.querySelector('.dti-cs-grid'), kids = grid.children;
+            let grew = kids.length <= shown.length;
+            for (let i = 0; grew && i < kids.length; i++) grew = kids[i] === shown[i];
+            if (grew) grid.append(...shown.slice(kids.length)); else grid.replaceChildren(...shown);
             p.querySelectorAll('.dti-cs-pager').forEach(pg => {
-                pg.hidden = CS.mode !== 'pages' || pages < 2 && !loading;
+                pg.hidden = mode !== 'pages' || pages < 2 && !loading;
                 pg.querySelector('span').textContent = `Page ${CS.page} of ${pages}${loading ? '+' : ''}`;
                 pg.querySelector('[data-d="-1"]').disabled = CS.page <= 1;
                 pg.querySelector('[data-d="1"]').disabled = CS.page >= pages;
             });
             const empty = p.querySelector('.dti-cs-empty');
             empty.hidden = matches.length > 0;
-            empty.textContent = loading ? 'Looking…' : `${custom ? `Nothing ${lc}` : `No ${lc} items`} in this search${activeZone ? ` (${activeZone})` : ''}`;
+            empty.textContent = loading ? 'Looking…' : filtered ? 'Nothing in this search matches these filters' : 'Nothing found';
             csPaintWorn();
         }
         function csPaintWorn() {   // (what's on the pet now: its tiles ringed)
@@ -27169,14 +27412,20 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     variableDefinitions: [D('itemIds', { kind: 'NonNullType', type: { kind: 'ListType', type: T('ID', true) } }), D('speciesId', T('ID', true)), D('colorId', T('ID', true)), D('altStyleId', T('ID'))],
                     directives: [], selectionSet: { kind: 'SelectionSet', selections: [F('items', [F('id'), F('appearanceOn', [F('id'), F('layers', [F('id'), F('zone', [F('id')])]), F('restrictedZones', [F('id')])],
                         [A('speciesId', 'speciesId'), A('colorId', 'colorId'), A('altStyleId', 'altStyleId')])], [A('ids', 'itemIds')])] } }] };
-                const toolbar = () => {   // (DTI's search box component: its query and how it changes it)
+                const toolbar = () => {   // (DTI's search box component: its query and how it changes it — React keeps two copies of
+                    // each component, the one on screen and the one drawn before, and a page element can point at either: the one whose
+                    // query is what's in the box)
                     const i = document.querySelector('#wardrobe-2020-root input.react-autosuggest__input');
                     const fk = i && Object.keys(i).find(k => k.startsWith('__reactFiber$'));
-                    for (let f = fk && i[fk], n = 0; f && n < 80; f = f.return, n++) {
-                        const p = f.memoizedProps;
-                        if (p && p.query && p.onChange && 'searchQueryRef' in p) return p;
-                    }
-                    return null;
+                    const find = start => {
+                        for (let f = start, n = 0; f && n < 80; f = f.return, n++) {
+                            const p = f.memoizedProps;
+                            if (p && p.query && p.onChange && 'searchQueryRef' in p) return p;
+                        }
+                        return null;
+                    };
+                    const a = fk ? find(i[fk]) : null, b = fk && i[fk].alternate ? find(i[fk].alternate) : null;
+                    return [a, b].find(p => p && (p.query.value || '') === i.value) || a || b;
                 };
                 const done = (rid, out) => {   // (an answer that took a while)
                     const h = document.documentElement;
@@ -27195,9 +27444,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                             out = { params: qc ? qc.getQueryCache().findAll({ queryKey: ['itemSearch'] }).filter(q => q.getObserversCount() > 0).map(q => q.queryKey[1]) : [] };
                         }
                         else if (req.op === 'query') { const t = toolbar(); out = { query: t ? t.query : null }; }
-                        else if (req.op === 'kind') {   // (DTI's own "Neocash items" / "Neopoint items" filter)
-                            const t = toolbar();
-                            if (t) { t.onChange(Object.assign({}, t.query, { filterToItemKind: req.kind || null })); out = { ok: true }; }
+                        else if (req.op === 'kind') {   // (DTI's own "Neocash items" / "Neopoint items" filter — with what's typed in the box now)
+                            const t = toolbar(), box = document.querySelector('#wardrobe-2020-root input.react-autosuggest__input');
+                            if (t) { t.onChange(Object.assign({}, t.query, box ? { value: box.value } : {}, { filterToItemKind: req.kind || null })); out = { ok: true }; }
                         }
                         else if (c && req.op === 'unwear') { c.dispatchToOutfit({ type: 'unwearItem', itemId: String(req.id) }); out = { ok: true }; }
                         else if (c && req.op === 'wear') {
@@ -27245,7 +27494,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         return {
             get: () => ask({ op: 'get' }), set: data => ask({ op: 'set', data })?.ok === true,
             search: () => ask({ op: 'search' })?.params || [],
-            kind: () => ask({ op: 'query' })?.query?.filterToItemKind || '', setKind: k => ask({ op: 'kind', kind: k })?.ok === true,
+            kind: () => {   // (DTI's own NC / NP filter, from the search it's running)
+                const p = ask({ op: 'search' })?.params?.[0], u = p && new URLSearchParams(p);
+                for (let i = 0; u && u.has(`q[${i}][key]`); i++) { const m = /^is_(nc|np|pb)$/.exec(u.get(`q[${i}][key]`)); if (m) return m[1].toUpperCase(); }
+                return '';
+            },
+            setKind: k => ask({ op: 'kind', kind: k })?.ok === true,
             wear: id => askLater({ op: 'wear', id }), unwear: id => ask({ op: 'unwear', id })?.ok === true,
         };
     }
@@ -27492,28 +27746,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             #dti-zone-color-filter { padding: 0; border: none; background: transparent; flex-shrink: 0; position: relative; }
             .dti-zcf-row { display: flex; align-items: center; gap: 6px; }
-            .dti-zcf-zone-wrap {
-                display: flex; align-items: center; gap: 4px;
-                background: var(--surface-2); border: 1.5px solid var(--border);
-                border-radius: 20px; padding: 4px 10px 4px 12px;
-                font-size: 12px; max-width: 150px;
-                transition: border-color .13s;
-            }
-            .dti-zcf-zone-wrap:focus-within { border-color: var(--accent); }
-            .dti-zcf-zone-wrap select {
-                border: none !important; background: transparent !important;
-                color: var(--text) !important; font-size: 12px !important;
-                font-weight: 600 !important; padding: 0 !important;
-                outline: none !important; cursor: pointer; flex: 1; min-width: 0;
-                height: auto !important; line-height: normal !important;
-            }
-            .dti-zcf-chevron {
-                color: var(--text-muted); font-size: 13px; flex-shrink: 0;
-                pointer-events: none;
-            }
-            /* The color filter: the shared picker, as a pill beside the zone menu (an id: the editor restyles its buttons) */
+            /* The zone and color filters: the shared pickers, as pills (an id: the editor restyles its buttons) */
             #wardrobe-2020-root .dti-cpk.dti-cpk-ed { height: 30px; padding: 0 10px 0 8px; gap: 6px; border-radius: 20px !important; background: var(--surface-2); font-size: 12px; font-weight: 600; }
             #wardrobe-2020-root .dti-cpk.dti-cpk-ed .dti-cpk-chip { width: 15px; height: 15px; border-radius: 50%; }
+            #wardrobe-2020-root .dti-cpk.dti-cpk-ed .dti-cpk-chips .dti-cpk-chip:not(:only-child) { outline-color: var(--surface-2); }
+            #wardrobe-2020-root .dti-cpk.dti-cpk-ed .dti-cpk-name { max-width: 130px; }
 
             /* ── Base ──────────────────────────────────────────────────────── */
             body, html { background: var(--bg) !important; }
@@ -28392,10 +28629,17 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #wardrobe-2020-root.dti-hide-kind :is(.dti-kind-badge, .dti-cs-tile .b .k) { display: none !important; }
             #dti-cs { padding: 10px 10px 18px; }
             .dti-cs-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 9px; }
-            .dti-cs-sw { width: 14px; height: 14px; flex-shrink: 0; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0,0,0,.18); }
-            .dti-cs-title { font-size: 13.5px; font-weight: 800; color: var(--text); }
+            .dti-cs-sw { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--text-sub); }
+            .dti-cs-sw .dti-cpk-chip { width: 14px; height: 14px; border-radius: 50%; }
+            .dti-cs-sw .dti-cpk-chip + .dti-cpk-chip { margin-left: -4px; outline: 1.5px solid var(--surface); }
+            .dti-cs-title { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 800; color: var(--text); }
             .dti-cs-count { font-size: 12px; font-weight: 700; color: var(--accent-text, var(--accent)); }
             .dti-cs-mode { margin-left: auto; display: flex; gap: 2px; padding: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
+            .dti-cs-mode[hidden] { display: none; }
+            .dti-cs-mode[hidden] + .dti-cs-again { margin-left: auto; }
+            /* A plain search: every page in one list — a button by DTI's own pages */
+            #wardrobe-2020-root #dti-cs-all { display: inline-flex; align-items: center; gap: 5px; height: 28px !important; min-height: 0 !important; min-width: 0 !important; margin: 0 0 0 10px; padding: 0 10px !important; border: 1px solid var(--border) !important; border-radius: 8px !important; background: var(--surface) !important; color: var(--text-muted) !important; font-size: 12px !important; font-weight: 700 !important; line-height: 1 !important; white-space: nowrap; cursor: pointer; }
+            #wardrobe-2020-root #dti-cs-all:hover { border-color: var(--accent) !important; color: var(--accent-text, var(--accent)) !important; }
             /* (the panel's buttons: under both ids — the editor's own button styles would win otherwise) */
             #wardrobe-2020-root #dti-cs .dti-cs-mode button { height: auto !important; min-height: 0 !important; min-width: 0 !important; padding: 3px 10px !important; border: none !important; border-radius: 6px !important; background: transparent !important; color: var(--text-muted) !important; font-size: 11.5px !important; font-weight: 700 !important; line-height: 1.5 !important; cursor: pointer; }
             #wardrobe-2020-root #dti-cs .dti-cs-mode button:hover:not(.on) { color: var(--text) !important; background: var(--surface) !important; }
