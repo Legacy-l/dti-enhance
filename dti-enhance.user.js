@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      2.6
+// @version      2.7
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -1045,35 +1045,571 @@
     // gradient (--theme-btn). Picking any mode / style / accent goes back to your own colors.
     // pv = the little preview in Settings: page, bar, card, button.
     const PRESET_KEY = 'dti_theme_preset';
+    // Textures a few presets lay over their backdrop: a fine grain (paper, clay, film) and a honeycomb — both drawn, no pictures
+    const _GRAIN = op => `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)' opacity='${op}'/%3E%3C/svg%3E")`;
+    const _HEXCOMB = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='55' height='96'%3E%3Cpath d='M27.5 0L55 16v32L27.5 64 0 48V16zM27.5 64v32' fill='none' stroke='%23b07800' stroke-opacity='.11'/%3E%3C/svg%3E")`;
+    // ── Drawn art for the newer themes (no pictures: SVG drawings made here, once — the hand-drawn ones from a fixed seed, so
+    // they're the same every time): fern fronds, atomic starbursts, porcelain tiles, a postmark, a compass rose, a striped sun,
+    // deco fans, copper patina, chalk doodles, champagne bubbles and gold seams ──
+    const _svgUrl = s => `url("data:image/svg+xml,${encodeURIComponent(s)}")`;
+    const _svgOf = (w, h, body, attrs = '') => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"${attrs}>${body}</svg>`;
+    const _rng = seed => () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+    const _n = v => Math.round(v * 10) / 10;
+    const _curve = (P0, P1, P2) => ({   // (a quadratic curve: a point and the way it's heading, t from 0 to 1)
+        at: t => [0, 1].map(k => (1 - t) ** 2 * P0[k] + 2 * (1 - t) * t * P1[k] + t * t * P2[k]),
+        tan: t => [0, 1].map(k => 2 * (1 - t) * (P1[k] - P0[k]) + 2 * t * (P2[k] - P1[k])),
+        d: `M${P0.map(_n)}Q${P1.map(_n)} ${P2.map(_n)}`,
+    });
+    // Herbarium: a fern frond (leaflets in pairs, smaller toward the tip) and sprigs of round leaves, in fine ink
+    const _frondArt = (P0, P1, P2, n, seed) => {
+        const R = _rng(seed), c = _curve(P0, P1, P2);
+        let s = `<path d="${c.d}" fill="none" stroke-width="1.6"/>`;
+        for (let i = 0; i < n; i++) {
+            const t = .05 + i * (.9 / n), [x, y] = c.at(t), [dx, dy] = c.tan(t), a = Math.atan2(dy, dx) * 180 / Math.PI;
+            const len = (1 - t * .8) * 74 + 10, wd = len * .3;
+            for (const side of [-1, 1]) s += `<g transform="translate(${_n(x)} ${_n(y)}) rotate(${_n(a + side * (52 + R() * 12))})"><path d="M0 0Q${_n(len * .4)} ${_n(-wd)} ${_n(len)} ${_n(-wd * .15)}Q${_n(len * .5)} ${_n(wd * .9)} 0 0Z"/><path d="M2 0H${_n(len * .85)}" fill="none" stroke-width=".5"/></g>`;
+        }
+        return s;
+    };
+    const _sprigArt = (P0, P1, P2, n, seed) => {
+        const R = _rng(seed), c = _curve(P0, P1, P2);
+        let s = `<path d="${c.d}" fill="none" stroke-width="1.4"/>`;
+        for (let i = 0; i < n; i++) {
+            const t = .12 + i * (.84 / n), [x, y] = c.at(t), [dx, dy] = c.tan(t), a = Math.atan2(dy, dx) * 180 / Math.PI;
+            const side = i % 2 ? 1 : -1, r = (1 - t * .7) * 15 + 5, st = 5 + R() * 4;
+            s += `<g transform="translate(${_n(x)} ${_n(y)}) rotate(${_n(a + side * (64 + R() * 14))})"><path d="M0 0H${_n(st)}" fill="none" stroke-width=".8"/><ellipse cx="${_n(st + r)}" cy="0" rx="${_n(r)}" ry="${_n(r * .78)}"/><path d="M${_n(st + 1.5)} 0H${_n(st + r * 1.7)}" fill="none" stroke-width=".45"/></g>`;
+        }
+        return s;
+    };
+    const _HERB_FROND = _svgUrl(_svgOf(460, 600, `<g fill="rgba(61,106,68,.07)" stroke="rgba(53,95,60,.36)" stroke-linejoin="round">${_frondArt([448, 6], [392, 352], [62, 588], 24, 11)}</g>`));
+    const _HERB_SPRIG = _svgUrl(_svgOf(400, 460, `<g fill="rgba(61,106,68,.07)" stroke="rgba(53,95,60,.3)" stroke-linejoin="round">${_sprigArt([10, 456], [64, 160], [374, 24], 15, 5)}${_sprigArt([46, 456], [176, 336], [318, 262], 7, 9)}</g>`));
+    // Mid-Century: atomic starbursts, boomerangs and dots, like a 1950s print
+    const _burst = (cx, cy, r, col, n = 8) => {
+        let s = '';
+        for (let i = 0; i < n * 2; i++) { const a = i * Math.PI / n + .2, q = i % 2 ? r * .45 : r; s += `M${cx} ${cy}L${_n(cx + Math.cos(a) * q)} ${_n(cy + Math.sin(a) * q)}`; }
+        return `<path d="${s}" stroke="${col}" stroke-width="1.5" stroke-linecap="round" fill="none"/><circle cx="${cx}" cy="${cy}" r="${_n(r * .11)}" fill="${col}"/>`;
+    };
+    const _MCM_ATOMIC = _svgUrl(_svgOf(420, 320, _burst(78, 70, 36, 'rgba(208,146,26,.5)') + _burst(300, 168, 24, 'rgba(27,122,112,.45)', 6)
+        + _burst(168, 268, 17, 'rgba(213,97,42,.45)', 6) + _burst(374, 42, 11, 'rgba(208,146,26,.45)', 5)
+        + '<path d="M196 92c30-26 78-28 106-4-30-6-66 2-90 24-6-7-11-13-16-20z" fill="rgba(27,122,112,.16)"/>'
+        + '<path d="M40 214c22-12 52-8 66 10-20-4-42 0-56 12-4-8-7-15-10-22z" fill="rgba(213,97,42,.15)"/>'
+        + [[250, 262], [120, 150], [342, 298], [24, 122], [402, 222], [222, 18]].map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="${i % 2 ? 2.4 : 3.2}" fill="${['rgba(208,146,26,.5)', 'rgba(27,122,112,.45)', 'rgba(213,97,42,.45)'][i % 3]}"/>`).join('')));
+    // Porcelain: a blue-and-white tile (a rosette, rings where the corners meet, little diamonds between) and the bar's scalloped rim
+    const _DELFT = (() => {
+        let p = '';
+        for (let i = 0; i < 8; i++) p += `<ellipse cx="60" cy="45" rx="5" ry="12" transform="rotate(${i * 45} 60 60)"/>`;
+        let c = '';
+        for (const [x, y] of [[0, 0], [120, 0], [0, 120], [120, 120]]) c += `<circle cx="${x}" cy="${y}" r="16"/><circle cx="${x}" cy="${y}" r="9"/>`;
+        let d = '';
+        for (const [x, y] of [[60, 0], [0, 60], [120, 60], [60, 120]]) d += `<path d="M${x - 7} ${y}Q${x} ${y - 7} ${x + 7} ${y}Q${x} ${y + 7} ${x - 7} ${y}Z"/>`;
+        return _svgUrl(_svgOf(120, 120, `<g fill="rgba(29,79,163,.05)" stroke="rgba(29,79,163,.17)" stroke-width="1.1">${p}<circle cx="60" cy="60" r="5"/><circle cx="60" cy="60" r="27" fill="none" stroke-dasharray="2 4"/>${c}${d}</g>`));
+    })();
+    const _SCALLOP = _svgUrl(_svgOf(20, 8, '<path d="M0 0H20V1.5C20 5 15.5 8 10 8S0 5 0 1.5Z" fill="#183f86"/>'));
+    // Kraft: a postmark, its ring of words and the wavy lines that cancel a stamp
+    const _POSTMARK = (() => {
+        let w = '';
+        for (let i = 0; i < 5; i++) { const y = 62 + i * 14; w += `<path d="M178 ${y}c18-9 36-9 54 0s36 9 54 0 36-9 54 0 36 9 54 0"/>`; }
+        return _svgUrl(_svgOf(420, 190, `<g fill="none" stroke="rgba(35,50,75,.26)" stroke-width="2.2"><circle cx="92" cy="92" r="74"/><circle cx="92" cy="92" r="58" stroke-width="1.3"/>`
+            + '<path id="r" d="M38 92a54 54 0 1 1 108 0a54 54 0 1 1-108 0" stroke="none"/><text font-family="Courier New, monospace" font-size="12.5" font-weight="700" letter-spacing="3" fill="rgba(35,50,75,.32)" stroke="none"><textPath href="#r">DRESS TO IMPRESS · AIR MAIL ·</textPath></text>'
+            + `<path d="M60 82h64M60 104h64" stroke-width="1.6"/><text x="92" y="98" text-anchor="middle" font-family="Courier New, monospace" font-size="13" font-weight="700" letter-spacing="2" fill="rgba(35,50,75,.34)" stroke="none">DTI</text>${w}</g>`));
+    })();
+    // Nautical: twisted rope under the bar, and a compass rose
+    const _ROPE = _svgUrl(_svgOf(16, 8, '<rect width="16" height="8" fill="#9c7a48"/><path d="M-4 8L4 0M4 8L12 0M12 8L20 0" stroke="#d8bd8a" stroke-width="3.6"/><path d="M-1.5 8L6.5 0M6.5 8L14.5 0M14.5 8L22.5 0" stroke="rgba(90,65,30,.55)" stroke-width=".9"/>'));
+    const _COMPASS = (() => {
+        const C = 200, pt = (a, r) => `${_n(C + Math.cos(a) * r)} ${_n(C + Math.sin(a) * r)}`;
+        let ticks = '';
+        for (let i = 0; i < 64; i++) { const a = i * Math.PI / 32, r1 = i % 8 ? (i % 2 ? 170 : 165) : 156; ticks += `M${pt(a, r1)}L${pt(a, 176)}`; }
+        let star = '';
+        for (let i = 0; i < 8; i++) {
+            const a = i * Math.PI / 4 - Math.PI / 2, L = i % 2 ? 104 : 150, W = i % 2 ? 13 : 19;
+            star += `<path d="M${C} ${C}L${pt(a, L)}L${pt(a - Math.PI / 2, W)}Z" fill="rgba(20,33,58,.12)"/><path d="M${C} ${C}L${pt(a, L)}L${pt(a + Math.PI / 2, W)}Z" fill="rgba(20,33,58,.04)"/>`;
+        }
+        return _svgUrl(_svgOf(400, 400, `<g stroke="rgba(20,33,58,.2)" stroke-width="1.1" stroke-linejoin="round"><circle cx="200" cy="200" r="182" fill="none"/><circle cx="200" cy="200" r="176" fill="none"/><path d="${ticks}" fill="none"/><circle cx="200" cy="200" r="118" fill="none" stroke-dasharray="1 5"/>${star}<circle cx="200" cy="200" r="8" fill="rgba(184,41,47,.28)"/></g>`));
+    })();
+    // Synthwave: a striped sun, sinking
+    const _SUN = (() => {
+        let m = '';
+        for (let i = 0; i < 9; i++) m += `<rect y="${_n(312 + i * 30 + i * i * .6)}" width="600" height="${_n(3 + i * 2.1)}" fill="#000"/>`;
+        return _svgUrl(_svgOf(600, 600, `<defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe46b"/><stop offset=".5" stop-color="#ff8a4c"/><stop offset="1" stop-color="#ff2d95"/></linearGradient><mask id="m"><rect width="600" height="600" fill="#fff"/>${m}</mask></defs><circle cx="300" cy="300" r="290" fill="url(#s)" mask="url(#m)"/>`));
+    })();
+    // Deco: fans, row on row
+    const _DECO_FAN = (() => {
+        const fan = (cx, cy) => [30, 23, 16, 9].map(r => `M${cx - r} ${cy}A${r} ${r} 0 0 1 ${cx + r} ${cy}`).join('');
+        return _svgUrl(_svgOf(60, 30, `<path d="${fan(30, 30) + fan(0, 15) + fan(60, 15)}" fill="none" stroke="rgba(216,179,106,.16)" stroke-width="1"/>`));
+    })();
+    // Verdigris: copper gone green — mottled patina
+    const _PATINA = _svgUrl(_svgOf(320, 320, '<filter id="p" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency=".022 .034" numOctaves="4" seed="7" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 .34  0 0 0 0 .74  0 0 0 0 .66  0 0 0 1.25 -.52"/></filter><rect width="320" height="320" filter="url(#p)"/>'));
+    // Chalkboard: half-wiped doodles — a circled something with an arrow, a star, a sine wave on its axes, a right triangle, a cloud
+    const _CHALK = (() => {
+        const R = _rng(17), j = v => _n(v + (R() - .5) * 2.6);   // (a hand's wobble)
+        const line = pts => 'M' + pts.map(([x, y]) => `${j(x)} ${j(y)}`).join('L');
+        const ring = (cx, cy, r, n = 26) => line(Array.from({ length: n + 2 }, (_, i) => [cx + Math.cos(i / n * 2 * Math.PI) * r * (1 + (R() - .5) * .06), cy + Math.sin(i / n * 2 * Math.PI) * r]));
+        const wave = (x, y, w, a) => line(Array.from({ length: 40 }, (_, i) => [x + i * w / 39, y - Math.sin(i / 39 * Math.PI * 4) * a]));
+        const star = (cx, cy, r) => line(Array.from({ length: 6 }, (_, i) => { const a = -Math.PI / 2 + i * 4 * Math.PI / 5; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; }));
+        const d = [ring(150, 140, 46), line([[214, 92], [262, 50]]), line([[262, 50], [244, 54]]), line([[262, 50], [256, 67]]),
+            star(720, 120, 34), wave(560, 470, 220, 18), line([[540, 470], [800, 470]]), line([[560, 520], [560, 410]]),
+            line([[180, 520], [330, 520], [180, 410], [180, 520]]), line([[180, 500], [200, 500], [200, 520]]),
+            ring(860, 330, 22, 18), ring(892, 344, 16, 16), line([[120, 330], [260, 336]]), line([[124, 344], [232, 349]])].map(p => `<path d="${p}"/>`).join('');
+        return _svgUrl(_svgOf(960, 600, `<g fill="none" stroke="rgba(255,255,255,.08)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">${d}</g>`, ' preserveAspectRatio="xMidYMid slice"'));
+    })();
+    // Champagne: bubbles, a highlight on each
+    const _BUBBLES = (() => {
+        const R = _rng(31);
+        let b = '';
+        for (let i = 0; i < 11; i++) {
+            const r = 1.6 + R() ** 2 * 8, x = _n(14 + R() * 292), y = _n(14 + R() * 392);
+            b += `<circle cx="${x}" cy="${y}" r="${_n(r)}" fill="rgba(255,255,255,.28)" stroke="rgba(186,146,92,.5)" stroke-width="1"/><circle cx="${_n(x - r * .32)}" cy="${_n(y - r * .34)}" r="${_n(Math.max(.6, r * .26))}" fill="rgba(255,255,255,.85)"/>`;
+        }
+        return _svgUrl(_svgOf(320, 420, b));
+    })();
+    // Kintsugi: cracks mended with gold, across the whole page — and a gold seam under the bar
+    const _KINTSUGI = (() => {
+        const W = 1600, H = 1000, R = _rng(23);
+        let d = '';
+        const walk = (x, y, ang, len, depth) => {
+            let p = `M${_n(x)} ${_n(y)}`;
+            for (let s = 0; s < len; s++) {
+                ang += (R() - .5) * .9;
+                const step = 16 + R() * 26;
+                x += Math.cos(ang) * step; y += Math.sin(ang) * step;
+                p += `L${_n(x)} ${_n(y)}`;
+                if (depth < 2 && R() < .12) walk(x, y, ang + (R() < .5 ? 1 : -1) * (.5 + R() * .7), Math.floor(len * .45), depth + 1);   // (a branch)
+                if (x < -40 || y < -40 || x > W + 40 || y > H + 40) break;
+            }
+            d += `<path d="${p}" stroke-width="${_n(2.4 - depth * .7)}"/>`;
+        };
+        walk(-10, H * .28, .18, 46, 0); walk(W * .62, -10, 1.75, 40, 0); walk(W + 10, H * .72, Math.PI + .12, 42, 0); walk(W * .18, H + 10, -1.45, 30, 0);
+        return _svgUrl(_svgOf(W, H, `<defs><linearGradient id="k" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b88a2f"/><stop offset=".5" stop-color="#f3d892"/><stop offset="1" stop-color="#c69a3e"/></linearGradient><filter id="g" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="2.4"/></filter></defs><g fill="none" stroke="url(#k)" stroke-linejoin="round" stroke-linecap="round"><g filter="url(#g)" opacity=".5">${d}</g>${d}</g>`, ' preserveAspectRatio="xMidYMid slice"'));
+    })();
+    const _SEAM = (() => {
+        const R = _rng(5);
+        let p = 'M0 3';
+        for (let x = 8; x < 240; x += 8) p += `L${x} ${_n(1.2 + R() * 3.6)}`;
+        return _svgUrl(_svgOf(240, 6, `<path d="${p}L240 3" fill="none" stroke="#d9b25c" stroke-width="1.4" stroke-linejoin="round"/>`));
+    })();
+    // (the main cards — the home page's, My Items' panels, the customs and item pages' — and the third set of themes)
+    const _CARDS = '.dti-section-card, #dti-hero, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar, ul#outfits > li, header.item-header';
+    const _THEMES_3 = ['atelier', 'bauhaus', 'herbarium', 'midcentury', 'porcelain', 'kraft', 'champagne', 'nautical', 'synthwave', 'phosphor', 'deco', 'volt', 'verdigris', 'chalkboard', 'lumen', 'kintsugi'];
+    const _thm = ids => ids.map(i => `[data-dti-theme="${i}"]`).join(', ');
+    // ── Drawn art for the fourth set (the same way: SVG made here, once, the hand-drawn ones from a fixed seed) ──
+    const _wobble = (R, amt) => ([x, y]) => [x + (R() - .5) * amt, y + (R() - .5) * amt];
+    const _poly = pts => 'M' + pts.map(([x, y]) => `${_n(x)} ${_n(y)}`).join('L');
+    // Bitmap: a 1-bit desktop's dither, and its icons drawn a pixel at a time ('#' black, '.' white, ' ' see-through), a label under each
+    const _DITHER = _svgUrl(_svgOf(4, 4, '<rect width="4" height="4" fill="#fff"/><rect width="1" height="1" fill="#000"/>', ' shape-rendering="crispEdges"'));
+    const _PF = { D: ['##.', '#.#', '#.#', '#.#', '##.'], T: ['###', '.#.', '.#.', '.#.', '.#.'], I: ['###', '.#.', '.#.', '.#.', '###'],
+        R: ['##.', '#.#', '##.', '#.#', '#.#'], A: ['.#.', '#.#', '###', '#.#', '#.#'], S: ['.##', '#..', '.#.', '..#', '##.'], H: ['#.#', '#.#', '###', '#.#', '#.#'] };
+    const _pix = (rows, k, x0 = 0, y0 = 0) => {
+        let b = '', w = '';
+        rows.forEach((row, y) => [...row].forEach((c, x) => { const d = `M${x0 + x * k} ${y0 + y * k}h${k}v${k}h-${k}z`; if (c === '#') b += d; else if (c === '.') w += d; }));
+        return `<path d="${w}" fill="#fff"/><path d="${b}" fill="#000"/>`;
+    };
+    const _bmIcon = (rows, label) => {
+        const W = 64, text = Array.from({ length: 5 }, (_, j) => '.' + [...label].map(ch => _PF[ch][j]).join('.') + '.');
+        const lab = ['.'.repeat(text[0].length), ...text, '.'.repeat(text[0].length)], lw = lab[0].length * 2;
+        return _svgUrl(_svgOf(W, 68, _pix(rows, 3, 8, 0) + _pix(lab, 2, (W - lw) / 2, 54), ' shape-rendering="crispEdges"'));
+    };
+    const _BM_DISK = _bmIcon(['##############  ', '#..#.......#..# ', '#..#...##..#...#', '#..#...##..#...#', '#..#...##..#...#', '#..#.......#...#', '#..#########...#', '#..............#',
+        '#..............#', '#.############.#', '#.#..........#.#', '#.#.########.#.#', '#.#..........#.#', '#.#.#####....#.#', '#.#..........#.#', '################'], 'DTI');
+    const _BM_TRASH = _bmIcon(['     #####      ', '     #...#      ', '############### ', '#.............# ', '############### ', ' #...........#  ',
+        ' #..#..#..#..#  ', ' #..#..#..#..#  ', ' #..#..#..#..#  ', ' #..#..#..#..#  ', ' #..#..#..#..#  ', ' #..#..#..#..#  ', ' #..#..#..#..#  ', ' #...........#  ', ' #...........#  ', '  ###########   '], 'TRASH');
+    // Transit: a subway map — route lines at 45° steps, stations on them — and a station's white tiles, laid like brick
+    const _TRANSIT = (() => {
+        const W = 1600, H = 1000, R = _rng(61), D = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+        const lines = [['#ee352e', [-20, 180], 0], ['#0039a6', [300, -20], 2], ['#00933c', [W + 20, 640], 4], ['#ff6319', [-20, 820], 7], ['#b933ad', [1180, H + 20], 6], ['#fccc0a', [W + 20, 120], 3]];
+        let s = '', st = '';
+        for (const [col, start, d0] of lines) {
+            let [x, y] = start, d = d0;
+            const pts = [[x, y]];
+            for (let k = 0; k < 9; k++) {
+                const len = 90 + R() * 230, f = D[d][0] && D[d][1] ? .7071 : 1;
+                x += D[d][0] * len * f; y += D[d][1] * len * f;
+                pts.push([x, y]);
+                if (k && R() < .7) st += `<circle cx="${_n(x)}" cy="${_n(y)}" r="7" fill="#fff" stroke="#1a1a1a" stroke-width="3"/>`;
+                d = (d + (R() < .5 ? 1 : 7)) % 8;   // (a 45° turn, one way or the other)
+                if (x < -60 || y < -60 || x > W + 60 || y > H + 60) break;
+            }
+            s += `<path d="${_poly(pts)}" fill="none" stroke="${col}" stroke-width="10" stroke-linejoin="round" stroke-linecap="round"/>`;
+        }
+        return _svgUrl(_svgOf(W, H, `${s}${st}`, ' preserveAspectRatio="xMidYMid slice"'));
+    })();
+    const _SUBWAY = _svgUrl(_svgOf(72, 48, '<path d="M0 .5H72M0 24.5H72M.5 0V24M36.5 24V48" fill="none" stroke="rgba(0,0,0,.055)"/><path d="M0 1.5H72M0 25.5H72M1.5 1V24M37.5 25V48" fill="none" stroke="rgba(255,255,255,.75)"/>'));
+    // Contour: a topographic map — rings round a few summits (every fifth one heavier) and a dashed trail; the bar's edge a ridge
+    const _CONTOUR = (() => {
+        const W = 1600, H = 1000, R = _rng(41);
+        const peaks = [[260, 230, 7], [1230, 300, 8], [770, 830, 7], [1470, 900, 4], [70, 780, 5]];
+        let d = '', di = '';
+        for (const [cx, cy, n] of peaks) {
+            const ph = [R() * 6.28, R() * 6.28, R() * 6.28], amp = [.14, .08, .05].map(a => a * (.7 + R() * .6));
+            for (let k = 1; k <= n; k++) {
+                const base = k * (33 + R() * 5);
+                let p = '';
+                for (let i = 0; i <= 72; i++) {
+                    const a = i / 72 * Math.PI * 2, r = base * (1 + amp[0] * Math.sin(2 * a + ph[0]) + amp[1] * Math.sin(3 * a + ph[1]) + amp[2] * Math.sin(5 * a + ph[2] + k * .3));
+                    p += `${i ? 'L' : 'M'}${_n(cx + Math.cos(a) * r * 1.25)} ${_n(cy + Math.sin(a) * r)}`;
+                }
+                if (k % 5 === 0) di += `<path d="${p}Z"/>`; else d += `<path d="${p}Z"/>`;
+            }
+        }
+        const trail = 'M-20 560C180 520 300 600 470 540S760 420 930 470 1180 600 1360 560 1560 470 1640 500';
+        return _svgUrl(_svgOf(W, H, `<g fill="none" stroke="rgba(140,98,58,.32)" stroke-width="1.1">${d}</g><g fill="none" stroke="rgba(140,98,58,.5)" stroke-width="2">${di}</g><path d="${trail}" fill="none" stroke="rgba(196,85,31,.45)" stroke-width="2.2" stroke-dasharray="7 7" stroke-linecap="round"/>`, ' preserveAspectRatio="xMidYMid slice"'));
+    })();
+    const _RIDGE = (() => {
+        const R = _rng(141), W = 600;
+        let p = `M0 0H${W}V7`, y = 7;
+        for (let x = W - 12; x > 8; x -= 9 + R() * 16) { y = Math.max(1.5, Math.min(14.5, y + (R() - .5) * 8)); p += `L${_n(x)} ${_n(y)}`; }
+        return _svgUrl(_svgOf(W, 16, `<path d="${p}L0 7Z" fill="#233828"/>`));
+    })();
+    // Notebook: ballpoint doodles down the margins, and the spiral's rings
+    const _NOTEBOOK = (() => {
+        const R = _rng(71), w = _wobble(R, 2.2);
+        const path = pts => `<path d="${_poly(pts.map(w))}"/>`;
+        const ring = (cx, cy, r, n = 22, t = 1) => Array.from({ length: Math.round(n * t) + 1 }, (_, i) => [cx + Math.cos(i / n * 6.28) * r, cy + Math.sin(i / n * 6.28) * r]);
+        const spiral = (cx, cy) => Array.from({ length: 60 }, (_, i) => { const a = i * .42, r = 2 + i * .55; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; });
+        const star = (cx, cy, r) => Array.from({ length: 6 }, (_, i) => { const a = -Math.PI / 2 + i * 4 * Math.PI / 5; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; });
+        const heart = (cx, cy, s) => Array.from({ length: 41 }, (_, i) => { const t = i / 40 * 6.28; return [cx + 16 * Math.sin(t) ** 3 * s, cy - (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * s]; });
+        const cube = (x, y, a) => [path([[x, y], [x + a, y], [x + a, y + a], [x, y + a], [x, y]]), path([[x + a * .4, y - a * .4], [x + a * 1.4, y - a * .4], [x + a * 1.4, y + a * .6], [x + a, y + a]]), path([[x, y], [x + a * .4, y - a * .4]]), path([[x + a, y], [x + a * 1.4, y - a * .4]])].join('');
+        const bolt = (x, y) => path([[x, y], [x - 12, y + 26], [x - 2, y + 26], [x - 10, y + 52], [x + 12, y + 18], [x + 2, y + 18], [x + 8, y]]);
+        const d = [path(star(70, 140, 24)), path(spiral(64, 330)), path(heart(70, 520, 1.5)), cube(44, 690, 34), bolt(76, 840),
+            path(star(1532, 210, 18)), path(heart(1530, 420, 1.2)), path(spiral(1536, 620)), path(ring(1530, 820, 26)), path([[1512, 812], [1520, 820], [1546, 808]])].join('');
+        return _svgUrl(_svgOf(1600, 1000, `<g fill="none" stroke="rgba(35,65,170,.42)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</g>`, ' preserveAspectRatio="xMidYMid slice"'));
+    })();
+    // (a coil of the binding: through its punched hole in the page, round over the cover's edge — the back of the loop darker)
+    const _SPIRAL = _svgUrl(_svgOf(22, 26, '<defs><linearGradient id="w" x1="0" x2="1"><stop offset="0" stop-color="#6f767d"/><stop offset=".55" stop-color="#eef1f4"/><stop offset="1" stop-color="#8a9198"/></linearGradient></defs>'
+        + '<ellipse cx="11" cy="20.5" rx="4" ry="2.6" fill="rgba(30,25,20,.55)"/><path d="M13.6 20C17 13 17 5 11 2.2" fill="none" stroke="#5a6067" stroke-width="2.6" stroke-linecap="round"/>'
+        + '<path d="M8.4 20.6C4.6 13 5 5 11 2.2" fill="none" stroke="url(#w)" stroke-width="3" stroke-linecap="round"/>'));
+    // Terrazzo: stone chips set in a pale floor (drawn to repeat seamlessly)
+    const _TERRAZZO = (() => {
+        const S = 260, R = _rng(53), C = ['#dfa094', '#a3b394', '#d6a03c', '#4d4846', '#c5664c', '#e2cfb8', '#8aa1b4'];
+        let s = '';
+        const chip = (cx, cy, r, col, op) => {
+            const n = 5 + Math.floor(R() * 3), a0 = R() * 6.28;
+            let p = '';
+            for (let k = 0; k < n; k++) { const a = a0 + k / n * 6.28 + (R() - .5) * .6, rr = r * (.6 + R() * .5); p += `${k ? 'L' : 'M'}${_n(cx + Math.cos(a) * rr)} ${_n(cy + Math.sin(a) * rr)}`; }
+            for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) if (cx + dx > -r && cx + dx < S + r && cy + dy > -r && cy + dy < S + r) s += `<path d="${p}Z" transform="translate(${dx} ${dy})" fill="${col}" opacity="${op}"/>`;
+        };
+        for (let i = 0; i < 32; i++) chip(R() * S, R() * S, 3 + R() ** 2.2 * 15, C[Math.floor(R() * C.length)], _n(.4 + R() * .35));
+        for (let i = 0; i < 80; i++) s += `<circle cx="${_n(R() * S)}" cy="${_n(R() * S)}" r="${_n(.5 + R())}" fill="${C[Math.floor(R() * C.length)]}" opacity=".55"/>`;
+        return _svgUrl(_svgOf(S, S, s));
+    })();
+    // Sampler: cross-stitch — each stitch an X; a heart, tulips, a border band and an alphabet
+    const _SAMPLER = (() => {
+        const sz = 9, col = { r: '#b8312f', g: '#3c7a4a', y: '#c99a2e', b: '#2b3f6b' };
+        let s = '';
+        const motif = (rows, ox, oy) => rows.forEach((row, j) => [...row].forEach((ch, i) => {
+            if (!col[ch]) return;
+            const x = ox + i * sz, y = oy + j * sz, m = 1.6;
+            s += `<path d="M${x + m} ${y + m}L${x + sz - m} ${y + sz - m}M${x + sz - m} ${y + m}L${x + m} ${y + sz - m}" stroke="${col[ch]}"/>`;
+        }));
+        const heart = ['.rr...rr.', 'rrrr.rrrr', 'rrrrrrrrr', 'rrrrrrrrr', '.rrrrrrr.', '..rrrrr..', '...rrr...', '....r....'];
+        const tulip = ['..r.r.r..', '..rrrrr..', '.rrrrrrr.', '.rrrrrrr.', '..rrrrr..', '....g....', 'gg..g..gg', '.ggggggg.', '....g....', '....g....'];
+        const band = Array.from({ length: 3 }, (_, j) => Array.from({ length: 40 }, (_, i) => ((i + j) % 4 === 0 || (i - j + 40) % 4 === 0) ? 'y' : '.').join(''));
+        const A = ['.bbb.', 'b...b', 'b...b', 'bbbbb', 'b...b', 'b...b', 'b...b'], B = ['bbbb.', 'b...b', 'b...b', 'bbbb.', 'b...b', 'b...b', 'bbbb.'], Cc = ['.bbbb', 'b....', 'b....', 'b....', 'b....', 'b....', '.bbbb'];
+        motif(heart, 60, 120); motif(tulip, 1450, 700); motif(tulip, 1350, 760); motif(band, 1240, 900);
+        motif(A, 50, 820); motif(B, 110, 820); motif(Cc, 170, 820); motif(heart.map(r => r.replace(/r/g, 'g')), 1470, 140);
+        return _svgUrl(_svgOf(1600, 1000, `<g fill="none" stroke-width="1.7" stroke-linecap="round" opacity=".75">${s}</g>`, ' preserveAspectRatio="xMidYMid slice"'));
+    })();
+    // Pop Art: a comic burst, and a speech balloon with three dots in it
+    const _BURST = (() => {
+        const pt = (a, r) => `${_n(150 + Math.cos(a) * r)} ${_n(150 + Math.sin(a) * r)}`;
+        let o = '', i = '';
+        for (let k = 0; k < 32; k++) { const a = k / 32 * 6.28, R1 = k % 2 ? 92 : 146, R2 = k % 2 ? 62 : 104; o += `${k ? 'L' : 'M'}${pt(a, R1)}`; i += `${k ? 'L' : 'M'}${pt(a + .05, R2)}`; }
+        return _svgUrl(_svgOf(300, 300, `<path d="${o}Z" fill="#ffd400" stroke="#111" stroke-width="5" stroke-linejoin="round"/><path d="${i}Z" fill="#e8282b" stroke="#111" stroke-width="4" stroke-linejoin="round"/>`));
+    })();
+    const _SPEECH = _svgUrl(_svgOf(320, 240, '<path d="M160 12C240 12 306 56 306 108S240 204 160 204C146 204 132 203 119 200L58 232L80 186C40 168 14 140 14 108C14 56 80 12 160 12Z" fill="#fff" stroke="#111" stroke-width="5" stroke-linejoin="round"/><g fill="#111"><circle cx="112" cy="110" r="11"/><circle cx="160" cy="110" r="11"/><circle cx="208" cy="110" r="11"/></g>'));
+    // Zen: raked sand — fine lines, and stones with rings raked round them, a little moss; an ink-brush circle (ensō) for icons
+    const _RAKE = _svgUrl(_svgOf(200, 16, '<path d="M0 4Q50 2.6 100 4T200 4M0 12Q50 10.6 100 12T200 12" fill="none" stroke="rgba(120,100,70,.13)" stroke-width="1"/>'));
+    const _ZEN = (() => {
+        const R = _rng(83);
+        const stone = (cx, cy, rx, ry, rings) => {
+            let s = '';
+            for (let k = 1; k <= rings; k++) s += `<ellipse cx="${cx}" cy="${cy}" rx="${rx + k * 13}" ry="${ry + k * 10}" fill="none" stroke="rgba(120,100,70,.2)" stroke-width="1.2"/>`;
+            let p = '';
+            for (let i = 0; i < 14; i++) { const a = i / 14 * 6.28, f = .86 + R() * .2; p += `${i ? 'L' : 'M'}${_n(cx + Math.cos(a) * rx * f)} ${_n(cy + Math.sin(a) * ry * f)}`; }
+            s += `<path d="${p}Z" fill="url(#st)"/><ellipse cx="${_n(cx - rx * .25)}" cy="${_n(cy - ry * .35)}" rx="${_n(rx * .35)}" ry="${_n(ry * .18)}" fill="rgba(255,255,255,.1)"/>`;
+            s += `<ellipse cx="${_n(cx + rx * .5)}" cy="${_n(cy + ry * .75)}" rx="${_n(rx * .55)}" ry="${_n(ry * .22)}" fill="rgba(98,128,72,.45)"/>`;   // (moss at its foot)
+            return s;
+        };
+        return _svgUrl(_svgOf(1600, 1000, `<defs><radialGradient id="st" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#6d6e68"/><stop offset="1" stop-color="#34352f"/></radialGradient></defs>${stone(1360, 760, 64, 40, 6)}${stone(1470, 840, 30, 20, 3)}${stone(190, 250, 46, 30, 5)}`, ' preserveAspectRatio="xMidYMid slice"'));
+    })();
+    const _ENSO = col => {   // (heavy where the brush came down, thinning to a dry tail, a gap left)
+        const R = _rng(151), out = [], inn = [];
+        for (let i = 0; i <= 56; i++) {
+            const t = i / 56, a = -1.15 + t * 5.45, w = Math.max(.4, .5 + 3.9 * (1 - t) ** .7 * Math.min(1, t * 12) + (R() - .5) * .5), r = 14.2 + (R() - .5) * .5;
+            out.push([20 + Math.cos(a) * (r + w / 2), 20 + Math.sin(a) * (r + w / 2)]);
+            inn.push([20 + Math.cos(a) * (r - w / 2), 20 + Math.sin(a) * (r - w / 2)]);
+        }
+        return _svgUrl(_svgOf(40, 40, `<path d="${_poly([...out, ...inn.reverse()])}Z" fill="${col}"/>`));
+    };
+    // Cathedral: stained glass — a rose window and a lancet, panes leaded — over coursed stone; a gilt arcade under the bar
+    const _JEWELS = ['#b3122e', '#1d3fa3', '#127a4a', '#e09a1b', '#6b2fa0', '#c2306b', '#d8b23a', '#127d86', '#7a1a8a', '#2156c4'];
+    const _ROSE = (() => {
+        const R = _rng(91), C = 300, pt = (r, a) => `${_n(C + Math.cos(a) * r)} ${_n(C + Math.sin(a) * r)}`;
+        const wedge = (r1, r2, a1, a2) => `M${pt(r1, a1)}L${pt(r2, a1)}A${r2} ${r2} 0 0 1 ${pt(r2, a2)}L${pt(r1, a2)}A${r1} ${r1} 0 0 0 ${pt(r1, a1)}Z`;
+        let s = `<circle cx="${C}" cy="${C}" r="44" fill="${_JEWELS[3]}"/>`;
+        for (const [r1, r2, n] of [[44, 120, 8], [120, 210, 16], [210, 270, 32]]) for (let k = 0; k < n; k++) s += `<path d="${wedge(r1, r2, k / n * 6.28, (k + 1) / n * 6.28)}" fill="${_JEWELS[Math.floor(R() * _JEWELS.length)]}"/>`;
+        return _svgUrl(_svgOf(600, 600, `<g stroke="#0b0710" stroke-width="5" stroke-linejoin="round" opacity=".9">${s}</g><circle cx="${C}" cy="${C}" r="282" fill="none" stroke="#2a2030" stroke-width="20"/><circle cx="${C}" cy="${C}" r="282" fill="none" stroke="rgba(216,178,58,.35)" stroke-width="2"/>`));
+    })();
+    const _LANCET = (() => {
+        const W = 200, H = 640, R = _rng(97), cols = 4, rows = 13, pts = [];
+        for (let j = 0; j <= rows; j++) { const row = []; for (let i = 0; i <= cols; i++) { const ex = i === 0 || i === cols, ey = j === 0 || j === rows; row.push([i * W / cols + (ex ? 0 : (R() - .5) * W / cols * .7), j * H / rows + (ey ? 0 : (R() - .5) * H / rows * .7)]); } pts.push(row); }
+        let s = '';
+        for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) s += `<path d="${_poly([pts[j][i], pts[j][i + 1], pts[j + 1][i + 1], pts[j + 1][i]])}Z" fill="${_JEWELS[Math.floor(R() * _JEWELS.length)]}"/>`;
+        const arch = `M0 ${H}V150Q0 40 ${W / 2} 0Q${W} 40 ${W} 150V${H}Z`;
+        return _svgUrl(_svgOf(W, H, `<defs><clipPath id="a"><path d="${arch}"/></clipPath></defs><g clip-path="url(#a)" stroke="#0b0710" stroke-width="4" stroke-linejoin="round" opacity=".9">${s}</g><path d="${arch}" fill="none" stroke="#2a2030" stroke-width="12"/><path d="${arch}" fill="none" stroke="rgba(216,178,58,.35)" stroke-width="1.5"/>`));
+    })();
+    const _ARCADE = _svgUrl(_svgOf(26, 10, '<path d="M1 10V6Q1 1.5 13 0Q25 1.5 25 6V10" fill="none" stroke="#c9a24a" stroke-width="1.2"/>'));
+    const _ASHLAR = _svgUrl(_svgOf(160, 80, '<path d="M0 .5H160M0 40.5H160M.5 0V40M80.5 0V40M40.5 40V80M120.5 40V80" fill="none" stroke="rgba(255,255,255,.04)"/><path d="M0 1.5H160M0 41.5H160M1.5 1V40M81.5 1V40M41.5 41V80M121.5 41V80" fill="none" stroke="rgba(0,0,0,.35)"/>'));
+    // Cockpit: a radar's rings and ticks, a few blips (the sweep turns on its own layer)
+    const _RADAR = (() => {
+        const C = 400, pt = (r, a) => `${_n(C + Math.cos(a) * r)} ${_n(C + Math.sin(a) * r)}`;
+        let t = '';
+        for (let i = 0; i < 72; i++) { const a = i / 72 * 6.28; t += `M${pt(i % 6 ? 352 : 340, a)}L${pt(362, a)}`; }
+        const rings = [90, 180, 270, 362].map(r => `<circle cx="${C}" cy="${C}" r="${r}"/>`).join('');
+        const blips = [[250, 1.1], [150, 2.6], [310, 4.4], [205, 5.6]].map(([r, a]) => { const [x, y] = pt(r, a).split(' '); return `<circle cx="${x}" cy="${y}" r="4" fill="rgba(63,216,255,.8)" stroke="none"/><circle cx="${x}" cy="${y}" r="11" stroke-width="1"/>`; }).join('');
+        return _svgUrl(_svgOf(800, 800, `<g fill="none" stroke="rgba(63,216,255,.35)" stroke-width="1.2">${rings}<path d="M${C - 370} ${C}H${C + 370}M${C} ${C - 370}V${C + 370}"/><path d="${t}"/>${blips}</g>`));
+    })();
+    const _HEXGRID = _svgUrl(_svgOf(56, 97, '<path d="M28 0L56 16v33L28 65 0 49V16zM28 65v32" fill="none" stroke="rgba(63,216,255,.07)" stroke-width="1"/>'));
+    // Cyberpunk: rain, and a city at night along the bottom — lit windows, a few neon signs
+    const _RAIN = (() => {
+        const R = _rng(101);
+        let s = '';
+        for (let i = 0; i < 18; i++) { const x = R() * 140, y = R() * 180, l = 10 + R() * 26; s += `<path d="M${_n(x)} ${_n(y)}l${_n(-l * .26)} ${_n(l)}"/>`; }
+        return _svgUrl(_svgOf(140, 180, `<g stroke="rgba(5,217,232,.16)" stroke-width="1" stroke-linecap="round">${s}</g>`));
+    })();
+    const _SKYLINE = (() => {
+        const W = 1600, H = 440, R = _rng(107), lit = ['#fcee0a', '#05d9e8', '#ff2a6d', '#fff3c4'];
+        let b = '', win = '', neon = '';
+        for (let x = -10; x < W;) {
+            const w = 46 + R() * 110, h = 140 + R() ** 1.4 * 280, top = H - h, shade = ['#0f0d1d', '#141128', '#191530'][Math.floor(R() * 3)];
+            b += `<rect x="${_n(x)}" y="${_n(top)}" width="${_n(w)}" height="${_n(h)}" fill="${shade}"/>`;
+            for (let wy = top + 12; wy < H - 10; wy += 13) for (let wx = x + 8; wx < x + w - 8; wx += 10) if (R() < .17) win += `<rect x="${_n(wx)}" y="${_n(wy)}" width="4" height="6" fill="${lit[Math.floor(R() * lit.length)]}" opacity="${_n(.35 + R() * .5)}"/>`;
+            if (R() < .22) { const nx = x + w * .3, ny = top + 30 + R() * 60, c = R() < .5 ? '#ff2a6d' : '#05d9e8'; neon += `<rect x="${_n(nx)}" y="${_n(ny)}" width="12" height="${_n(40 + R() * 50)}" rx="2" fill="none" stroke="${c}" stroke-width="2.2" opacity=".85"/>`; }
+            x += w + R() * 6;
+        }
+        return _svgUrl(_svgOf(W, H, `${b}${win}<g filter="url(#n)">${neon}</g><defs><filter id="n" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.5" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>`));
+    })();
+    // Folio: tooled leather's grain, a shelf of books along the bottom, gilt diamonds under the bar, gilt corners
+    const _LEATHER = _svgUrl(_svgOf(260, 260, '<filter id="l" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency=".9 .5" numOctaves="3" seed="3" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 .2  0 0 0 0 .12  0 0 0 0 .07  0 0 0 .55 0"/></filter><rect width="260" height="260" filter="url(#l)"/>'));
+    const _SHELF = (() => {
+        const W = 1600, H = 250, R = _rng(113), C = ['#6e1f2a', '#1f4030', '#1f2a4a', '#5a3a22', '#7a5a22', '#3a1f3a', '#2a4a4a'];
+        let s = '';
+        for (let x = 0; x < W;) {
+            const w = 18 + R() * 30, h = 150 + R() * 74, y = H - 22 - h, c = C[Math.floor(R() * C.length)], lean = R() < .06 ? -6 + R() * 12 : 0;
+            s += `<g transform="rotate(${_n(lean)} ${_n(x + w / 2)} ${H - 22})"><rect x="${_n(x)}" y="${_n(y)}" width="${_n(w)}" height="${_n(h)}" rx="2" fill="${c}"/>`
+                + `<rect x="${_n(x)}" y="${_n(y + 12)}" width="${_n(w)}" height="2" fill="rgba(217,170,80,.75)"/><rect x="${_n(x)}" y="${_n(y + h - 16)}" width="${_n(w)}" height="2" fill="rgba(217,170,80,.75)"/>`
+                + (R() < .5 ? `<rect x="${_n(x + 3)}" y="${_n(y + 32)}" width="${_n(w - 6)}" height="${_n(26 + R() * 20)}" rx="1" fill="rgba(240,220,180,.18)"/>` : '') + '</g>';
+            x += w + (R() < .1 ? 14 : 1);
+        }
+        return _svgUrl(_svgOf(W, H, `${s}<rect y="${H - 22}" width="${W}" height="22" fill="#3a2416"/><rect y="${H - 22}" width="${W}" height="3" fill="#5a3a24"/>`));
+    })();
+    const _FLEURON = _svgUrl(_svgOf(18, 8, '<path d="M0 4H5M13 4H18" stroke="#c9a24a" stroke-width="1"/><path d="M9 .5L12.5 4L9 7.5L5.5 4Z" fill="#c9a24a"/>'));
+    const _GILT = (() => {   // (top left, top right, bottom right, bottom left)
+        const lines = '<path d="M3 34V3H34" stroke-width="1.3"/><path d="M8 26V8H26" stroke-width=".8"/><path d="M8 8C13 9 15 13 14 17C13.4 19.6 10.6 19.6 10.4 17.4C10.2 15.8 11.6 15 12.6 15.8M8 8C9 13 13 15 17 14C19.6 13.4 19.6 10.6 17.4 10.4C15.8 10.2 15 11.6 15.8 12.6" stroke-width=".9"/>';
+        const dots = '<circle cx="3" cy="3" r="1.9"/><circle cx="34" cy="3" r="1.1"/><circle cx="3" cy="34" r="1.1"/><path d="M19.5 19.5l2.2-1 1 2.2-2.2 1z"/>';
+        return [0, 90, 180, 270].map(r => _svgUrl(_svgOf(38, 38, `<g transform="rotate(${r} 19 19)"><g fill="none" stroke="#d6ad5c" stroke-opacity=".8" stroke-linecap="round">${lines}</g><g fill="#d6ad5c" fill-opacity=".85">${dots}</g></g>`)));
+    })();
+    // Nocturne: a crescent moon, moonflowers on a vine, moths — the fireflies on a layer of their own, to glow and dim
+    const _NOCTURNE = (() => {
+        const R = _rng(127);
+        const flower = (cx, cy, r, rot) => {
+            let p = '';
+            for (let k = 0; k < 5; k++) { const a = rot + k / 5 * 6.28; p += `<ellipse cx="${_n(cx + Math.cos(a) * r * .55)}" cy="${_n(cy + Math.sin(a) * r * .55)}" rx="${_n(r * .5)}" ry="${_n(r * .32)}" transform="rotate(${_n(a * 180 / Math.PI)} ${_n(cx + Math.cos(a) * r * .55)} ${_n(cy + Math.sin(a) * r * .55)})"/>`; }
+            return p + `<circle cx="${cx}" cy="${cy}" r="${_n(r * .14)}" fill="rgba(255,250,220,.5)"/>`;
+        };
+        const leaf = (x, y, a, s) => `<path transform="translate(${_n(x)} ${_n(y)}) rotate(${_n(a)}) scale(${s})" d="M0 0C6-8 18-8 22 0C18 8 6 8 0 0Z"/>`;
+        const moth = (x, y, s) => `<g transform="translate(${x} ${y}) scale(${s})"><path d="M0 -8V9"/><path d="M0 -4C-10 -16 -22 -10 -18 0C-15 6 -6 4 0 1M0 -4C10 -16 22 -10 18 0C15 6 6 4 0 1M0 2C-7 6 -10 13 -4 14C-1 14 0 8 0 4M0 2C7 6 10 13 4 14C1 14 0 8 0 4"/></g>`;
+        const vine = 'M-10 1010C80 900 60 800 150 720S190 560 120 470 150 300 230 240';
+        let fl = '', lv = '';
+        const c = _curve([-10, 1010], [200, 620], [230, 240]);
+        for (let i = 1; i < 9; i++) { const [x, y] = c.at(i / 9), [dx, dy] = c.tan(i / 9), a = Math.atan2(dy, dx) * 180 / Math.PI; lv += leaf(x, y, a + (i % 2 ? 60 : -60), .9 + R() * .5); }
+        fl += flower(232, 236, 30, .3) + flower(110, 470, 22, 1.1) + flower(150, 722, 26, 2);
+        return _svgUrl(_svgOf(1600, 1000, `<defs><radialGradient id="mg" r=".5"><stop offset=".55" stop-color="rgba(220,235,255,.22)"/><stop offset="1" stop-color="rgba(220,235,255,0)"/></radialGradient><mask id="cr"><circle cx="1505" cy="150" r="74" fill="#fff"/><circle cx="1539" cy="128" r="66" fill="#000"/></mask></defs>`
+            + `<circle cx="1505" cy="150" r="190" fill="url(#mg)"/><circle cx="1505" cy="150" r="74" fill="rgba(240,244,250,.85)" mask="url(#cr)"/>`
+            + `<g fill="none" stroke="rgba(225,235,240,.3)" stroke-width="1.5" stroke-linecap="round"><path d="${vine}"/>${lv}</g><g fill="rgba(240,245,250,.1)" stroke="rgba(240,245,250,.55)" stroke-width="1.3">${fl}</g>`
+            + `<g fill="none" stroke="rgba(240,245,250,.42)" stroke-width="1.4" stroke-linejoin="round">${moth(420, 160, 1.2)}${moth(1180, 420, .9)}${moth(1500, 760, 1)}</g>`, ' preserveAspectRatio="xMidYMid slice"'));
+    })();
+    const _FIREFLIES = (() => {
+        const R = _rng(129);
+        const f = Array.from({ length: 18 }, () => { const x = _n(R() * 1600), y = _n(180 + R() * 780); return `<circle cx="${x}" cy="${y}" r="6" fill="rgba(220,255,150,.3)" filter="url(#f)"/><circle cx="${x}" cy="${y}" r="${_n(1.1 + R() * .9)}" fill="#f4ffd0"/>`; }).join('');
+        return _svgUrl(_svgOf(1600, 1000, `<defs><filter id="f" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="2.5"/></filter></defs>${f}`, ' preserveAspectRatio="xMidYMid slice"'));
+    })();
+    // Marquee: velvet curtains drawn back with a gold rope (left; the right one its mirror), and a row of bulbs — one in three
+    // lit, moved along a bulb at a time so they chase
+    const _CURTAIN = (() => {
+        let folds = '';
+        for (let i = 0; i < 7; i++) {
+            const xt = 12 + i * 29, xm = 8 + i * 11.5, xb = 6 + i * 23;
+            folds += `<path d="M${xt} 0Q${xt} 380 ${_n(xm)} 610Q${_n(xm)} 760 ${xb} 1000" stroke="rgba(0,0,0,.42)" stroke-width="9"/><path d="M${xt + 12} 0Q${xt + 12} 380 ${_n(xm + 5)} 610Q${_n(xm + 5)} 760 ${xb + 11} 1000" stroke="rgba(255,140,150,.13)" stroke-width="5"/>`;
+        }
+        const shape = 'M0 0H200C200 260 150 520 84 612C98 760 130 880 156 1000H0Z';
+        const body = `<defs><clipPath id="c"><path d="${shape}"/></clipPath><linearGradient id="g" x2="1"><stop offset="0" stop-color="#3a0610"/><stop offset=".55" stop-color="#7d1424"/><stop offset="1" stop-color="#5c0d1a"/></linearGradient><linearGradient id="v" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity=".35"/><stop offset=".25" stop-color="#000" stop-opacity="0"/><stop offset=".85" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".45"/></linearGradient></defs>`
+            + `<g clip-path="url(#c)"><rect width="200" height="1000" fill="url(#g)"/><g fill="none">${folds}</g><rect width="200" height="1000" fill="url(#v)"/></g>`
+            + `<path d="${shape}" fill="none" stroke="rgba(0,0,0,.5)" stroke-width="2"/>`
+            + '<path d="M-4 596Q44 640 92 606" fill="none" stroke="#b8862c" stroke-width="9" stroke-linecap="round"/><path d="M-4 596Q44 640 92 606" fill="none" stroke="#f0c45c" stroke-width="5" stroke-linecap="round" stroke-dasharray="3 4"/>'
+            + '<path d="M86 610q4 18 2 34" stroke="#d9a63e" stroke-width="3" fill="none"/><path d="M80 642h16l4 34h-24z" fill="#d9a63e"/><path d="M80 642h16" stroke="#f3d27a" stroke-width="2"/>';
+        return [_svgUrl(_svgOf(200, 1000, body, ' preserveAspectRatio="none"')), _svgUrl(_svgOf(200, 1000, `<g transform="translate(200 0) scale(-1 1)">${body}</g>`, ' preserveAspectRatio="none"'))];
+    })();
+    const _BULBS = _svgUrl(_svgOf(66, 14, '<defs><radialGradient id="on"><stop offset="0" stop-color="#fffbe8"/><stop offset=".45" stop-color="#ffe08a"/><stop offset="1" stop-color="#ffc850" stop-opacity="0"/></radialGradient><radialGradient id="off"><stop offset="0" stop-color="#d9a24c"/><stop offset=".65" stop-color="#8a5a1e"/><stop offset="1" stop-color="#5a3a12" stop-opacity="0"/></radialGradient></defs><circle cx="11" cy="7" r="7" fill="url(#on)"/><circle cx="11" cy="7" r="2.6" fill="#fffdf2"/><circle cx="33" cy="7" r="4" fill="url(#off)"/><circle cx="55" cy="7" r="4" fill="url(#off)"/>'));
+    // Astrolabe: a star chart (constellations joined up, a celestial grid) and an astrolabe's rings; a brass rule, engraved
+    const _STARCHART = (() => {
+        const W = 1600, H = 1000, R = _rng(131);
+        let stars = '', lines = '';
+        for (let i = 0; i < 150; i++) stars += `<circle cx="${_n(R() * W)}" cy="${_n(R() * H)}" r="${_n(.5 + R() ** 3 * 2)}" fill="rgba(240,235,215,${_n(.3 + R() * .5)})"/>`;
+        for (const [cx, cy] of [[300, 180], [1260, 230], [880, 640], [1420, 760], [140, 620]]) {
+            let x = cx, y = cy, p = `M${cx} ${cy}`;
+            stars += `<circle cx="${cx}" cy="${cy}" r="2.6" fill="rgba(255,248,225,.9)"/>`;
+            for (let k = 0; k < 5; k++) { x += (R() - .5) * 170; y += (R() - .5) * 130; p += `L${_n(x)} ${_n(y)}`; stars += `<circle cx="${_n(x)}" cy="${_n(y)}" r="${_n(1.6 + R() * 1.4)}" fill="rgba(255,248,225,.85)"/>`; }
+            lines += `<path d="${p}"/>`;
+        }
+        const C = [200, 800], pt = (r, a) => `${_n(C[0] + Math.cos(a) * r)} ${_n(C[1] + Math.sin(a) * r)}`;
+        let ticks = '', spokes = '';
+        for (let i = 0; i < 120; i++) { const a = i / 120 * 6.28; ticks += `M${pt(i % 10 ? 300 : 290, a)}L${pt(310, a)}`; }
+        for (let i = 0; i < 12; i++) { const a = i / 12 * 6.28; spokes += `M${pt(120, a)}L${pt(290, a)}`; }
+        const astro = `<g fill="none" stroke="rgba(199,154,82,.4)" stroke-width="1.3"><circle cx="${C[0]}" cy="${C[1]}" r="310"/><circle cx="${C[0]}" cy="${C[1]}" r="290"/><circle cx="${C[0]}" cy="${C[1]}" r="120"/><circle cx="${C[0] + 40}" cy="${C[1] - 30}" r="190"/><path d="${ticks}"/><path d="${spokes}" stroke-dasharray="2 5"/></g>`;
+        const grid = `<g fill="none" stroke="rgba(199,154,82,.12)" stroke-width="1"><ellipse cx="800" cy="500" rx="900" ry="260"/><ellipse cx="800" cy="500" rx="900" ry="520"/><path d="M-100 500H1700"/><ellipse cx="800" cy="500" rx="300" ry="700"/><ellipse cx="800" cy="500" rx="620" ry="700"/></g>`;
+        return _svgUrl(_svgOf(W, H, `${grid}${stars}<g fill="none" stroke="rgba(199,154,82,.4)" stroke-width="1">${lines}</g>${astro}`, ' preserveAspectRatio="xMidYMid slice"'));
+    })();
+    const _SCALE = (() => {
+        let t = '';
+        for (let x = 0; x < 60; x += 3) t += `M${x + .5} 0V${x % 30 === 0 ? 6.5 : x % 15 === 0 ? 4.5 : 2.6}`;
+        return _svgUrl(_svgOf(60, 10, `<defs><linearGradient id="b" x2="0" y2="1"><stop offset="0" stop-color="#f2d69c"/><stop offset=".5" stop-color="#c79a52"/><stop offset="1" stop-color="#8a6630"/></linearGradient></defs><rect width="60" height="10" fill="url(#b)"/><path d="${t}" stroke="#3a2a12" stroke-opacity=".75"/><path d="M0 9.5H60" stroke="#5a4218"/>`));
+    })();
+    // Groovy: 70s rainbow arcs from two corners, and four wavy stripes under the bar
+    const _GROOVY = (() => {
+        const band = ['#f3e3c3', '#e8a33d', '#d9622b', '#8a4a22', '#7d7f2a'];
+        const arcs = (cx, cy, r0, w, start, sweep) => band.map((c, i) => { const r = r0 + i * w; return `<path d="M${_n(cx + Math.cos(start) * r)} ${_n(cy + Math.sin(start) * r)}A${r} ${r} 0 0 ${sweep} ${_n(cx + Math.cos(start + Math.PI / 2 * (sweep ? 1 : -1)) * r)} ${_n(cy + Math.sin(start + Math.PI / 2 * (sweep ? 1 : -1)) * r)}" stroke="${c}"/>`; }).join('');
+        return _svgUrl(_svgOf(1600, 1000, `<g fill="none" stroke-width="30" opacity=".85">${arcs(1600, 1000, 170, 30, Math.PI, 1)}${arcs(0, 0, 110, 30, 0, 1)}</g>`, ' preserveAspectRatio="xMidYMid slice"'));
+    })();
+    const _WAVES = _svgUrl(_svgOf(120, 17, ['#f0b24a', '#e07a30', '#c4512a', '#8a3d22'].map((c, i) => { const y = 3.4 + i * 3.4; return `<path d="M0 ${_n(y)}C20 ${_n(y - 2.2)} 40 ${_n(y - 2.2)} 60 ${_n(y)}S100 ${_n(y + 2.2)} 120 ${_n(y)}" fill="none" stroke="${c}" stroke-width="3.6"/>`; }).join('')));
+    const _THEMES_4 = ['bitmap', 'transit', 'contour', 'notebook', 'terrazzo', 'sampler', 'popart', 'zen', 'cathedral', 'cockpit', 'cyberpunk', 'folio', 'nocturne', 'marquee', 'astrolabe', 'groovy'];
+    // (a star's outline as a clip-path polygon: n points, outer and inner radius in % of the box)
+    const _starPoly = (n, r1, r2) => Array.from({ length: n * 2 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / n, r = i % 2 ? r2 : r1; return `${_n(50 + Math.cos(a) * r)}% ${_n(50 + Math.sin(a) * r)}%`; }).join(', ');
+    // In Settings: the light looks, then the dark ones, each in the order shown (desc: a line about it, on hover)
     const THEME_PRESETS = [
-        { id: 'pastel',  label: 'R. Pastel', base: 'light', fav: '#9061f9', cover: '#fdf7ff',
+        { id: 'pastel',  label: 'R. Pastel', base: 'light', fav: '#9061f9', cover: '#fdf7ff', desc: 'Soft rainbow pastels on white',
           pv: ['linear-gradient(135deg,#ffe3ef,#fff6d9 35%,#e1f8e3 65%,#e4ecff)', 'linear-gradient(90deg,#ffc2d6,#ffdcb5,#fff3b0,#c9f2cb,#b8e4ff,#cbbcff)', '#ffffff', 'linear-gradient(90deg,#f27ab0,#b07cf7,#6fa8ff)'] },
-        { id: 'holo',    label: 'R. Pastel 2', base: 'light', fav: '#7c5cff', cover: '#f7f5ff',
+        { id: 'holo',    label: 'R. Pastel 2', base: 'light', fav: '#7c5cff', cover: '#f7f5ff', desc: 'Holographic pastels, the bar slowly shifting',
           pv: ['conic-gradient(from 210deg at 70% 30%,#f9dff0,#dfe9fa,#dff9f2,#faf6df,#f9dfdf,#f9dff0)', 'linear-gradient(90deg,#f5c2e7,#c2d7f5,#c2f5e9,#f5f0c2,#f5c2c2,#e0c2f5)', '#ffffff', 'linear-gradient(90deg,#8b5cf6,#ec4899,#06b6d4)'] },
-        { id: 'sunset',  label: 'Sunset', base: 'light', fav: '#ea4c60', cover: '#fff7f2',
-          pv: ['linear-gradient(160deg,#fff1e6,#ffe4ea 55%,#f3e4ff)', 'linear-gradient(90deg,#ff9b54,#ff6a6a 45%,#c2549d 78%,#7b4ba8)', '#ffffff', 'linear-gradient(90deg,#ff8a4c,#ef4f6b,#b24f9f)'] },
-        { id: 'regal', label: 'Regal', base: 'light', fav: '#2a56b8', cover: '#fbf6e9',
-          pv: ['linear-gradient(180deg,#fcf6e6,#f3e9d2)', 'linear-gradient(90deg,#1b336f,#23468f 55%,#2f5bb5)', '#fffdf8', 'linear-gradient(90deg,#2a56b8,#3b6fd6 60%,#c4952b)'] },
-        { id: 'lilac',  label: 'Lilac Dream', base: 'light', fav: '#a855f7', cover: '#faf5ff',
+        { id: 'lilac',  label: 'Lilac Dream', base: 'light', fav: '#a855f7', cover: '#faf5ff', desc: 'Lilac and pink, with sparkles',
           pv: ['radial-gradient(circle at 20% 15%,#fff,transparent 45%),linear-gradient(180deg,#efe4ff,#fff4fb)', 'linear-gradient(90deg,#e9d5ff,#fbcfe8,#dbeafe,#f5d0fe)', '#ffffff', 'linear-gradient(90deg,#c084fc,#f472b6,#93c5fd)'] },
-        { id: 'tropical',  label: 'Tropical', base: 'light', fav: '#0d9488', cover: '#f2fbf9',
+        { id: 'peony',  label: 'Peony', base: 'light', fav: '#c8436b', cover: '#fbf1f2', desc: 'Blush pink and raspberry',
+          pv: ['linear-gradient(160deg,#fdf5f6,#f6e3e6)', 'linear-gradient(90deg,#f9d7df,#eaa0b6)', '#ffffff', 'linear-gradient(90deg,#d24f76,#a8355c)'] },
+        { id: 'champagne', label: 'Champagne', base: 'light', fav: '#c9a06a', cover: '#f7eee8', accentAttr: 'yellow', font: 'Bodoni+Moda:opsz,wght@6..96,500..700', desc: 'Blush and gold foil, bubbles rising',
+          pv: ['radial-gradient(circle at 20% 70%,rgba(190,150,95,.5) 0 1.6px,transparent 2.2px),radial-gradient(circle at 72% 38%,rgba(190,150,95,.45) 0 1.2px,transparent 1.8px),linear-gradient(180deg,#faf2ec,#f4e9e1)', 'linear-gradient(100deg,#e6cfa8,#f7ead2 30%,#d8b98a 55%,#f3e3c6 75%,#cfae7f)', '#fffaf6', 'linear-gradient(100deg,#d9b98a,#f3e3c6,#c9a06a)'] },
+        { id: 'sunset',  label: 'Sunset', base: 'light', fav: '#ea4c60', cover: '#fff7f2', desc: 'Warm peach, coral and plum',
+          pv: ['linear-gradient(160deg,#fff1e6,#ffe4ea 55%,#f3e4ff)', 'linear-gradient(90deg,#ff9b54,#ff6a6a 45%,#c2549d 78%,#7b4ba8)', '#ffffff', 'linear-gradient(90deg,#ff8a4c,#ef4f6b,#b24f9f)'] },
+        { id: 'terracotta', label: 'Terracotta', base: 'light', fav: '#b8532f', cover: '#f6eee6', desc: 'Sun-baked clay, sand and olive',
+          pv: ['linear-gradient(180deg,#f8f0e7,#f1e4d6)', 'linear-gradient(90deg,#8f3a22,#b4552f)', '#fffaf5', 'linear-gradient(90deg,#a9472a,#c0632f)'] },
+        { id: 'terrazzo', label: 'Terrazzo', base: 'light', fav: '#b35340', cover: '#f3eee8', font: 'Syne:wght@600;700;800', desc: 'Speckled stone floors with a brass strip set in',
+          pv: [`${_TERRAZZO} 0 0/70px 70px,#f3eee8`, 'linear-gradient(180deg,#ecd5c8 0 72%,#c49a4a 72%)', '#fffdfa', '#b35340'] },
+        { id: 'kraft', label: 'Kraft', base: 'light', fav: '#b5382c', cover: '#cdb48e', font: 'Courier+Prime:wght@400;700', desc: 'Brown paper, labels, tape and a red stamp',
+          pv: ['radial-gradient(rgba(60,40,20,.28) .6px,transparent 1px) 0 0/5px 5px,#cdb48e', 'linear-gradient(180deg,#23324b 0 78%,transparent 78%),radial-gradient(circle at 50% 100%,transparent 1px,#23324b 1.5px) 0 0/4px 7px', '#fbf6ec', '#b5382c'] },
+        { id: 'sampler', label: 'Sampler', base: 'light', fav: '#8f2b2b', cover: '#f3eee2', font: 'Fraunces:opsz,wght@9..144,600;9..144,700', desc: 'Cross-stitch on linen, in red and indigo thread',
+          pv: ['radial-gradient(rgba(80,62,40,.28) .6px,transparent 1px) 0 0/3px 3px,#f3eee2', '#8f2b2b', '#fbf8f0', '#2f4a7a'] },
+        { id: 'honeycomb', label: 'Honeycomb', base: 'light', fav: '#d69213', cover: '#fdf6e3', accentAttr: 'yellow', desc: 'Golden honey over a faint comb',
+          pv: [`${_HEXCOMB} 0 0/14px 24px,linear-gradient(180deg,#fff9ea,#fcf2da)`, 'linear-gradient(90deg,#f4c552,#d69213)', '#fffdf6', 'linear-gradient(90deg,#e8ad2c,#c27a0a)'] },
+        { id: 'popart', label: 'Pop Art', base: 'light', fav: '#d9221f', cover: '#fff7d6', font: 'Bangers', desc: 'Comic panels, Ben-Day dots and a big burst',
+          pv: ['radial-gradient(circle,rgba(0,163,224,.5) 30%,transparent 34%) 0 0/4px 4px,#fff7d6', 'linear-gradient(180deg,#ffd400 0 70%,#111 70%)', '#ffffff', '#d9221f'] },
+        { id: 'midcentury', label: 'Mid-Century', base: 'light', fav: '#1b7a70', cover: '#f3e7cf', font: 'Josefin+Sans:wght@600;700', desc: 'Walnut, mustard and teal, with atomic stars',
+          pv: [`${_MCM_ATOMIC} 0 0/64px 49px,#f3e7cf`, 'linear-gradient(180deg,#5a3a24 0 64%,#e0a526 64% 82%,#d5612a 82%)', '#fffaf0', '#e0a526'] },
+        { id: 'regal', label: 'Regal', base: 'light', fav: '#2a56b8', cover: '#fbf6e9', desc: 'Royal blue on cream, with a gold rule',
+          pv: ['linear-gradient(180deg,#fcf6e6,#f3e9d2)', 'linear-gradient(90deg,#1b336f,#23468f 55%,#2f5bb5)', '#fffdf8', 'linear-gradient(90deg,#2a56b8,#3b6fd6 60%,#c4952b)'] },
+        { id: 'bauhaus', label: 'Bauhaus', base: 'light', fav: '#d4322c', cover: '#efe9dc', font: 'Jost:wght@500;600;700', desc: 'Red, yellow and blue, circles and squares',
+          pv: ['radial-gradient(circle at 86% 22%,rgba(212,50,44,.55) 0 9px,transparent 9.5px),linear-gradient(45deg,rgba(242,182,50,.6) 0 18%,transparent 18%),#efe9dc', 'linear-gradient(180deg,#151515 0 68%,transparent 68%),linear-gradient(90deg,#d4322c 0 33%,#f2b632 33% 66%,#1f4e9e 66%)', '#fbf8f1', '#d4322c'] },
+        { id: 'transit', label: 'Transit', base: 'light', fav: '#0039a6', cover: '#f4f4f1', font: 'Archivo:wght@600;700;800', desc: 'Subway signage: black bands, route colors, bold type',
+          pv: ['linear-gradient(135deg,transparent 0 44%,rgba(238,53,46,.55) 44% 50%,transparent 50% 62%,rgba(0,57,166,.5) 62% 68%,transparent 68%),#f4f4f1', 'linear-gradient(180deg,#161616 0 22%,#ffffff 22% 34%,#161616 34%)', '#ffffff', '#0039a6'] },
+        { id: 'paper', label: 'Paper & Ink', base: 'light', fav: '#c23b22', cover: '#f4efe4', desc: 'Cream paper, black ink and a red seal',
+          pv: ['#f4efe4', 'linear-gradient(180deg,#1f1d1a 0 75%,#c23b22 75%)', '#fbf8f1', '#c23b22'] },
+        { id: 'atelier', label: 'Atelier', base: 'light', fav: '#1f3ad1', cover: '#f5f3ee', font: 'Instrument+Serif:ital@0;1', desc: 'A gallery’s white walls, ink, and one cobalt blue',
+          pv: ['linear-gradient(180deg,#f7f5f0,#f1eee7)', 'linear-gradient(180deg,#ffffff 0 70%,#141416 70% 80%,#ffffff 80% 88%,#141416 88%)', '#ffffff', '#141416'] },
+        { id: 'bitmap', label: 'Bitmap', base: 'light', fav: '#000000', cover: '#ffffff', font: 'Pixelify+Sans:wght@500;600;700', desc: 'A one-bit desktop: black, white and a pixel font',
+          pv: [`${_DITHER} 0 0/4px 4px,#ffffff`, 'linear-gradient(180deg,#ffffff 0 78%,#000000 78%)', '#ffffff', '#000000'] },
+        { id: 'linen', label: 'Linen', base: 'light', fav: '#2f6e6a', cover: '#efebe4', desc: 'Woven linen, charcoal and deep teal',
+          pv: ['repeating-linear-gradient(0deg,rgba(60,50,35,.07) 0 1px,transparent 1px 3px),#efebe4', 'linear-gradient(180deg,#2b2a28 0 78%,#b58f4d 78%)', '#f9f7f3', '#2f6e6a'] },
+        { id: 'zen', label: 'Zen', base: 'light', fav: '#4f6b3c', cover: '#ece6d8', font: 'Zen+Maru+Gothic:wght@500;700', desc: 'Raked sand, still stones and an ink-brush circle',
+          pv: [`${_RAKE} 0 0/50px 4px,#ece6d8`, '#2e2f2a', '#fbf9f3', '#4f6b3c'] },
+        { id: 'matcha', label: 'Matcha', base: 'light', fav: '#557f29', cover: '#f2f1e6', desc: 'Oat milk and fresh matcha',
+          pv: ['linear-gradient(180deg,#f5f4ea,#e9ead4)', 'linear-gradient(90deg,#dce8bd,#b2ca7e)', '#fcfbf5', '#557f29'] },
+        { id: 'herbarium', label: 'Herbarium', base: 'light', fav: '#3d6a44', cover: '#f1ebdd', font: 'Cormorant+Garamond:ital,wght@0,600;0,700;1,600', desc: 'Pressed ferns on old paper, in green ink',
+          pv: [`${_HERB_FROND} right -4px top -6px/30px 40px no-repeat,linear-gradient(180deg,#f3eee1,#ece4d2)`, 'linear-gradient(180deg,#2f5037 0 82%,#c9a75a 82%)', '#fbf7ed', '#3d6a44'] },
+        { id: 'contour', label: 'Contour', base: 'light', fav: '#2f6b3d', cover: '#efebdc', font: 'Bitter:wght@600;700', desc: 'A trail map: contour lines, forest green, an orange blaze',
+          pv: [`${_CONTOUR} center/cover,#efebdc`, '#2a402f', '#fbf9f1', '#c55a22'] },
+        { id: 'tropical',  label: 'Tropical', base: 'light', fav: '#0d9488', cover: '#f2fbf9', desc: 'Teal water and coral',
           pv: ['linear-gradient(180deg,#ddf6ff,#ecfbf4 55%,#fff3d6)', 'linear-gradient(90deg,#0e7490,#0d9488 45%,#e2566b 80%,#c81e6b)', '#ffffff', 'linear-gradient(90deg,#0d9488,#14b8a6,#f97366)'] },
-        { id: 'glacier',   label: 'Glacier', base: 'light', fav: '#2563eb', cover: '#f2f8ff',
+        { id: 'fjord', label: 'Fjord', base: 'light', fav: '#3a6b8c', cover: '#edf1f4', desc: 'Cool slate and sea mist',
+          pv: ['linear-gradient(180deg,#eff3f6,#e3e9ee)', 'linear-gradient(90deg,#2b3d4f,#4f6b80)', '#fbfcfd', '#3a6b8c'] },
+        { id: 'nautical', label: 'Nautical', base: 'light', fav: '#b8292f', cover: '#f3f1ea', font: 'Zilla+Slab:wght@600;700', desc: 'Navy and signal red, rope and a compass rose',
+          pv: [`${_COMPASS} right -12px bottom -12px/42px 42px no-repeat,#f3f1ea`, `linear-gradient(180deg,#172a4a 0 70%,transparent 70%),${_ROPE} 0 100%/8px 4px repeat-x`, '#fdfcf8', '#b8292f'] },
+        { id: 'glacier',   label: 'Glacier', base: 'light', fav: '#2563eb', cover: '#f2f8ff', desc: 'Crisp blues with drifting snow',
           pv: ['radial-gradient(circle at 30% 0%,#cdeafe,transparent 60%),linear-gradient(180deg,#eaf4ff,#f7fbff)', 'linear-gradient(90deg,#1e3a8a,#2563eb 50%,#0284c7)', '#ffffff', 'linear-gradient(90deg,#1d4ed8,#0ea5e9,#22d3ee)'] },
-        { id: 'ocean',   label: 'Ocean Depths', base: 'dark', fav: '#0ea5a4', cover: '#041322',
-          pv: ['radial-gradient(circle at 20% 0%,#0f4a5c,#05162a 70%)', 'linear-gradient(90deg,#0a3d62,#0b5f7a 45%,#0e8a8f)', '#0e263d', 'linear-gradient(90deg,#0e7490,#0ea5a4,#22c1a6)'] },
-        { id: 'aurora',  label: 'Aurora', base: 'dark', fav: '#10a37f', cover: '#070a10',
-          pv: ['radial-gradient(circle at 15% 0%,#0f5545,transparent 60%),radial-gradient(circle at 85% 0%,#3a2a72,transparent 60%),#070a10', 'linear-gradient(90deg,#0f766e,#1d4f91 50%,#5b3cc4)', '#131a24', 'linear-gradient(90deg,#10a37f,#2f6fd6,#7c4ddb)'] },
-        { id: 'neon',    label: 'Neon Nights', base: 'dark', fav: '#e5309a', cover: '#0a0614',
-          pv: ['radial-gradient(circle at 50% -20%,#5c1846,#0d0719 70%)', 'linear-gradient(90deg,#ff2e97,#8a3ffc 52%,#1fb6ff)', '#1a112e', 'linear-gradient(90deg,#ff2e97,#a04cff,#3aa7ff)'] },
-        { id: 'nightshade', label: 'Nightshade', base: 'dark', fav: '#e2620f', cover: '#0c0a10',
-          pv: ['radial-gradient(circle at 85% 0%,#4a2410,transparent 60%),radial-gradient(circle at 5% 0%,#2c1a4a,transparent 60%),#0b0910', 'linear-gradient(90deg,#2b1640,#4c2a6b 55%,#8a3a12)', '#1c1724', 'linear-gradient(90deg,#e2620f,#c2410c,#7e22ce)'] },
-        { id: 'starlight', label: 'Starlight', base: 'dark', fav: '#8b5cf6', cover: '#050816',
-          pv: ['radial-gradient(1px 1px at 20% 30%,#fff,transparent),radial-gradient(1px 1px at 70% 60%,#fff,transparent),radial-gradient(1px 1px at 45% 80%,#fff,transparent),radial-gradient(circle at 80% 0%,#4a1a55,transparent 60%),#060a1c', 'linear-gradient(90deg,#1e1452,#4c1d95 35%,#9d2f8f 70%,#e2557f)', '#121733', 'linear-gradient(90deg,#6d3fe0,#b4479e,#e2557f)'] },
-        { id: 'ember', label: 'Ember', base: 'dark', fav: '#ea580c', cover: '#120c0a',
-          pv: ['radial-gradient(circle at 50% 120%,#7c2d0f,transparent 65%),#120c0a', 'linear-gradient(90deg,#7f1d1d,#b8380c,#dd5a12,#b8380c)', '#221714', 'linear-gradient(90deg,#b91c1c,#ea580c,#f59e0b)'] },
-        { id: 'gold',    label: 'Midnight Gold', base: 'dark', fav: '#d4af37', cover: '#0b0a08', accentAttr: 'yellow',
+        { id: 'porcelain', label: 'Porcelain', base: 'light', fav: '#1d4fa3', cover: '#eef2f8', font: 'Playfair+Display:wght@600;700', desc: 'Blue-and-white china, glazed and painted',
+          pv: [`${_DELFT} 0 0/20px 20px,#eef2f8`, `linear-gradient(180deg,#1a4594 0 72%,transparent 72%),${_SCALLOP} 0 100%/6px 3px repeat-x`, '#fafcff', '#1d4fa3'] },
+        { id: 'notebook', label: 'Notebook', base: 'light', fav: '#2350b0', cover: '#fdfcf6', font: 'Caveat:wght@600;700', desc: 'Ruled paper, ballpoint doodles and a spiral binding',
+          pv: ['linear-gradient(90deg,transparent 0 7px,rgba(222,82,82,.6) 7px 8px,transparent 8px),repeating-linear-gradient(180deg,transparent 0 4px,rgba(80,130,210,.35) 4px 5px),#fdfcf6', '#2b4a9a', '#ffffff', '#2350b0'] },
+        { id: 'riso', label: 'Riso', base: 'light', fav: '#d6276f', cover: '#f5f0e6', desc: 'Fluorescent pink and blue, printed on cream',
+          pv: ['radial-gradient(rgba(50,85,164,.22) 1px,transparent 1.3px) 0 0/5px 5px,#f5f0e6', 'linear-gradient(180deg,#3255a4 0 78%,#d6276f 78%)', '#fffcf6', '#d6276f'] },
+        { id: 'gold',    label: 'Midnight Gold', base: 'dark', fav: '#d4af37', cover: '#0b0a08', accentAttr: 'yellow', desc: 'Black and polished gold',
           pv: ['radial-gradient(circle at 50% -20%,#3a2f12,transparent 60%),#0b0a08', 'linear-gradient(90deg,#7a5c16,#b8892a 22%,#e9c96a 45%,#fff1b8 52%,#d4af37 62%,#9c7623 85%,#6e5212)', '#1b1813', 'linear-gradient(90deg,#b08d2a,#e9c96a,#b08d2a)'] },
+        { id: 'kintsugi', label: 'Kintsugi', base: 'dark', fav: '#d4a64a', cover: '#0f0d0c', accentAttr: 'yellow', font: 'Shippori+Mincho:wght@600;700', desc: 'Black lacquer, mended with seams of gold',
+          pv: [`${_KINTSUGI} center/cover,#0f0d0c`, `linear-gradient(180deg,#151210 0 76%,transparent 76%),${_SEAM} 0 100%/60px 3px repeat-x,#151210`, '#171412', 'linear-gradient(90deg,#b88a2f,#e8c879,#b88a2f)'] },
+        { id: 'ember', label: 'Ember', base: 'dark', fav: '#ea580c', cover: '#120c0a', desc: 'Glowing embers on charcoal',
+          pv: ['radial-gradient(circle at 50% 120%,#7c2d0f,transparent 65%),#120c0a', 'linear-gradient(90deg,#7f1d1d,#b8380c,#dd5a12,#b8380c)', '#221714', 'linear-gradient(90deg,#b91c1c,#ea580c,#f59e0b)'] },
+        { id: 'marquee', label: 'Marquee', base: 'dark', fav: '#f5c542', cover: '#12060a', accentAttr: 'yellow', font: 'Limelight', desc: 'An old theatre: velvet curtains and a row of bulbs',
+          pv: ['linear-gradient(90deg,#6a1220 0 9%,transparent 9% 91%,#6a1220 91%),radial-gradient(ellipse at 50% 0%,rgba(255,214,140,.25),transparent 70%),#12060a', 'radial-gradient(circle,#ffe39a 0 .9px,transparent 1.3px) 0 4.5px/5px 3px repeat-x,linear-gradient(180deg,#951c2d,#6a1220)', '#1d0b10', '#f5c542'] },
+        { id: 'espresso', label: 'Espresso', base: 'dark', fav: '#a96b38', cover: '#15100c', accentAttr: 'yellow', desc: 'Dark roast and caramel crema',
+          pv: ['radial-gradient(circle at 50% -20%,#5a3a22,#15100c 70%)', 'linear-gradient(90deg,#2e1c13,#5f3b26)', '#261d17', 'linear-gradient(90deg,#c8894a,#e6bb84)'] },
+        { id: 'groovy', label: 'Groovy', base: 'dark', fav: '#e8a33d', cover: '#22140c', accentAttr: 'yellow', font: 'Shrikhand', desc: 'Seventies stripes in mustard, orange and brown',
+          pv: ['radial-gradient(circle at 100% 100%,transparent 0 7px,#e8a33d 7px 9.5px,#d9622b 9.5px 12px,#8a4a22 12px 14.5px,transparent 14.5px),#22140c', 'linear-gradient(180deg,#4a2c18 0 52%,#e8a33d 52% 68%,#d9622b 68% 84%,#8a4a22 84%)', '#2c1b11', '#e26a32'] },
+        { id: 'folio', label: 'Folio', base: 'dark', fav: '#d1a54e', cover: '#17100d', accentAttr: 'yellow', font: 'IM+Fell+English:ital@0;1&family=IM+Fell+English+SC', desc: 'Oxblood leather, gilt tooling and a shelf of old books',
+          pv: [`${_LEATHER} 0 0/60px 60px,#17100d`, 'linear-gradient(180deg,#5e1a25 0 75%,#d1a54e 75%)', '#221814', 'linear-gradient(90deg,#b58b38,#ebc877,#b58b38)'] },
+        { id: 'bordeaux', label: 'Bordeaux', base: 'dark', fav: '#a3325a', cover: '#150a0e', desc: 'Deep wine, with a champagne line',
+          pv: ['radial-gradient(circle at 80% -10%,#6b1a30,#150a0e 70%)', 'linear-gradient(180deg,#5a1628 0 80%,#e9c27a 80%)', '#28141c', 'linear-gradient(90deg,#a3325a,#cf5574)'] },
+        { id: 'cathedral', label: 'Cathedral', base: 'dark', fav: '#d9b44a', cover: '#0c0a10', accentAttr: 'yellow', font: 'Pirata+One', desc: 'Stained glass and stone, the light falling in colors',
+          pv: [`${_ROSE} right -10px top -8px/36px 36px no-repeat,#0c0a10`, 'linear-gradient(90deg,#5a0f20,#3a1666 40%,#14306b 70%,#0e4a4a)', '#16121b', 'linear-gradient(90deg,#b8922f,#ecd07e,#b8922f)'] },
+        { id: 'nightshade', label: 'Nightshade', base: 'dark', fav: '#e2620f', cover: '#0c0a10', desc: 'Purple night with an orange glow',
+          pv: ['radial-gradient(circle at 85% 0%,#4a2410,transparent 60%),radial-gradient(circle at 5% 0%,#2c1a4a,transparent 60%),#0b0910', 'linear-gradient(90deg,#2b1640,#4c2a6b 55%,#8a3a12)', '#1c1724', 'linear-gradient(90deg,#e2620f,#c2410c,#7e22ce)'] },
+        { id: 'neon',    label: 'Neon Nights', base: 'dark', fav: '#e5309a', cover: '#0a0614', desc: 'Hot pink and electric blue',
+          pv: ['radial-gradient(circle at 50% -20%,#5c1846,#0d0719 70%)', 'linear-gradient(90deg,#ff2e97,#8a3ffc 52%,#1fb6ff)', '#1a112e', 'linear-gradient(90deg,#ff2e97,#a04cff,#3aa7ff)'] },
+        { id: 'synthwave', label: 'Synthwave', base: 'dark', fav: '#ff3ea5', cover: '#120626', accentAttr: 'yellow', font: 'Orbitron:wght@600;700;800', desc: 'An 80s sunset over a neon grid',
+          pv: [`linear-gradient(rgba(255,62,165,.6) 1px,transparent 1px) 0 26px/7px 4px,${_SUN} center 9px/18px 18px no-repeat,linear-gradient(180deg,#0d041f,#3a0d4f 72%,#5c1550)`, 'linear-gradient(90deg,#2a0b5a,#a8237f,#d23a52)', '#1a0b35', 'linear-gradient(90deg,#ff3ea5,#ff7a59)'] },
+        { id: 'cyberpunk', label: 'Cyberpunk', base: 'dark', fav: '#fcee0a', cover: '#0b0a14', accentAttr: 'yellow', font: 'Rajdhani:wght@600;700', desc: 'Neon in the rain, a city at night, hazard yellow',
+          pv: [`linear-gradient(0deg,#191530 0 22%,transparent 22%),${_RAIN} 0 0/30px 40px,#0b0a14`, 'repeating-linear-gradient(-45deg,#fcee0a 0 2px,#0b0a14 2px 4px) 0 100%/100% 2px no-repeat,#17102b', '#13111f', '#fcee0a'] },
+        { id: 'starlight', label: 'Starlight', base: 'dark', fav: '#8b5cf6', cover: '#050816', desc: 'A violet sky full of stars',
+          pv: ['radial-gradient(1px 1px at 20% 30%,#fff,transparent),radial-gradient(1px 1px at 70% 60%,#fff,transparent),radial-gradient(1px 1px at 45% 80%,#fff,transparent),radial-gradient(circle at 80% 0%,#4a1a55,transparent 60%),#060a1c', 'linear-gradient(90deg,#1e1452,#4c1d95 35%,#9d2f8f 70%,#e2557f)', '#121733', 'linear-gradient(90deg,#6d3fe0,#b4479e,#e2557f)'] },
+        { id: 'astrolabe', label: 'Astrolabe', base: 'dark', fav: '#c79a52', cover: '#070b17', accentAttr: 'yellow', font: 'Marcellus+SC', desc: 'Brass instruments under a chart of the stars',
+          pv: [`${_STARCHART} center/cover,#070b17`, 'linear-gradient(180deg,#0f1730 0 70%,#c79a52 70%)', '#0d1426', 'linear-gradient(180deg,#e6c27e,#a87c36)'] },
+        { id: 'dusk', label: 'Dusk', base: 'dark', fav: '#e58f6e', cover: '#10111f', accentAttr: 'yellow', desc: 'Twilight blues, warm at the horizon',
+          pv: ['linear-gradient(180deg,#14152c,#2a1f3a 70%,#5a3a40)', 'linear-gradient(90deg,#1d1f45,#4f3d6e,#94525a)', '#1e1f34', 'linear-gradient(90deg,#e58f6e,#f6c08a)'] },
+        { id: 'moonstone', label: 'Moonstone', base: 'dark', fav: '#6f86e0', cover: '#0f1218', accentAttr: 'yellow', desc: 'Midnight with a pearly blue sheen',
+          pv: ['radial-gradient(circle at 15% -10%,#2e3a66,#0f1218 70%)', 'linear-gradient(90deg,#222838,#3a3550,#2b3a4c)', '#1c212b', 'linear-gradient(90deg,#8fa8ff,#b7a6ff,#f0c4b0)'] },
+        { id: 'nocturne', label: 'Nocturne', base: 'dark', fav: '#c9dceb', cover: '#091114', accentAttr: 'yellow', font: 'Gilda+Display', desc: 'A moonlit garden: moonflowers, moths and fireflies',
+          pv: ['radial-gradient(circle at 82% 26%,rgba(240,244,250,.9) 0 2.5px,rgba(220,235,255,.2) 3px,transparent 9px),#091114', '#0f1d22', '#0f191c', 'linear-gradient(90deg,#b3c9db,#eef5fa)'] },
+        { id: 'lumen', label: 'Lumen', base: 'dark', fav: '#8aa8ff', cover: '#0a0e1c', accentAttr: 'yellow', desc: 'Frosted glass over drifting light',
+          pv: ['radial-gradient(circle at 18% 30%,rgba(124,92,255,.75),transparent 46%),radial-gradient(circle at 82% 72%,rgba(60,210,255,.55),transparent 46%),radial-gradient(circle at 70% 10%,rgba(255,90,200,.45),transparent 40%),#0a0e1c', 'linear-gradient(90deg,rgba(150,160,255,.55),rgba(230,140,255,.45),rgba(110,230,255,.5))', 'rgba(255,255,255,.14)', 'linear-gradient(90deg,#8aa8ff,#c08bff,#7ff0e6)'] },
+        { id: 'aurora',  label: 'Aurora', base: 'dark', fav: '#10a37f', cover: '#070a10', desc: 'Northern lights over a dark sky',
+          pv: ['radial-gradient(circle at 15% 0%,#0f5545,transparent 60%),radial-gradient(circle at 85% 0%,#3a2a72,transparent 60%),#070a10', 'linear-gradient(90deg,#0f766e,#1d4f91 50%,#5b3cc4)', '#131a24', 'linear-gradient(90deg,#10a37f,#2f6fd6,#7c4ddb)'] },
+        { id: 'ocean',   label: 'Ocean Depths', base: 'dark', fav: '#0ea5a4', cover: '#041322', desc: 'Deep teal water',
+          pv: ['radial-gradient(circle at 20% 0%,#0f4a5c,#05162a 70%)', 'linear-gradient(90deg,#0a3d62,#0b5f7a 45%,#0e8a8f)', '#0e263d', 'linear-gradient(90deg,#0e7490,#0ea5a4,#22c1a6)'] },
+        { id: 'verdigris', label: 'Verdigris', base: 'dark', fav: '#d7895a', cover: '#0c1615', accentAttr: 'yellow', font: 'Cinzel:wght@600;700', desc: 'Copper gone green, with bright copper edges',
+          pv: [`${_PATINA} 0 0/90px 90px,#0c1615`, 'linear-gradient(180deg,#173a34 0 66%,#c27a4c 66%)', '#112120', 'linear-gradient(180deg,#e4a173,#b0633a)'] },
+        { id: 'blueprint', label: 'Blueprint', base: 'dark', fav: '#1f5d99', cover: '#0b3a66', accentAttr: 'yellow', desc: 'Drafting blue with a fine grid',
+          pv: ['linear-gradient(rgba(255,255,255,.16) 1px,transparent 1px) 0 0/7px 7px,linear-gradient(90deg,rgba(255,255,255,.16) 1px,transparent 1px) 0 0/7px 7px,#0b3a66', '#072b50', '#134d82', '#ffd166'] },
+        { id: 'cockpit', label: 'Cockpit', base: 'dark', fav: '#3fd8ff', cover: '#05080f', accentAttr: 'yellow', font: 'Chakra+Petch:wght@600;700', desc: 'A flight deck at night: radar, gauges and cyan readouts',
+          pv: [`${_RADAR} right -14px bottom -14px/46px 46px no-repeat,#05080f`, 'linear-gradient(180deg,#0b1424 0 70%,#3fd8ff 70% 80%,#0b1424 80%)', '#0a111d', '#3fd8ff'] },
+        { id: 'evergreen', label: 'Evergreen', base: 'dark', fav: '#1c6b4f', cover: '#0b1612', accentAttr: 'yellow', desc: 'Pine green and brass',
+          pv: ['radial-gradient(circle at 20% -10%,#1f5a43,#0b1612 70%)', 'linear-gradient(180deg,#164234 0 80%,#c9a75a 80%)', '#152820', 'linear-gradient(90deg,#b8954a,#d4b46a)'] },
+        { id: 'deco', label: 'Deco', base: 'dark', fav: '#d8b36a', cover: '#08130f', accentAttr: 'yellow', font: 'Poiret+One', desc: 'Emerald and gold — fans, rays and brackets',
+          pv: [`${_DECO_FAN} 0 0/16px 8px,#08130f`, 'linear-gradient(180deg,#0b1a14 0 58%,#d8b36a 58% 68%,#0b1a14 68% 80%,#d8b36a 80% 90%,#0b1a14 90%)', '#0e1e18', 'linear-gradient(180deg,#e6c886,#c9a254)'] },
+        { id: 'chalkboard', label: 'Chalkboard', base: 'dark', fav: '#ffd66b', cover: '#1c2a24', accentAttr: 'yellow', font: 'Patrick+Hand', desc: 'Slate, chalk dust and a wooden frame',
+          pv: ['radial-gradient(ellipse at 30% 60%,rgba(255,255,255,.1),transparent 60%),#1c2a24', 'repeating-linear-gradient(90deg,rgba(0,0,0,.12) 0 2px,transparent 2px 6px),linear-gradient(180deg,#6b4a2e,#533722)', '#22322b', '#f6f7f2'] },
+        { id: 'phosphor', label: 'Phosphor', base: 'dark', fav: '#33f06f', cover: '#040905', accentAttr: 'yellow', font: '', desc: 'A green-screen terminal, scanlines and all',
+          pv: ['repeating-linear-gradient(180deg,rgba(0,0,0,.45) 0 1px,transparent 1px 3px),radial-gradient(circle at 50% 40%,#0c2312,#040905 75%)', 'linear-gradient(180deg,#06100a 0 82%,#33f06f 82%)', '#07110a', '#33f06f'] },
+        { id: 'volt', label: 'Volt', base: 'dark', fav: '#d4ff3a', cover: '#0b0c0d', accentAttr: 'yellow', font: 'Barlow+Condensed:ital,wght@1,700;1,800', desc: 'Matte black and a jolt of volt, built for speed',
+          pv: ['linear-gradient(115deg,transparent 0 58%,rgba(212,255,58,.2) 58% 63%,transparent 63% 67%,rgba(212,255,58,.12) 67% 72%,transparent 72%),#0b0c0d', 'linear-gradient(180deg,#16171a 0 70%,#d4ff3a 70%)', '#131416', '#d4ff3a'] },
+        { id: 'graphite', label: 'Graphite', base: 'dark', fav: '#3a6be6', cover: '#0e0f11', desc: 'A calm, focused dark',
+          pv: ['radial-gradient(rgba(255,255,255,.12) 1px,transparent 1.3px) 0 0/6px 6px,#0e0f11', 'linear-gradient(180deg,#202227,#17181c)', '#1c1d21', '#3a6be6'] },
+        { id: 'noir', label: 'Noir', base: 'dark', fav: '#d92f32', cover: '#0b0b0b', desc: 'Black and white, and one red',
+          pv: ['radial-gradient(circle at 50% -30%,#2a2a2a,#0b0b0b 70%)', 'linear-gradient(180deg,#161616 0 82%,#d92f32 82%)', '#1b1b1b', '#d92f32'] },
     ];
     let currentPreset = GM_getValue(PRESET_KEY, '');
     if (!THEME_PRESETS.some(t => t.id === currentPreset)) currentPreset = '';
@@ -1086,6 +1622,15 @@
         const html = document.documentElement, d = html.dataset;
         d.mode = effMode(); d.accent = effAccent(); d.style = effStyle();
         if (currentPreset) d.dtiTheme = currentPreset; else delete d.dtiTheme;   // its own name — other code on DTI pages sets a plain "theme" attribute
+        // (a theme's own typeface for headings — Google Fonts, only while it's on; '' = one already here)
+        const p = presetOf();
+        if (p && 'font' in p) d.dtiFont = '1'; else delete d.dtiFont;
+        let fl = document.getElementById('dti-theme-font');
+        const href = p?.font ? `https://fonts.googleapis.com/css2?family=${p.font}&display=swap` : '';
+        if (href && fl?.getAttribute('href') !== href) {
+            if (!fl) { fl = document.createElement('link'); fl.id = 'dti-theme-font'; fl.rel = 'stylesheet'; fl.dataset.dtiFont = '1'; (document.head || html).appendChild(fl); }
+            fl.href = href;
+        } else if (!href) fl?.remove();
         html.style.colorScheme = effMode();
     }
     let showNCBadge   = GM_getValue(NC_BADGE_KEY, false);
@@ -1362,6 +1907,10 @@
         'Glasses', 'Gloves', 'Hat', 'Higher Foreground Item', 'Hind Cover', 'Jacket', 'Left-hand Item', 'Lower Foreground Item',
         'Markings', 'Music', 'Necklace', 'Right-hand Item', 'Shirt/Dress', 'Shoes', 'Sound Effects', 'Static', 'Thought Bubble',
         'Trousers', 'Wings'];
+    // A zone's name, shortened the way DTI's own labels do it (Background Item → BG Item, …) — for the item tiles
+    const zoneShort = z => String(z).replace('Background Item', 'BG Item').replace('Foreground Item', 'FG Item').replace('Lower-body', 'Lower')
+        .replace('Upper-body', 'Upper').replace('Transient', 'Trans').replace('Biology', 'Bio');
+    const ED_TRASH = '<svg width="10" height="11" viewBox="0 0 10 11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M1.5 3h7M4 3V2h2v1M2.5 3l.5 6h4l.5-6"/></svg>';
     // A filter's picks (the color and zone filters — user asked for several at once, and for some to be left out): { inc: shown,
     // exc: left out, all: with several shown, things must be all of them (else any one does) }
     const Picks = {
@@ -1394,8 +1943,23 @@
         let map = null, loading = null, saveT = 0, active = 0;
         const pending = new Map(), queue = [];
         const keyOf = src => String(src || '').replace(/^(https?:)?\/\/[^/]+/, '').replace(/[?#].*$/, '');
-        const ready = () => loading || (loading = DTICache.get('itemcolors').then(v => (map = v && typeof v === 'object' ? v : {})));
-        const save = () => { clearTimeout(saveT); saveT = setTimeout(() => DTICache.set('itemcolors', map), 1500); };
+        const ready = () => loading || (loading = DTICache.get('itemcolors').then(v => {
+            map = v && typeof v === 'object' ? v : {};
+            // (readings from before 2.7 — named the way they were then, not counted: dropped, each read again when next needed — the last time)
+            let old = 0;
+            for (const k in map) if (map[k] && typeof map[k] === 'object') { delete map[k]; old++; }
+            if (old) save();
+            return map;
+        }));
+        // (saved a moment after the last reading — and in a long run of them (every item), at least every 20s, and as the page goes)
+        let saveFrom = 0;
+        const saveNow = () => { clearTimeout(saveT); saveT = 0; saveFrom = 0; DTICache.set('itemcolors', map); };
+        const save = () => {
+            clearTimeout(saveT);
+            if (!saveFrom) saveFrom = Date.now();
+            saveT = setTimeout(saveNow, Date.now() - saveFrom > 20000 ? 0 : 1500);
+        };
+        addEventListener('pagehide', () => { if (saveT) saveNow(); });
         const hex = (r, g, b) => '#' + [r, g, b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
         // One pixel's named color
         function classify(r, g, b) {
@@ -1423,7 +1987,13 @@
             const [L, A, B] = labRgb(r, g, b), C = Math.hypot(A, B);
             return L >= 84 && C < 26 ? Math.min(1, (26 - C) / 14) : 0;
         }
-        // A picture → { t: its main named color, sh: { color: share }, m / s / v: main, secondary and vibrant colors }
+        // A picture → its own colors, counted: the item's pixels (not the background) on a grid of 16 steps a channel, the most-used
+        // 64 kept (the rest counted with the nearest) — a short string: RV, the count, then each grid step with its count, 4 characters apiece. How those are named
+        // (red, cream as white…) is worked out from it when asked (derive) — so a change to the naming needs no new reading, and
+        // what's been read stays through updates. RV only changes if this reading itself does (user asked).
+        const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+        const enc = (v, n) => { let o = ''; for (let i = n - 1; i >= 0; i--) o += B64[(v >> (6 * i)) & 63]; return o; };
+        const dec = (t, at, n) => { let v = 0; for (let i = 0; i < n; i++) v = v * 64 + B64.indexOf(t[at + i]); return v; };
         function analyse(pic) {
             const N = 48, cv = document.createElement('canvas');
             cv.width = cv.height = N;
@@ -1445,36 +2015,63 @@
             let kept = 0;
             for (let p = 0; p < N * N; p++) if (!bg[p]) kept++;
             const whole = kept < N * N * 0.06;   // (next to nothing left: an all-white picture — count all of it)
-            const n = {}, sum = {}, cells = new Map();
             let total = 0;
-            const add = (k, w, o) => {   // (a pixel, or part of one, to a named color)
-                n[k] = (n[k] || 0) + w;
-                const t = sum[k] || (sum[k] = [0, 0, 0]);
-                t[0] += px[o] * w; t[1] += px[o + 1] * w; t[2] += px[o + 2] * w;
-            };
+            const bins = new Map();
             for (let p = 0; p < N * N; p++) {
                 const o = p * 4;
                 if (px[o + 3] < 40 || (bg[p] && !whole)) continue;
-                const k = classify(px[o], px[o + 1], px[o + 2]), w = NEUTRAL.has(k) ? 0 : paleWhite(px[o], px[o + 1], px[o + 2]);
                 total++;
-                if (w) add(WHITE, w, o);
-                if (w < 1) add(k, 1 - w, o);
-                // (and its place in a coarse grid of colors, 5 steps a channel: the picture's own few colors, for one picked by hand)
-                const q = ((px[o] * 5) >> 8) * 25 + ((px[o + 1] * 5) >> 8) * 5 + ((px[o + 2] * 5) >> 8);
-                const cq = cells.get(q) || cells.set(q, [0, 0, 0, 0]).get(q);
-                cq[0] += px[o]; cq[1] += px[o + 1]; cq[2] += px[o + 2]; cq[3]++;
+                const q = (px[o] >> 4) << 8 | (px[o + 1] >> 4) << 4 | px[o + 2] >> 4;
+                bins.set(q, (bins.get(q) || 0) + 1);
             }
             if (!total) return false;
+            const all = [...bins].sort((x, y) => y[1] - x[1]), keep = all.slice(0, 64);
+            const ctr = q => [(q >> 8) * 16 + 8, (q >> 4 & 15) * 16 + 8, (q & 15) * 16 + 8], kc = keep.map(([q]) => ctr(q));
+            for (let i = 64; i < all.length; i++) {   // (the rest: each counted with the kept step nearest its color)
+                const [r, g, b] = ctr(all[i][0]);
+                let best = 0, bd = Infinity;
+                kc.forEach(([R, G, B], j) => { const d = (r - R) ** 2 + (g - G) ** 2 + (b - B) ** 2; if (d < bd) { bd = d; best = j; } });
+                keep[best][1] += all[i][1];
+            }
+            let out = RV + enc(total, 2);
+            for (const [q, cnt] of keep) out += enc(q << 12 | cnt, 4);
+            return out;
+        }
+        // Its colors, named the way they're named now → { t: its main named color, sh: { color: share }, m / s / v: main, secondary
+        // and vibrant colors, pal: its own few colors (for one picked by hand) } — once a page
+        const derived = new Map();
+        function derive(raw) {
+            let pr = derived.get(raw);
+            if (pr) return pr;
+            const total = dec(raw, 1, 2), n = {}, sum = {}, cells = new Map();
+            const add = (k, w, r, g, b) => {   // (a grid step's pixels, or part of them, to a named color)
+                n[k] = (n[k] || 0) + w;
+                const t = sum[k] || (sum[k] = [0, 0, 0]);
+                t[0] += r * w; t[1] += g * w; t[2] += b * w;
+            };
+            for (let at = 3; at + 4 <= raw.length; at += 4) {
+                const v = dec(raw, at, 4), q = v >> 12, cnt = v & 4095;
+                const r = (q >> 8) * 16 + 8, g = (q >> 4 & 15) * 16 + 8, b = (q & 15) * 16 + 8;
+                const k = classify(r, g, b), w = NEUTRAL.has(k) ? 0 : paleWhite(r, g, b);
+                if (w) add(WHITE, w * cnt, r, g, b);
+                if (w < 1) add(k, (1 - w) * cnt, r, g, b);
+                // (and its place in a coarse grid of colors, 5 steps a channel: the picture's own few colors, for one picked by hand)
+                const q5 = ((r * 5) >> 8) * 25 + ((g * 5) >> 8) * 5 + ((b * 5) >> 8);
+                const cq = cells.get(q5) || cells.set(q5, [0, 0, 0, 0]).get(q5);
+                cq[0] += r * cnt; cq[1] += g * cnt; cq[2] += b * cnt; cq[3] += cnt;
+            }
             // Ranked with the outlines, shine and shading every item has counting for less
             const weight = k => k === BLACK ? 0.45 : k === GREY ? 0.7 : k === WHITE ? 0.85 : 1;
-            const ranked = Object.keys(n).sort((a, b) => n[b] * weight(b) - n[a] * weight(a));
+            const ranked = Object.keys(n).sort((x, y) => n[y] * weight(y) - n[x] * weight(x));
             const avg = k => hex(sum[k][0] / n[k], sum[k][1] / n[k], sum[k][2] / n[k]);
             const sh = {};
             ranked.forEach(k => { const v = Math.round(n[k] / total * 100) / 100; if (v >= 0.02) sh[k] = v; });
             const vivid = ranked.find(k => !NEUTRAL.has(k));
-            const pal = [...cells.values()].sort((a, b) => b[3] - a[3]).slice(0, 8)
-                .map(c => [hex(c[0] / c[3], c[1] / c[3], c[2] / c[3]), Math.round(c[3] / total * 100) / 100]).filter(c => c[1] >= 0.02);
-            return { t: ranked[0], sh, m: avg(ranked[0]), s: ranked[1] ? avg(ranked[1]) : '', v: vivid ? avg(vivid) : '', pal, r: RV };
+            const pal = [...cells.values()].sort((x, y) => y[3] - x[3]).slice(0, 8)
+                .map(cq => [hex(cq[0] / cq[3], cq[1] / cq[3], cq[2] / cq[3]), Math.round(cq[3] / total * 100) / 100]).filter(cq => cq[1] >= 0.02);
+            pr = { t: ranked[0], sh, m: avg(ranked[0]), s: ranked[1] ? avg(ranked[1]) : '', v: vivid ? avg(vivid) : '', pal };
+            derived.set(raw, pr);
+            return pr;
         }
         // How a color looks (CIE Lab: its lightness, 0–100, and how colored it is), and how close two colors look (Lab distance:
         // ~2 barely different, ~10 close, ~30 another shade)
@@ -1497,8 +2094,9 @@
         const clampLv = v => Math.min(7, Math.max(1, Math.round(+v) || 4));
         let level = clampLv(GM_getValue('dti_color_level', null) ?? (+GM_getValue('dti_color_match', 3) || 3) + 1);
         if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('dti_color_level', (key, o, v, remote) => { if (remote) level = clampLv(v); });
-        // (a picture read before it was read this way — creams as white, its own few colors kept: read again when next needed)
-        const RV = 2, stale = p => !!p && p.r !== RV;
+        // (the way a picture's colors are read and kept — changed only if the reading itself changes; how they're named works from
+        // what's kept, so it can change freely)
+        const RV = '3', fresh = p => typeof p === 'string' && p[0] === RV;
         // undefined = couldn't fetch it now (asked again another time); false = not a picture we can read (kept)
         const decode = async blob => {
             try { const bmp = await createImageBitmap(blob); const pr = analyse(bmp); bmp.close?.(); return pr; } catch (_) { return false; }
@@ -1529,7 +2127,7 @@
                     if (pr !== undefined) { map[k] = pr; save(); }
                     pending.delete(k);
                     active--;
-                    done(pr || null);
+                    done(pr ? derive(pr) : null);
                     pump();
                 });
             }
@@ -1538,12 +2136,13 @@
             ready,
             // A picture's colors, once read (after ready()): an object; false = unreadable; undefined = not read yet (or read the old
             // way — read again)
-            get: src => { const p = map ? map[keyOf(src)] : undefined; return stale(p) ? undefined : p; },
+            get: src => { const p = map ? map[keyOf(src)] : undefined; return p === false ? false : fresh(p) ? derive(p) : undefined; },
             async profile(src) {
                 await ready();
                 const k = keyOf(src);
                 if (!k) return null;
-                if (k in map && !stale(map[k])) return map[k] || null;
+                if (map[k] === false) return null;
+                if (fresh(map[k])) return derive(map[k]);
                 if (!pending.has(k)) pending.set(k, new Promise(done => { queue.push([k, src, done]); pump(); }));
                 return pending.get(k);
             },
@@ -12340,6 +12939,21 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['2.7', [
+            'Themes: 48 new Advanced themes, light and dark apart — 32 with their own typeface, drawn backdrop and details (Notebook, Marquee, Cockpit, Kintsugi…)',
+            'Customs: sort a search — newest, oldest, A–Z, Z–A, color, zone, rarity, cap value, or yours first',
+            'Customs: pick zones with nothing typed to see every item in them — or “Every item” for all your pet can wear',
+            'Customs: “Load a pet” starts a new custom from one of your Neopets pets',
+            'Customs: a Zones button shows what’s worn in each zone and what’s still open, plus an “Open zones” filter',
+            'Customs: a layout menu — items per row, picture size, name and label size',
+            'Customs: tiles show every zone, a trash to take an item out and “?” item info, with easier-to-see buttons',
+            'Customs: switching All, NC and NP is instant on a list of every page',
+            'Alternate outfits: each outfit shows only its own items — “All items” shows them all',
+            'Colors read from item pictures now stay through updates (read one last time after this one)',
+            'Color and zone filters: a Reset button',
+            'My Items: a pencil to edit each list',
+            'Fixes: item previews no longer stretch with long zone lists, plus smaller fixes',
+        ]],
         ['2.6', [
             'Filters: pick several colors or zones at once — click once to show, twice to leave out',
             'Colors: with two or more picked, show items with any of them or all of them',
@@ -13599,6 +14213,238 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     radial-gradient(800px 500px at 100% 100%, rgba(120,90,30,.13), transparent 60%),
                     linear-gradient(180deg, #0d0b08, #080706);
             }
+            :root[data-dti-theme="peony"][data-mode][data-style] {
+                --bg: #fbf1f2; --surface: #ffffff; --surface-2: #fdf6f7; --surface-3: #f6e3e6; --border: #efd2d7; --nav-bg: #ffffff;
+                --text: #3a1e26; --text-muted: #85596a; --text-sub: #bf95a2;
+                --accent: #c8436b; --accent-dim: #ad3157; --accent-glow: rgba(200,67,107,.12); --accent-text: #b83861; --accent-fg: #ffffff;
+                --nc: #b45309; --np: #3c7a5a;
+                --solid-bg: #f0b6c6;
+                --solid-fill: linear-gradient(100deg, #f9d7df 0%, #f3bccb 45%, #eaa0b6 100%);
+                --solid-fg: #4a1628; --solid-fg-2: rgba(74,22,40,.74); --solid-line: rgba(74,22,40,.16);
+                --solid-hover: rgba(255,255,255,.38); --solid-active: rgba(255,255,255,.58);
+                --theme-btn: linear-gradient(100deg, #d24f76, #c8436b 55%, #a8355c);
+                --theme-page: radial-gradient(900px 480px at 0% 0%, rgba(249,215,223,.6), transparent 60%),
+                    radial-gradient(800px 480px at 100% 100%, rgba(253,232,214,.55), transparent 60%),
+                    linear-gradient(180deg, #fdf5f6, #faeef0);
+            }
+            :root[data-dti-theme="terracotta"][data-mode][data-style] {
+                --bg: #f6eee6; --surface: #fffaf5; --surface-2: #faf3ec; --surface-3: #f1e4d6; --border: #e6d3c0; --nav-bg: #fffaf5;
+                --text: #2d1f17; --text-muted: #7a5f4e; --text-sub: #b1978a;
+                --accent: #b8532f; --accent-dim: #9c4224; --accent-glow: rgba(184,83,47,.12); --accent-text: #a8482a; --accent-fg: #ffffff;
+                --nc: #a0590b; --np: #4d6b35;
+                --solid-bg: #a5472a;
+                --solid-fill: linear-gradient(100deg, #8f3a22 0%, #a5472a 50%, #b4552f 100%);
+                --solid-fg: #fff8f1; --solid-fg-2: rgba(255,248,241,.84); --solid-line: rgba(255,236,220,.28);
+                --solid-hover: rgba(255,240,228,.13); --solid-active: rgba(255,240,228,.22);
+                --theme-btn: linear-gradient(100deg, #a9472a, #b85432 55%, #c0632f);
+                --theme-page: radial-gradient(1000px 500px at 100% -10%, rgba(222,154,110,.3), transparent 60%),
+                    radial-gradient(900px 520px at 0% 110%, rgba(150,160,100,.16), transparent 60%),
+                    linear-gradient(180deg, #f8f0e7, #f3e8dc);
+                --theme-pattern: ${_GRAIN('.055')}; --theme-pattern-size: 180px 180px;
+            }
+            :root[data-dti-theme="honeycomb"][data-mode][data-style] {
+                --bg: #fdf6e3; --surface: #fffdf6; --surface-2: #fdf8ea; --surface-3: #f8ecc9; --border: #efdcaa; --nav-bg: #fffdf6;
+                --text: #2b2108; --text-muted: #6f5d2e; --text-sub: #a99764;
+                --accent: #c88a06; --accent-dim: #a46f00; --accent-glow: rgba(200,138,6,.14); --accent-text: #8f6200; --accent-fg: #241a00;
+                --nc: #a85d00; --np: #3b6fb6;
+                --solid-bg: #e3a51c;
+                --solid-fill: linear-gradient(100deg, #f4c552 0%, #e8ad2c 45%, #d69213 100%);
+                --solid-fg: #2a1d03; --solid-fg-2: rgba(42,29,3,.74); --solid-line: rgba(42,29,3,.18);
+                --solid-hover: rgba(255,255,255,.24); --solid-active: rgba(255,255,255,.38);
+                --theme-btn: linear-gradient(100deg, #e8ad2c, #d69213 55%, #c27a0a); --theme-btn-fg: #241a00;
+                --theme-page: radial-gradient(1000px 520px at 50% -10%, rgba(250,214,120,.42), transparent 60%),
+                    radial-gradient(800px 500px at 100% 100%, rgba(242,190,110,.25), transparent 60%),
+                    linear-gradient(180deg, #fff9ea, #fcf2da);
+                --theme-pattern: ${_HEXCOMB}; --theme-pattern-size: 55px 96px;
+            }
+            :root[data-dti-theme="paper"][data-mode][data-style] {
+                --bg: #f4efe4; --surface: #fbf8f1; --surface-2: #f7f2e8; --surface-3: #ece4d3; --border: #ddd2bd; --nav-bg: #fbf8f1;
+                --text: #1d1b17; --text-muted: #5e584d; --text-sub: #9a9282;
+                --accent: #c23b22; --accent-dim: #a32e18; --accent-glow: rgba(194,59,34,.11); --accent-text: #b0341d; --accent-fg: #fffaf2;
+                --nc: #9a5b00; --np: #2b4c7e;
+                --solid-bg: #1f1d1a;
+                --solid-fill: linear-gradient(180deg, #24221e, #1b1a17);
+                --solid-fg: #f4efe4; --solid-fg-2: rgba(244,239,228,.74); --solid-line: rgba(244,239,228,.16);
+                --solid-hover: rgba(244,239,228,.08); --solid-active: rgba(244,239,228,.14);
+                --theme-btn: linear-gradient(180deg, #cc4329, #b5341c);
+                --theme-page: radial-gradient(1200px 600px at 50% -20%, rgba(255,255,255,.65), transparent 60%),
+                    linear-gradient(180deg, #f6f1e6, #f0e9da);
+                --theme-pattern: ${_GRAIN('.075')}; --theme-pattern-size: 180px 180px;
+            }
+            :root[data-dti-theme="linen"][data-mode][data-style] {
+                --bg: #efebe4; --surface: #f9f7f3; --surface-2: #f4f1eb; --surface-3: #e7e1d7; --border: #d9d1c4; --nav-bg: #f9f7f3;
+                --text: #22201c; --text-muted: #5f5a52; --text-sub: #9a948a;
+                --accent: #2f6e6a; --accent-dim: #245854; --accent-glow: rgba(47,110,106,.12); --accent-text: #2a635f; --accent-fg: #ffffff;
+                --nc: #9a6a1e; --np: #3e6a8c;
+                --solid-bg: #2b2a28;
+                --solid-fill: linear-gradient(180deg, #33312e, #282725);
+                --solid-fg: #f3efe8; --solid-fg-2: rgba(243,239,232,.74); --solid-line: rgba(243,239,232,.16);
+                --solid-hover: rgba(243,239,232,.08); --solid-active: rgba(243,239,232,.14);
+                --theme-btn: linear-gradient(100deg, #2f6e6a, #3d8580);
+                --theme-page: radial-gradient(1000px 520px at 100% -10%, rgba(255,255,255,.7), transparent 60%),
+                    radial-gradient(900px 500px at 0% 110%, rgba(47,110,106,.08), transparent 60%),
+                    linear-gradient(180deg, #f1ede6, #ebe6dd);
+                --theme-pattern: repeating-linear-gradient(0deg, rgba(60,50,35,.035) 0 1px, transparent 1px 4px),
+                    repeating-linear-gradient(90deg, rgba(60,50,35,.03) 0 1px, transparent 1px 4px), ${_GRAIN('.04')};
+                --theme-pattern-size: auto, auto, 180px 180px;
+            }
+            :root[data-dti-theme="matcha"][data-mode][data-style] {
+                --bg: #f2f1e6; --surface: #fcfbf5; --surface-2: #f7f6ec; --surface-3: #e9ead4; --border: #d9dcbc; --nav-bg: #fcfbf5;
+                --text: #22281a; --text-muted: #5b6448; --text-sub: #959d80;
+                --accent: #557f29; --accent-dim: #46691f; --accent-glow: rgba(85,127,41,.13); --accent-text: #4f7726; --accent-fg: #ffffff;
+                --nc: #a06414; --np: #3f6f8a;
+                --solid-bg: #c6d99a;
+                --solid-fill: linear-gradient(100deg, #dce8bd 0%, #c6d99a 50%, #b2ca7e 100%);
+                --solid-fg: #233016; --solid-fg-2: rgba(35,48,22,.74); --solid-line: rgba(35,48,22,.16);
+                --solid-hover: rgba(255,255,255,.35); --solid-active: rgba(255,255,255,.55);
+                --theme-btn: linear-gradient(100deg, #5f8a33, #557f29 60%, #46691f);
+                --theme-page: radial-gradient(1000px 520px at 0% -10%, rgba(198,217,154,.45), transparent 60%),
+                    radial-gradient(900px 500px at 100% 110%, rgba(240,226,190,.55), transparent 60%),
+                    linear-gradient(180deg, #f5f4ea, #efeee0);
+            }
+            :root[data-dti-theme="fjord"][data-mode][data-style] {
+                --bg: #edf1f4; --surface: #fbfcfd; --surface-2: #f4f7f9; --surface-3: #e3e9ee; --border: #d0dae3; --nav-bg: #fbfcfd;
+                --text: #17222c; --text-muted: #4e5f6e; --text-sub: #8c9cab;
+                --accent: #3a6b8c; --accent-dim: #2e5672; --accent-glow: rgba(58,107,140,.12); --accent-text: #335f7d; --accent-fg: #ffffff;
+                --nc: #a0620d; --np: #3a7a64;
+                --solid-bg: #34495c;
+                --solid-fill: linear-gradient(100deg, #2b3d4f 0%, #3b5468 55%, #4f6b80 100%);
+                --solid-fg: #f2f6f9; --solid-fg-2: rgba(242,246,249,.8); --solid-line: rgba(242,246,249,.2);
+                --solid-hover: rgba(242,246,249,.1); --solid-active: rgba(242,246,249,.18);
+                --theme-btn: linear-gradient(100deg, #3a6b8c, #467c9e);
+                --theme-page: radial-gradient(1100px 500px at 50% -15%, rgba(255,255,255,.9), transparent 60%),
+                    radial-gradient(900px 520px at 100% 100%, rgba(170,195,214,.35), transparent 60%),
+                    linear-gradient(180deg, #eff3f6, #e8edf1);
+            }
+            :root[data-dti-theme="riso"][data-mode][data-style] {
+                --bg: #f5f0e6; --surface: #fffcf6; --surface-2: #faf6ee; --surface-3: #efe7d8; --border: #e2d7c4; --nav-bg: #fffcf6;
+                --text: #1b1a2e; --text-muted: #575670; --text-sub: #9896ad;
+                --accent: #d6276f; --accent-dim: #b81d5d; --accent-glow: rgba(214,39,111,.13); --accent-text: #c41f66; --accent-fg: #ffffff;
+                --nc: #c46a00; --np: #0067b1;
+                --solid-bg: #2f4fa2;
+                --solid-fill: linear-gradient(100deg, #2b4a9c, #3255a4);
+                --solid-fg: #fff6fb; --solid-fg-2: rgba(255,246,251,.82); --solid-line: rgba(255,246,251,.24);
+                --solid-hover: rgba(214,39,111,.24); --solid-active: rgba(214,39,111,.38);
+                --theme-btn: linear-gradient(100deg, #e0337c, #d6276f);
+                --theme-page: linear-gradient(180deg, #f6f1e7, #f2ecdf);
+                --theme-pattern: radial-gradient(rgba(50,85,164,.075) 1px, transparent 1.5px), radial-gradient(rgba(214,39,111,.06) 1px, transparent 1.5px);
+                --theme-pattern-size: 11px 11px, 11px 11px; --theme-pattern-pos: 0 0, 5.5px 5.5px;
+            }
+            :root[data-dti-theme="espresso"][data-mode][data-style] {
+                --bg: #15100c; --surface: #1e1712; --surface-2: #261d17; --surface-3: #30251d; --border: #3d2f25; --nav-bg: #19130e;
+                --text: #f3e9dd; --text-muted: #c1ab95; --text-sub: #7f6a58;
+                --accent: #d39a5b; --accent-dim: #b47d42; --accent-glow: rgba(211,154,91,.16); --accent-text: #e3b07a; --accent-fg: #1d130b;
+                --nc: #e6b35a; --np: #9cc3d5;
+                --solid-bg: #4a2e1f;
+                --solid-fill: linear-gradient(100deg, #2e1c13 0%, #4a2e1f 50%, #5f3b26 100%);
+                --solid-fg: #f6ece0; --solid-fg-2: rgba(246,236,224,.78); --solid-line: rgba(246,236,224,.18);
+                --solid-hover: rgba(246,236,224,.08); --solid-active: rgba(246,236,224,.14);
+                --theme-btn: linear-gradient(100deg, #c8894a, #d9a467 55%, #e6bb84); --theme-btn-fg: #22150b;
+                --theme-page: radial-gradient(1000px 500px at 50% -15%, rgba(160,100,55,.22), transparent 60%),
+                    radial-gradient(900px 500px at 100% 110%, rgba(110,65,35,.18), transparent 60%),
+                    linear-gradient(180deg, #17110d, #120d0a);
+                --theme-pattern: ${_GRAIN('.05')}; --theme-pattern-size: 180px 180px;
+            }
+            :root[data-dti-theme="bordeaux"][data-mode][data-style] {
+                --bg: #150a0e; --surface: #1f0f15; --surface-2: #28141c; --surface-3: #321a24; --border: #45222f; --nav-bg: #1a0c11;
+                --text: #f6e9ec; --text-muted: #c9a3ad; --text-sub: #84606b;
+                --accent: #c2416a; --accent-dim: #a3325a; --accent-glow: rgba(226,94,135,.18); --accent-text: #f08aa6; --accent-fg: #ffffff;
+                --nc: #e9c27a; --np: #a7c7e7;
+                --solid-bg: #5a1628;
+                --solid-fill: linear-gradient(100deg, #3d0f1d 0%, #5a1628 45%, #7b2236 100%);
+                --solid-fg: #fbeef1; --solid-fg-2: rgba(251,238,241,.8); --solid-line: rgba(251,238,241,.2);
+                --solid-hover: rgba(251,238,241,.09); --solid-active: rgba(251,238,241,.16);
+                --theme-btn: linear-gradient(100deg, #a3325a, #c2416a 55%, #cf5574);
+                --theme-page: radial-gradient(1000px 520px at 80% -15%, rgba(140,30,60,.32), transparent 60%),
+                    radial-gradient(800px 500px at 0% 100%, rgba(90,20,40,.3), transparent 60%),
+                    linear-gradient(180deg, #170b10, #10070b);
+            }
+            :root[data-dti-theme="dusk"][data-mode][data-style] {
+                --bg: #10111f; --surface: #171829; --surface-2: #1e1f34; --surface-3: #26273f; --border: #33344f; --nav-bg: #131425;
+                --text: #f1eef8; --text-muted: #aeaac8; --text-sub: #6c6a8a;
+                --accent: #f2a072; --accent-dim: #e0845a; --accent-glow: rgba(242,160,114,.16); --accent-text: #f7b48e; --accent-fg: #2a1408;
+                --nc: #f6c66b; --np: #9cc8ff;
+                --solid-bg: #2f3164;
+                --solid-fill: linear-gradient(100deg, #1d1f45 0%, #2f3164 38%, #4f3d6e 64%, #7a4862 86%, #94525a 100%);
+                --solid-fg: #fbf6ff; --solid-fg-2: rgba(251,246,255,.82); --solid-line: rgba(255,255,255,.2);
+                --solid-hover: rgba(255,255,255,.1); --solid-active: rgba(255,255,255,.17);
+                --theme-btn: linear-gradient(100deg, #e58f6e, #f2a072 50%, #f6c08a); --theme-btn-fg: #2a1408;
+                --theme-page: radial-gradient(1300px 520px at 50% 115%, rgba(229,143,110,.22), transparent 62%),
+                    radial-gradient(900px 500px at 50% -20%, rgba(70,72,140,.3), transparent 60%),
+                    linear-gradient(180deg, #12132a, #10111f 50%, #1a1424);
+            }
+            :root[data-dti-theme="moonstone"][data-mode][data-style] {
+                --bg: #0f1218; --surface: #161a22; --surface-2: #1c212b; --surface-3: #232937; --border: #2f3646; --nav-bg: #12151c;
+                --text: #e9edf5; --text-muted: #a3acc0; --text-sub: #646d82;
+                --accent: #8fa8ff; --accent-dim: #7690f0; --accent-glow: rgba(143,168,255,.16); --accent-text: #b4c4ff; --accent-fg: #0f1528;
+                --nc: #f1c89a; --np: #9fd8e8;
+                --solid-bg: #2c3448;
+                --solid-fill: linear-gradient(90deg, #222838 0%, #2c3448 25%, #3a3550 50%, #2b3a4c 75%, #222838 100%);
+                --solid-fg: #eef1f8; --solid-fg-2: rgba(238,241,248,.76); --solid-line: rgba(238,241,248,.16);
+                --solid-hover: rgba(238,241,248,.07); --solid-active: rgba(238,241,248,.13);
+                --theme-btn: linear-gradient(100deg, #8fa8ff, #b7a6ff 50%, #f0c4b0); --theme-btn-fg: #141a2c;
+                --theme-page: radial-gradient(900px 480px at 15% -10%, rgba(143,168,255,.14), transparent 60%),
+                    radial-gradient(800px 460px at 90% 0%, rgba(240,196,176,.08), transparent 60%),
+                    linear-gradient(180deg, #10131a, #0c0e13);
+            }
+            :root[data-dti-theme="blueprint"][data-mode][data-style] {
+                --bg: #0b3a66; --surface: #0f4475; --surface-2: #134d82; --surface-3: #18578f; --border: #2d6aa3; --nav-bg: #0a355e;
+                --text: #eaf3ff; --text-muted: #a9c4e2; --text-sub: #7fa3c8;
+                --accent: #ffd166; --accent-dim: #f2b938; --accent-glow: rgba(255,209,102,.18); --accent-text: #ffd77a; --accent-fg: #1d2b3a;
+                --nc: #ffd166; --np: #9fe7ff;
+                --solid-bg: #08305a;
+                --solid-fill: linear-gradient(180deg, #0a3866, #072b50);
+                --solid-fg: #f2f8ff; --solid-fg-2: rgba(242,248,255,.78); --solid-line: rgba(255,255,255,.2);
+                --solid-hover: rgba(255,255,255,.08); --solid-active: rgba(255,255,255,.14);
+                --theme-btn: linear-gradient(180deg, #ffd77a, #f5c04a); --theme-btn-fg: #14253a;
+                --theme-page: radial-gradient(1200px 600px at 50% -20%, rgba(80,150,220,.25), transparent 60%),
+                    linear-gradient(180deg, #0c3d6b, #093258);
+                --theme-pattern: linear-gradient(rgba(255,255,255,.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.1) 1px, transparent 1px),
+                    linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+                --theme-pattern-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
+            }
+            :root[data-dti-theme="evergreen"][data-mode][data-style] {
+                --bg: #0b1612; --surface: #10201a; --surface-2: #152820; --surface-3: #1b3128; --border: #264035; --nav-bg: #0d1b16;
+                --text: #e8f1ea; --text-muted: #9fb7a8; --text-sub: #5f7a6b;
+                --accent: #c9a75a; --accent-dim: #a98a42; --accent-glow: rgba(201,167,90,.16); --accent-text: #dcbd73; --accent-fg: #1a1607;
+                --nc: #dcbd73; --np: #8fd0b0;
+                --solid-bg: #164234;
+                --solid-fill: linear-gradient(100deg, #0f2e23 0%, #164234 55%, #1c4f3e 100%);
+                --solid-fg: #f0f7f1; --solid-fg-2: rgba(240,247,241,.8); --solid-line: rgba(240,247,241,.18);
+                --solid-hover: rgba(240,247,241,.08); --solid-active: rgba(240,247,241,.14);
+                --theme-btn: linear-gradient(100deg, #b8954a, #d4b46a 55%, #c9a75a); --theme-btn-fg: #1a1607;
+                --theme-page: radial-gradient(1100px 520px at 20% -15%, rgba(40,110,80,.28), transparent 60%),
+                    radial-gradient(900px 500px at 100% 100%, rgba(201,167,90,.07), transparent 60%),
+                    linear-gradient(180deg, #0c1813, #08110d);
+            }
+            :root[data-dti-theme="graphite"][data-mode][data-style] {
+                --bg: #0e0f11; --surface: #16171a; --surface-2: #1c1d21; --surface-3: #24262b; --border: #2c2e34; --nav-bg: #121316;
+                --text: #eceef2; --text-muted: #9a9ea8; --text-sub: #5f636d;
+                --accent: #3a6be6; --accent-dim: #2f5bd0; --accent-glow: rgba(91,140,255,.16); --accent-text: #8fb0ff; --accent-fg: #ffffff;
+                --nc: #f2b84b; --np: #7cc7ff; --success: #4cc38a;
+                --solid-bg: #1d1f23;
+                --solid-fill: linear-gradient(180deg, #202227, #17181c);
+                --solid-fg: #f2f3f6; --solid-fg-2: rgba(242,243,246,.7); --solid-line: rgba(255,255,255,.1);
+                --solid-hover: rgba(255,255,255,.06); --solid-active: rgba(255,255,255,.1);
+                --theme-btn: linear-gradient(180deg, #4a7af0, #3a6be6);
+                --theme-page: radial-gradient(1200px 600px at 50% -25%, rgba(91,140,255,.1), transparent 60%),
+                    linear-gradient(180deg, #101114, #0c0d0f);
+                --theme-pattern: radial-gradient(rgba(255,255,255,.045) 1px, transparent 1.4px); --theme-pattern-size: 22px 22px;
+            }
+            :root[data-dti-theme="noir"][data-mode][data-style] {
+                --bg: #0b0b0b; --surface: #141414; --surface-2: #1b1b1b; --surface-3: #232323; --border: #2e2e2e; --nav-bg: #0f0f0f;
+                --text: #f2f2f2; --text-muted: #a3a3a3; --text-sub: #646464;
+                --accent: #d92f32; --accent-dim: #b82528; --accent-glow: rgba(229,56,59,.16); --accent-text: #ff6b6e; --accent-fg: #ffffff;
+                --nc: #e8e8e8; --np: #9a9a9a;
+                --solid-bg: #121212;
+                --solid-fill: linear-gradient(180deg, #161616, #0d0d0d);
+                --solid-fg: #f5f5f5; --solid-fg-2: rgba(245,245,245,.7); --solid-line: rgba(255,255,255,.12);
+                --solid-hover: rgba(255,255,255,.07); --solid-active: rgba(255,255,255,.12);
+                --theme-btn: linear-gradient(180deg, #e03a3d, #c62a2d);
+                --theme-page: radial-gradient(1000px 600px at 50% -20%, rgba(255,255,255,.06), transparent 60%),
+                    linear-gradient(180deg, #0d0d0d, #080808);
+                --theme-pattern: ${_GRAIN('.06')}; --theme-pattern-size: 180px 180px;
+            }
             /* Every preset: the gradient backdrop (on <html>, so an optional pattern layer — stars, snow,
                sparkles — can sit between it and the page), gradient call-to-action buttons, gradient-friendly hovers */
             html[data-dti-theme] {
@@ -13607,12 +14453,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             html[data-dti-theme] body { background: transparent !important; }
             html[data-dti-theme] body::before {
                 content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
-                background-image: var(--theme-pattern, none); background-size: var(--theme-pattern-size, auto);
+                background-image: var(--theme-pattern, none); background-size: var(--theme-pattern-size, auto); background-position: var(--theme-pattern-pos, 0 0);
+                background-repeat: var(--theme-pattern-repeat, repeat);
             }
             html[data-dti-theme] :is(.btn-primary, .dti-nx-new) { background: var(--theme-btn) !important; border-color: transparent !important; color: var(--theme-btn-fg, #fff) !important; }
             /* Lilac Dream, R. Pastel 2 and Ember: the nav bar's colors drift slowly along it */
             @keyframes dti-theme-flow { from { background-position: 0 0; } to { background-position: 1600px 0; } }
-            html:is([data-dti-theme="lilac"], [data-dti-theme="holo"], [data-dti-theme="ember"]) #main-nav {
+            html:is([data-dti-theme="lilac"], [data-dti-theme="holo"], [data-dti-theme="ember"], [data-dti-theme="moonstone"], [data-dti-theme="champagne"]) #main-nav {
                 background-size: 1600px 100% !important; animation: dti-theme-flow 22s linear infinite;
             }
             @media (prefers-reduced-motion: reduce) { html[data-dti-theme] #main-nav { animation: none !important; } }
@@ -13626,6 +14473,936 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             html[data-dti-theme="regal"] #main-nav { box-shadow: inset 0 -3px 0 #d4a63a, 0 4px 18px rgba(35,70,143,.22) !important; }
             html[data-dti-theme="neon"] #main-nav { box-shadow: 0 0 26px rgba(255,46,151,.32) !important; }
             html[data-dti-theme="neon"] :is(.btn-primary, .dti-nx-new) { box-shadow: 0 0 18px rgba(255,46,151,.38) !important; }
+            /* (each new one's finishing touch on the bar: a printed rule, a brass or champagne hairline, a soft glow) */
+            html[data-dti-theme="peony"] #main-nav { box-shadow: 0 4px 18px rgba(200,67,107,.14) !important; }
+            html[data-dti-theme="terracotta"] #main-nav { box-shadow: inset 0 -1px 0 rgba(255,236,220,.18), 0 4px 18px rgba(143,58,34,.22) !important; }
+            html[data-dti-theme="honeycomb"] #main-nav { box-shadow: inset 0 -1px 0 rgba(120,80,0,.2), 0 4px 18px rgba(214,146,19,.22) !important; }
+            html[data-dti-theme="paper"] #main-nav { box-shadow: inset 0 -3px 0 #c23b22, 0 2px 14px rgba(0,0,0,.16) !important; }
+            html[data-dti-theme="linen"] #main-nav { box-shadow: inset 0 -2px 0 #b58f4d, 0 3px 14px rgba(0,0,0,.14) !important; }
+            html[data-dti-theme="matcha"] #main-nav { box-shadow: 0 4px 16px rgba(85,127,41,.16) !important; }
+            html[data-dti-theme="fjord"] #main-nav { box-shadow: 0 4px 18px rgba(43,61,79,.22) !important; }
+            html[data-dti-theme="riso"] #main-nav { box-shadow: 0 3px 0 rgba(214,39,111,.6) !important; }   /* (the second ink, printed a touch off) */
+            html[data-dti-theme="riso"] :is(.btn-primary, .dti-nx-new) { box-shadow: 2px 2px 0 #3255a4 !important; }
+            html[data-dti-theme="espresso"] #main-nav { box-shadow: inset 0 -1px 0 rgba(211,154,91,.4), 0 6px 22px rgba(0,0,0,.35) !important; }
+            html[data-dti-theme="bordeaux"] #main-nav { box-shadow: inset 0 -1px 0 rgba(233,194,122,.5), 0 6px 24px rgba(90,22,40,.4) !important; }
+            html[data-dti-theme="dusk"] #main-nav { box-shadow: 0 6px 26px rgba(148,82,90,.25) !important; }
+            html[data-dti-theme="moonstone"] #main-nav { box-shadow: inset 0 -1px 0 rgba(200,215,255,.3), 0 6px 24px rgba(0,0,0,.35) !important; }
+            html[data-dti-theme="blueprint"] #main-nav { box-shadow: inset 0 -1px 0 rgba(255,255,255,.3), 0 4px 18px rgba(0,0,0,.3) !important; }
+            html[data-dti-theme="evergreen"] #main-nav { box-shadow: inset 0 -1px 0 rgba(201,167,90,.55), 0 6px 22px rgba(0,0,0,.35) !important; }
+            html[data-dti-theme="graphite"] #main-nav { box-shadow: inset 0 -1px 0 rgba(255,255,255,.07), 0 1px 0 rgba(0,0,0,.6) !important; }
+            html[data-dti-theme="noir"] #main-nav { box-shadow: inset 0 -1px 0 rgba(217,47,50,.85), 0 4px 18px rgba(0,0,0,.5) !important; }
+            /* ══ The third set — each with a typeface of its own for headings, a drawn layer over its backdrop, a finish under the
+               bar, its own scrollbars and selection; cards, buttons and icons made over where it suits the look ══ */
+            :root[data-dti-theme="atelier"][data-mode][data-style] {
+                --bg: #f5f3ee; --surface: #ffffff; --surface-2: #faf8f4; --surface-3: #efece5; --border: #e2ddd2; --nav-bg: #ffffff;
+                --text: #141416; --text-muted: #57544f; --text-sub: #9b968c;
+                --accent: #1f3ad1; --accent-dim: #172ea8; --accent-glow: rgba(31,58,209,.1); --accent-text: #1d36c4; --accent-fg: #ffffff;
+                --nc: #9a5a00; --np: #1f6f5c;
+                --solid-bg: #ffffff; --solid-fill: linear-gradient(180deg, #ffffff, #fbfaf7);
+                --solid-fg: #141416; --solid-fg-2: rgba(20,20,22,.66); --solid-line: rgba(20,20,22,.14); --solid-hover: rgba(20,20,22,.05); --solid-active: rgba(20,20,22,.09);
+                --theme-btn: #141416;
+                --theme-page: radial-gradient(1200px 520px at 50% -12%, rgba(255,251,240,.95), transparent 62%), linear-gradient(180deg, #f7f5f0, #f1eee7);
+                --theme-pattern: ${_GRAIN('.03')}; --theme-pattern-size: 180px 180px;
+                --shadow-sm: 0 1px 0 rgba(20,20,22,.04); --shadow-md: 0 1px 0 rgba(20,20,22,.05), 0 10px 30px rgba(20,20,22,.06); --shadow-lg: 0 18px 50px rgba(20,20,22,.13);
+                --theme-font: 'Instrument Serif', Georgia, serif; --theme-font-wt: 400; --theme-hc-size: 17px; --theme-hc-track: 0; --theme-hc-case: none; --theme-brand-track: 0;
+                --theme-navdeco: #141416; --theme-navdeco-h: 1px; --theme-navdeco-gap: 2px;
+                --theme-scroll: #3a3a3e; --theme-sel: #1f3ad1; --theme-sel-fg: #ffffff;
+            }
+            :root[data-dti-theme="bauhaus"][data-mode][data-style] {
+                --bg: #efe9dc; --surface: #fbf8f1; --surface-2: #f6f1e6; --surface-3: #ebe3d2; --border: #cfc4ad; --nav-bg: #fbf8f1;
+                --text: #151515; --text-muted: #4f4a42; --text-sub: #8e877a;
+                --accent: #d4322c; --accent-dim: #b0231e; --accent-glow: rgba(212,50,44,.12); --accent-text: #c02a24; --accent-fg: #ffffff;
+                --nc: #a86400; --np: #1f4e9e;
+                --solid-bg: #151515; --solid-fill: linear-gradient(180deg, #1b1b1b, #121212);
+                --solid-fg: #f7f2e6; --solid-fg-2: rgba(247,242,230,.72); --solid-line: rgba(247,242,230,.18); --solid-hover: rgba(247,242,230,.08); --solid-active: rgba(247,242,230,.15);
+                --theme-btn: #d4322c;
+                --theme-page: linear-gradient(180deg, #f1ebde, #ece4d3);
+                --theme-pattern: ${_GRAIN('.04')}; --theme-pattern-size: 180px 180px;
+                --theme-decor: radial-gradient(circle, rgba(212,50,44,.15) 0 70%, transparent 70.5%) right -150px top 70px / 400px 400px no-repeat,
+                    radial-gradient(circle at 0 100%, rgba(31,78,158,.14) 0 69%, transparent 69.5%) left 0 bottom 0 / 340px 340px no-repeat,
+                    linear-gradient(45deg, rgba(242,182,50,.28) 50%, transparent 50%) left 3% top 36% / 150px 150px no-repeat,
+                    linear-gradient(#151515, #151515) right 7% top 58% / 3px 220px no-repeat,
+                    radial-gradient(circle, #151515 0 60%, transparent 62%) right calc(7% - 7px) top calc(58% - 22px) / 17px 17px no-repeat,
+                    repeating-linear-gradient(90deg, rgba(21,21,21,.16) 0 3px, transparent 3px 14px) left 8% bottom 12% / 160px 54px no-repeat;
+                --shadow-sm: 2px 2px 0 rgba(21,21,21,.85); --shadow-md: 4px 4px 0 #151515; --shadow-lg: 6px 6px 0 #151515;
+                --theme-font: 'Jost', 'Poppins', sans-serif; --theme-font-wt: 700; --theme-hc-size: 11.5px; --theme-hc-track: .14em; --theme-brand-track: .02em;
+                --theme-navdeco: linear-gradient(90deg, #d4322c 0 33.34%, #f2b632 33.34% 66.67%, #1f4e9e 66.67%); --theme-navdeco-h: 6px;
+                --theme-scroll: #151515; --theme-sel: #f2b632; --theme-sel-fg: #151515;
+            }
+            :root[data-dti-theme="herbarium"][data-mode][data-style] {
+                --bg: #f1ebdd; --surface: #fbf7ed; --surface-2: #f6f0e3; --surface-3: #ebe2cf; --border: #d8cbb0; --nav-bg: #fbf7ed;
+                --text: #1f251c; --text-muted: #5a6150; --text-sub: #9a9a83;
+                --accent: #3d6a44; --accent-dim: #31573a; --accent-glow: rgba(61,106,68,.12); --accent-text: #355f3c; --accent-fg: #ffffff;
+                --nc: #9c5d16; --np: #3f6688;
+                --solid-bg: #2c4a33; --solid-fill: linear-gradient(180deg, #2f5037, #263f2d);
+                --solid-fg: #f6f1e3; --solid-fg-2: rgba(246,241,227,.76); --solid-line: rgba(246,241,227,.18); --solid-hover: rgba(246,241,227,.08); --solid-active: rgba(246,241,227,.15);
+                --theme-btn: linear-gradient(180deg, #44744b, #3d6a44);
+                --theme-page: radial-gradient(1100px 520px at 0% 0%, rgba(255,252,240,.85), transparent 60%), radial-gradient(900px 520px at 100% 100%, rgba(196,170,120,.2), transparent 60%), linear-gradient(180deg, #f3eee1, #ece4d2);
+                --theme-pattern: ${_GRAIN('.06')}; --theme-pattern-size: 180px 180px;
+                --theme-decor: ${_HERB_FROND} right -30px top 64px / 460px 600px no-repeat, ${_HERB_SPRIG} left -24px bottom -30px / 400px 460px no-repeat;
+                --shadow-sm: 0 1px 2px rgba(60,50,30,.06); --shadow-md: 0 6px 18px rgba(60,50,30,.09); --shadow-lg: 0 14px 36px rgba(60,50,30,.15);
+                --theme-font: 'Cormorant Garamond', Georgia, serif; --theme-font-wt: 700; --theme-hc-size: 16px; --theme-hc-track: .02em; --theme-hc-case: none; --theme-brand-track: .01em;
+                --theme-navdeco: linear-gradient(90deg, transparent, rgba(176,148,90,.9) 12%, rgba(176,148,90,.9) 88%, transparent); --theme-navdeco-h: 1px; --theme-navdeco-gap: 3px;
+                --theme-scroll: #b9a98a; --theme-sel: rgba(61,106,68,.24);
+            }
+            :root[data-dti-theme="midcentury"][data-mode][data-style] {
+                --bg: #f3e7cf; --surface: #fffaf0; --surface-2: #fbf3e3; --surface-3: #f0e2c4; --border: #e1cfa8; --nav-bg: #fffaf0;
+                --text: #2a1f16; --text-muted: #66523d; --text-sub: #a89074;
+                --accent: #1b7a70; --accent-dim: #15645c; --accent-glow: rgba(27,122,112,.13); --accent-text: #17695f; --accent-fg: #ffffff;
+                --nc: #b0620c; --np: #2c5f8f;
+                --solid-bg: #5a3a24; --solid-fill: repeating-linear-gradient(90deg, rgba(255,255,255,.035) 0 2px, transparent 2px 9px, rgba(0,0,0,.05) 9px 10px, transparent 10px 17px), linear-gradient(180deg, #6b4529, #4e321f);
+                --solid-fg: #fff6e6; --solid-fg-2: rgba(255,246,230,.78); --solid-line: rgba(255,246,230,.2); --solid-hover: rgba(255,246,230,.1); --solid-active: rgba(255,246,230,.17);
+                --theme-btn: linear-gradient(180deg, #e0a526, #d4961a); --theme-btn-fg: #2a1f16;
+                --theme-page: radial-gradient(1000px 520px at 100% 0%, rgba(224,165,38,.2), transparent 60%), radial-gradient(900px 520px at 0% 100%, rgba(27,122,112,.13), transparent 60%), linear-gradient(180deg, #f5ead3, #efe1c4);
+                --theme-pattern: ${_MCM_ATOMIC}; --theme-pattern-size: 420px 320px;
+                --shadow-sm: 0 2px 4px rgba(90,58,36,.08); --shadow-md: 0 8px 20px rgba(90,58,36,.12); --shadow-lg: 0 16px 40px rgba(90,58,36,.17);
+                --theme-font: 'Josefin Sans', 'Poppins', sans-serif; --theme-font-wt: 700; --theme-hc-size: 12px; --theme-hc-track: .12em; --theme-brand-track: .02em;
+                --theme-navdeco: linear-gradient(180deg, #e0a526 0 3px, #d5612a 3px 6px); --theme-navdeco-h: 6px;
+                --theme-scroll: #c99a52; --theme-sel: rgba(224,165,38,.38);
+            }
+            :root[data-dti-theme="porcelain"][data-mode][data-style] {
+                --bg: #eef2f8; --surface: #fafcff; --surface-2: #f3f6fb; --surface-3: #e6ecf5; --border: #d3dceb; --nav-bg: #fafcff;
+                --text: #13213b; --text-muted: #4b5a78; --text-sub: #8a97b0;
+                --accent: #1d4fa3; --accent-dim: #173f85; --accent-glow: rgba(29,79,163,.11); --accent-text: #1b489a; --accent-fg: #ffffff;
+                --nc: #a05c0c; --np: #1d6f8a;
+                --solid-bg: #1a4594; --solid-fill: linear-gradient(180deg, #1f53aa, #183f86);
+                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.82); --solid-line: rgba(255,255,255,.26); --solid-hover: rgba(255,255,255,.12); --solid-active: rgba(255,255,255,.2);
+                --theme-btn: linear-gradient(180deg, #2a5fbb, #1d4fa3);
+                --theme-page: radial-gradient(1200px 600px at 50% -10%, rgba(255,255,255,.95), transparent 60%), linear-gradient(180deg, #f1f4f9, #e8edf5);
+                --theme-pattern: ${_DELFT}; --theme-pattern-size: 120px 120px;
+                --shadow-sm: 0 1px 2px rgba(20,40,90,.06), inset 0 1px 0 rgba(255,255,255,.9); --shadow-md: 0 8px 22px rgba(20,40,90,.09), inset 0 1px 0 #ffffff; --shadow-lg: 0 18px 46px rgba(20,40,90,.17);
+                --theme-font: 'Playfair Display', Georgia, serif; --theme-font-wt: 700; --theme-hc-size: 14px; --theme-hc-track: .01em; --theme-hc-case: none;
+                --theme-navdeco: ${_SCALLOP} 0 0 / 20px 8px repeat-x; --theme-navdeco-h: 8px;
+                --theme-scroll: #8aa2cf; --theme-sel: rgba(29,79,163,.2);
+            }
+            :root[data-dti-theme="kraft"][data-mode][data-style] {
+                --bg: #cdb48e; --surface: #fbf6ec; --surface-2: #f5eedf; --surface-3: #ebe0c9; --border: #cdb68f; --nav-bg: #fbf6ec;
+                --text: #2a2219; --text-muted: #4a3f31; --text-sub: #8c7a62;
+                --accent: #b5382c; --accent-dim: #962c22; --accent-glow: rgba(181,56,44,.12); --accent-text: #a8322a; --accent-fg: #ffffff;
+                --nc: #8f4e0a; --np: #2c4466;
+                --solid-bg: #23324b; --solid-fill: linear-gradient(180deg, #26364f, #1f2d44);
+                --solid-fg: #f7f0e1; --solid-fg-2: rgba(247,240,225,.78); --solid-line: rgba(247,240,225,.2); --solid-hover: rgba(247,240,225,.09); --solid-active: rgba(247,240,225,.16);
+                --theme-btn: #b5382c;
+                --theme-page: radial-gradient(1000px 600px at 50% 0%, rgba(255,240,210,.35), transparent 60%), linear-gradient(180deg, #d2ba95, #c7ad86);
+                --theme-pattern: ${_GRAIN('.1')}, radial-gradient(rgba(70,45,20,.22) .7px, transparent 1.2px), radial-gradient(rgba(255,250,235,.18) .8px, transparent 1.3px);
+                --theme-pattern-size: 180px 180px, 23px 29px, 37px 31px; --theme-pattern-pos: 0 0, 0 0, 11px 7px;
+                --theme-decor: ${_POSTMARK} right 3% top 92px / 420px 190px no-repeat;
+                --shadow-sm: 0 1px 2px rgba(60,40,10,.12); --shadow-md: 0 6px 16px rgba(60,40,10,.16); --shadow-lg: 0 14px 34px rgba(60,40,10,.22);
+                --theme-font: 'Courier Prime', 'Courier New', monospace; --theme-font-wt: 700; --theme-hc-size: 12px; --theme-hc-track: .08em;
+                --theme-navdeco: radial-gradient(circle at 50% 100%, transparent 3.2px, #1f2d44 3.8px) 0 0 / 12px 7px repeat-x; --theme-navdeco-h: 7px;
+                --theme-scroll: #8c7a62; --theme-sel: rgba(181,56,44,.24);
+            }
+            :root[data-dti-theme="champagne"][data-mode][data-style] {
+                --bg: #f7eee8; --surface: #fffaf6; --surface-2: #fbf4ee; --surface-3: #f2e5da; --border: #ebd8c8; --nav-bg: #fffaf6;
+                --text: #2c1f1d; --text-muted: #75605b; --text-sub: #a38b84;
+                --accent: #c9a06a; --accent-dim: #b38a57; --accent-glow: rgba(201,160,106,.18); --accent-text: #8a5f33; --accent-fg: #2c1f1d;
+                --nc: #9c5d1c; --np: #5a6f9a;
+                --solid-bg: #e2c79d; --solid-fill: linear-gradient(100deg, #e6cfa8 0%, #f7ead2 18%, #d8b98a 36%, #f3e3c6 52%, #cfae7f 70%, #f0dfc0 86%, #ddc196 100%);
+                --solid-fg: #3a2a1f; --solid-fg-2: rgba(58,42,31,.74); --solid-line: rgba(58,42,31,.18); --solid-hover: rgba(255,255,255,.3); --solid-active: rgba(255,255,255,.48);
+                --theme-btn: linear-gradient(100deg, #d9b98a, #f3e3c6 45%, #c9a06a); --theme-btn-fg: #2c1f1d;
+                --theme-page: radial-gradient(900px 500px at 12% 0%, rgba(255,226,214,.75), transparent 60%), radial-gradient(900px 520px at 88% 100%, rgba(233,210,170,.5), transparent 60%), linear-gradient(180deg, #faf2ec, #f4e9e1);
+                --shadow-sm: 0 1px 3px rgba(120,80,40,.07); --shadow-md: 0 8px 24px rgba(120,80,40,.1); --shadow-lg: 0 18px 48px rgba(120,80,40,.17);
+                --theme-font: 'Bodoni Moda', Didot, Georgia, serif; --theme-font-wt: 600; --theme-hc-size: 12.5px; --theme-hc-track: .08em;
+                --theme-navdeco: linear-gradient(90deg, transparent, rgba(160,120,70,.55) 15%, rgba(160,120,70,.55) 85%, transparent); --theme-navdeco-h: 1px; --theme-navdeco-gap: 2px;
+                --theme-scroll: #d9b98a; --theme-sel: rgba(201,160,106,.38);
+            }
+            :root[data-dti-theme="nautical"][data-mode][data-style] {
+                --bg: #f3f1ea; --surface: #fdfcf8; --surface-2: #f7f5ee; --surface-3: #ece8dc; --border: #dad4c4; --nav-bg: #fdfcf8;
+                --text: #14213a; --text-muted: #4a5568; --text-sub: #8a92a0;
+                --accent: #b8292f; --accent-dim: #96202a; --accent-glow: rgba(184,41,47,.12); --accent-text: #a8242a; --accent-fg: #ffffff;
+                --nc: #a05f0c; --np: #1f5b8f;
+                --solid-bg: #172a4a; --solid-fill: linear-gradient(180deg, #1b3157, #14264a);
+                --solid-fg: #f4f1e8; --solid-fg-2: rgba(244,241,232,.78); --solid-line: rgba(244,241,232,.2); --solid-hover: rgba(244,241,232,.09); --solid-active: rgba(244,241,232,.16);
+                --theme-btn: linear-gradient(180deg, #c3333a, #b8292f);
+                --theme-page: radial-gradient(1100px 500px at 50% -10%, rgba(255,255,255,.9), transparent 60%), linear-gradient(180deg, #f5f3ec, #ebe7dc);
+                --theme-decor: ${_COMPASS} right -70px bottom -70px / 440px 440px no-repeat;
+                --theme-font: 'Zilla Slab', Georgia, serif; --theme-font-wt: 700; --theme-hc-size: 13px; --theme-hc-track: .06em;
+                --theme-navdeco: ${_ROPE} 0 0 / 16px 8px repeat-x; --theme-navdeco-h: 8px;
+                --theme-scroll: #8a92a0; --theme-sel: rgba(184,41,47,.2);
+            }
+            :root[data-dti-theme="synthwave"][data-mode][data-style] {
+                --bg: #120626; --surface: #1a0b35; --surface-2: #210f42; --surface-3: #2a1452; --border: #3d1f6e; --nav-bg: #150830;
+                --text: #fcf0ff; --text-muted: #c6a8e8; --text-sub: #8467ad;
+                --accent: #ff3ea5; --accent-dim: #e0268a; --accent-glow: rgba(255,62,165,.2); --accent-text: #ff7cc5; --accent-fg: #1a0631;
+                --nc: #ffd23f; --np: #4be3ff; --success: #5cf2a4;
+                --solid-bg: #6a1b8a; --solid-fill: linear-gradient(100deg, #2a0b5a 0%, #5d1786 35%, #a8237f 70%, #d23a52 100%);
+                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.84); --solid-line: rgba(255,255,255,.26); --solid-hover: rgba(255,255,255,.12); --solid-active: rgba(255,255,255,.2);
+                --theme-btn: linear-gradient(100deg, #ff3ea5, #ff7a59); --theme-btn-fg: #1a0631;
+                --theme-page: radial-gradient(70vh 34vh at 50% calc(100% - 34vh), rgba(255,90,140,.3), transparent 70%), linear-gradient(180deg, #0b031c 0%, #170634 40%, #300a4d 66%, #4a0f52 100%);
+                --theme-pattern: ${_SUN}; --theme-pattern-size: min(48vh, 500px) min(48vh, 500px); --theme-pattern-pos: center bottom 27vh; --theme-pattern-repeat: no-repeat;
+                --shadow-sm: 0 0 0 1px rgba(255,62,165,.12), 0 2px 8px rgba(5,0,20,.5); --shadow-md: 0 0 0 1px rgba(255,62,165,.16), 0 10px 28px rgba(5,0,20,.6), 0 0 26px rgba(255,62,165,.08);
+                --shadow-lg: 0 0 0 1px rgba(255,62,165,.2), 0 18px 48px rgba(5,0,20,.7), 0 0 40px rgba(255,62,165,.12);
+                --theme-font: 'Orbitron', 'Poppins', sans-serif; --theme-font-wt: 700; --theme-hc-size: 11px; --theme-hc-track: .14em; --theme-brand-track: .06em;
+                --theme-navdeco: linear-gradient(90deg, #4be3ff, #ff3ea5 50%, #ffd23f); --theme-navdeco-h: 2px;
+                --theme-scroll: #ff3ea5; --theme-scroll-track: #12062a; --theme-sel: rgba(75,227,255,.38); --theme-sel-fg: #ffffff;
+            }
+            :root[data-dti-theme="phosphor"][data-mode][data-style] {
+                --bg: #040905; --surface: #07110a; --surface-2: #0a160d; --surface-3: #0e1d12; --border: #163a20; --nav-bg: #050c07;
+                --text: #c6f7d2; --text-muted: #77c493; --text-sub: #3f7a52;
+                --accent: #33f06f; --accent-dim: #20c457; --accent-glow: rgba(51,240,111,.15); --accent-text: #5cff92; --accent-fg: #031a0a;
+                --nc: #ffc65c; --np: #6fe3ff; --success: #5cff92; --danger: #ff6b5c;
+                --solid-bg: #06100a; --solid-fill: linear-gradient(180deg, #08140c, #050c07);
+                --solid-fg: #b9ffcb; --solid-fg-2: rgba(185,255,203,.72); --solid-line: rgba(51,240,111,.22); --solid-hover: rgba(51,240,111,.1); --solid-active: rgba(51,240,111,.18);
+                --theme-btn: linear-gradient(180deg, #1fd65e, #18b84f); --theme-btn-fg: #021407;
+                --theme-page: radial-gradient(ellipse 90% 70% at 50% 40%, #0b1d10 0%, #040905 72%);
+                --theme-pattern: repeating-linear-gradient(180deg, rgba(0,0,0,.22) 0 1px, transparent 1px 3px), radial-gradient(rgba(51,240,111,.05) 1px, transparent 1.5px); --theme-pattern-size: auto, 4px 4px;
+                --shadow-sm: 0 0 0 1px rgba(51,240,111,.06); --shadow-md: 0 0 0 1px rgba(51,240,111,.1), 0 8px 24px rgba(0,0,0,.6); --shadow-lg: 0 0 0 1px rgba(51,240,111,.14), 0 18px 46px rgba(0,0,0,.75), 0 0 30px rgba(51,240,111,.06);
+                --theme-font: 'JetBrains Mono', ui-monospace, monospace; --theme-font-wt: 600; --theme-hc-size: 11px; --theme-hc-track: .08em; --theme-brand-track: -.02em;
+                --theme-navdeco: rgba(51,240,111,.7); --theme-navdeco-h: 1px;
+                --theme-scroll: #20c457; --theme-scroll-track: #040905; --theme-sel: #33f06f; --theme-sel-fg: #031a0a;
+            }
+            :root[data-dti-theme="deco"][data-mode][data-style] {
+                --bg: #08130f; --surface: #0e1e18; --surface-2: #12271f; --surface-3: #173127; --border: #284a3c; --nav-bg: #0a1712;
+                --text: #f2ead5; --text-muted: #c4b693; --text-sub: #7f7a62;
+                --accent: #d8b36a; --accent-dim: #b8944c; --accent-glow: rgba(216,179,106,.17); --accent-text: #e6c886; --accent-fg: #1a1407;
+                --nc: #e6c886; --np: #7fd1b9;
+                --solid-bg: #0b1a14; --solid-fill: linear-gradient(180deg, #0e221a, #091610);
+                --solid-fg: #f3e7c8; --solid-fg-2: rgba(243,231,200,.76); --solid-line: rgba(216,179,106,.3); --solid-hover: rgba(216,179,106,.1); --solid-active: rgba(216,179,106,.18);
+                --theme-btn: linear-gradient(180deg, #e6c886, #c9a254); --theme-btn-fg: #1a1407;
+                --theme-page: radial-gradient(1100px 520px at 50% -12%, rgba(216,179,106,.14), transparent 60%), radial-gradient(900px 500px at 100% 100%, rgba(30,90,70,.25), transparent 60%), linear-gradient(180deg, #0a1712, #06100c);
+                --theme-pattern: ${_DECO_FAN}; --theme-pattern-size: 60px 30px;
+                --theme-decor: repeating-conic-gradient(from -90deg at 50% -6%, rgba(216,179,106,.08) 0 1.2deg, transparent 1.2deg 7.5deg);
+                --theme-font: 'Poiret One', 'Josefin Sans', sans-serif; --theme-font-wt: 400; --theme-hc-size: 14px; --theme-hc-track: .14em; --theme-brand-track: .08em;
+                --theme-navdeco: linear-gradient(#d8b36a, #d8b36a) 0 0 / 100% 1px no-repeat, linear-gradient(#d8b36a, #d8b36a) 0 3px / 100% 1px no-repeat; --theme-navdeco-h: 4px;
+                --theme-scroll: #b8944c; --theme-scroll-track: #08130f; --theme-sel: rgba(216,179,106,.35);
+            }
+            :root[data-dti-theme="volt"][data-mode][data-style] {
+                --bg: #0b0c0d; --surface: #131416; --surface-2: #191b1e; --surface-3: #202226; --border: #2b2e33; --nav-bg: #0e0f11;
+                --text: #f3f5f0; --text-muted: #a0a69c; --text-sub: #5d6259;
+                --accent: #d4ff3a; --accent-dim: #b4dc1f; --accent-glow: rgba(212,255,58,.14); --accent-text: #dcff5c; --accent-fg: #0b0c0d;
+                --nc: #ffb020; --np: #5ec8ff; --success: #7dff9a;
+                --solid-bg: #111214; --solid-fill: repeating-linear-gradient(115deg, rgba(255,255,255,.03) 0 2px, transparent 2px 9px), linear-gradient(180deg, #16171a, #0e0f11);
+                --solid-fg: #f3f5f0; --solid-fg-2: rgba(243,245,240,.7); --solid-line: rgba(255,255,255,.12); --solid-hover: rgba(212,255,58,.1); --solid-active: rgba(212,255,58,.18);
+                --theme-btn: #d4ff3a; --theme-btn-fg: #0b0c0d;
+                --theme-page: radial-gradient(900px 500px at 88% -10%, rgba(212,255,58,.1), transparent 60%), linear-gradient(180deg, #0d0e10, #090a0b);
+                --theme-pattern: repeating-linear-gradient(115deg, rgba(255,255,255,.018) 0 1px, transparent 1px 7px);
+                --theme-decor: linear-gradient(115deg, transparent 0 58%, rgba(212,255,58,.07) 58% 62%, transparent 62% 64.5%, rgba(212,255,58,.045) 64.5% 70%, transparent 70%);
+                --shadow-md: 0 10px 28px rgba(0,0,0,.6); --shadow-lg: 0 18px 46px rgba(0,0,0,.75);
+                --theme-font: 'Barlow Condensed', 'Poppins', sans-serif; --theme-font-wt: 800; --theme-hc-size: 15px; --theme-hc-track: .04em; --theme-brand-track: .02em;
+                --theme-navdeco: #d4ff3a; --theme-navdeco-h: 3px;
+                --theme-scroll: #d4ff3a; --theme-scroll-track: #0b0c0d; --theme-sel: #d4ff3a; --theme-sel-fg: #0b0c0d;
+            }
+            :root[data-dti-theme="verdigris"][data-mode][data-style] {
+                --bg: #0c1615; --surface: #112120; --surface-2: #152826; --surface-3: #1a302d; --border: #284441; --nav-bg: #0e1a19;
+                --text: #e6f1ec; --text-muted: #9cb9ad; --text-sub: #5e7a70;
+                --accent: #d7895a; --accent-dim: #b86f43; --accent-glow: rgba(215,137,90,.17); --accent-text: #e9a47a; --accent-fg: #1d1009;
+                --nc: #e9b56a; --np: #6fd6c3;
+                --solid-bg: #173a34; --solid-fill: linear-gradient(100deg, #10302b 0%, #1a443d 50%, #12342e 100%);
+                --solid-fg: #eef7f3; --solid-fg-2: rgba(238,247,243,.78); --solid-line: rgba(238,247,243,.2); --solid-hover: rgba(238,247,243,.08); --solid-active: rgba(238,247,243,.15);
+                --theme-btn: linear-gradient(180deg, #e4a173, #c9784a 55%, #b0633a); --theme-btn-fg: #1d1009;
+                --theme-page: radial-gradient(1000px 520px at 15% -10%, rgba(79,179,160,.17), transparent 60%), radial-gradient(900px 520px at 100% 100%, rgba(215,137,90,.1), transparent 60%), linear-gradient(180deg, #0d1817, #091211);
+                --theme-pattern: ${_PATINA}; --theme-pattern-size: 320px 320px;
+                --theme-font: 'Cinzel', Georgia, serif; --theme-font-wt: 700; --theme-hc-size: 12px; --theme-hc-track: .1em;
+                --theme-navdeco: radial-gradient(circle, #f8d2b0 0 1.4px, #7a3a1a 1.9px, transparent 2.4px) 0 50% / 96px 6px repeat-x, linear-gradient(90deg, #6e3418, #b86f43 18%, #f0b88f 50%, #b86f43 82%, #6e3418); --theme-navdeco-h: 6px;
+                --theme-scroll: #b86f43; --theme-scroll-track: #0c1615; --theme-sel: rgba(111,214,195,.32);
+            }
+            :root[data-dti-theme="chalkboard"][data-mode][data-style] {
+                --bg: #1c2a24; --surface: #22322b; --surface-2: #273830; --surface-3: #2d4037; --border: #3e5348; --nav-bg: #1f2e28;
+                --text: #f3f5ef; --text-muted: #b9c6bb; --text-sub: #788a7e;
+                --accent: #ffd66b; --accent-dim: #f0c24a; --accent-glow: rgba(255,214,107,.15); --accent-text: #ffe08f; --accent-fg: #1c2a24;
+                --nc: #ffb3c7; --np: #9fd6ff;
+                --solid-bg: #5b3e26; --solid-fill: repeating-linear-gradient(90deg, rgba(0,0,0,.06) 0 3px, transparent 3px 11px, rgba(255,255,255,.03) 11px 12px, transparent 12px 19px), linear-gradient(180deg, #6b4a2e, #533722);
+                --solid-fg: #fff6e9; --solid-fg-2: rgba(255,246,233,.78); --solid-line: rgba(255,246,233,.2); --solid-hover: rgba(255,246,233,.09); --solid-active: rgba(255,246,233,.16);
+                --theme-btn: linear-gradient(180deg, #f6f7f2, #e6e9e0); --theme-btn-fg: #1c2a24;
+                --theme-page: radial-gradient(1300px 800px at 50% 35%, #24372e, #17231e 78%);
+                --theme-pattern: ${_GRAIN('.09')}, radial-gradient(ellipse 260px 120px at 30% 70%, rgba(255,255,255,.035), transparent 70%), radial-gradient(ellipse 320px 140px at 75% 25%, rgba(255,255,255,.03), transparent 70%);
+                --theme-pattern-size: 180px 180px, 100% 100%, 100% 100%;
+                --theme-decor: ${_CHALK} center / cover no-repeat;
+                --theme-font: 'Patrick Hand', 'Comic Sans MS', cursive; --theme-font-wt: 400; --theme-hc-size: 16px; --theme-hc-track: .02em; --theme-hc-case: none;
+                --theme-navdeco: linear-gradient(180deg, #8a6644, #5e4128); --theme-navdeco-h: 5px;
+                --theme-scroll: #788a7e; --theme-scroll-track: #1c2a24; --theme-sel: rgba(255,214,107,.35);
+            }
+            :root[data-dti-theme="lumen"][data-mode][data-style] {
+                --bg: #0a0e1c; --surface: #121935; --surface-2: #18203f; --surface-3: #1f2850; --border: #2b3666; --nav-bg: rgba(16,22,48,.6);
+                --text: #f2f5ff; --text-muted: #b2bbdc; --text-sub: #6f7aa6;
+                --accent: #8aa8ff; --accent-dim: #6f8ff5; --accent-glow: rgba(138,168,255,.18); --accent-text: #b1c5ff; --accent-fg: #0a0e1c;
+                --nc: #ffd27a; --np: #7ff0e6;
+                --solid-bg: #1d2550; --solid-fill: linear-gradient(100deg, rgba(120,140,255,.26), rgba(200,120,255,.18) 50%, rgba(80,220,255,.2));
+                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.8); --solid-line: rgba(255,255,255,.2); --solid-hover: rgba(255,255,255,.1); --solid-active: rgba(255,255,255,.18);
+                --theme-btn: linear-gradient(100deg, #8aa8ff, #c08bff 55%, #7ff0e6); --theme-btn-fg: #0a0e1c;
+                --theme-page: linear-gradient(180deg, #0b1020, #080b16);
+                --theme-decor: radial-gradient(38vw 38vw at 14% 18%, rgba(124,92,255,.5), transparent 62%), radial-gradient(34vw 34vw at 86% 26%, rgba(255,90,200,.3), transparent 62%),
+                    radial-gradient(42vw 42vw at 62% 92%, rgba(60,210,255,.32), transparent 64%), radial-gradient(28vw 28vw at 28% 78%, rgba(90,255,190,.16), transparent 62%);
+                --shadow-sm: 0 2px 10px rgba(0,0,0,.25); --shadow-md: 0 10px 34px rgba(0,0,0,.35); --shadow-lg: 0 20px 60px rgba(0,0,0,.5);
+                --theme-navdeco: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); --theme-navdeco-h: 1px;
+                --theme-scroll: rgba(255,255,255,.28); --theme-sel: rgba(138,168,255,.38); --theme-sel-fg: #ffffff;
+            }
+            :root[data-dti-theme="kintsugi"][data-mode][data-style] {
+                --bg: #0f0d0c; --surface: #171412; --surface-2: #1d1916; --surface-3: #241f1b; --border: #352d27; --nav-bg: #12100e;
+                --text: #f3ece2; --text-muted: #bfae9a; --text-sub: #776a5c;
+                --accent: #d4a64a; --accent-dim: #b88a2f; --accent-glow: rgba(212,166,74,.17); --accent-text: #e2bc6a; --accent-fg: #1a1305;
+                --nc: #e2bc6a; --np: #e0786a;
+                --solid-bg: #151210; --solid-fill: linear-gradient(180deg, #1a1614, #110f0d);
+                --solid-fg: #f3ece2; --solid-fg-2: rgba(243,236,226,.72); --solid-line: rgba(212,166,74,.28); --solid-hover: rgba(212,166,74,.09); --solid-active: rgba(212,166,74,.16);
+                --theme-btn: linear-gradient(100deg, #b88a2f, #e8c879 50%, #b88a2f); --theme-btn-fg: #1a1305;
+                --theme-page: radial-gradient(1000px 520px at 50% -12%, rgba(200,64,45,.13), transparent 60%), radial-gradient(800px 500px at 100% 100%, rgba(212,166,74,.06), transparent 60%), linear-gradient(180deg, #110f0d, #0b0a09);
+                --theme-pattern: ${_GRAIN('.05')}; --theme-pattern-size: 180px 180px;
+                --theme-decor: ${_KINTSUGI} center / cover no-repeat;
+                --theme-font: 'Shippori Mincho', Georgia, serif; --theme-font-wt: 700; --theme-hc-size: 12px; --theme-hc-track: .05em;
+                --theme-navdeco: ${_SEAM} 0 0 / 240px 6px repeat-x; --theme-navdeco-h: 6px; --theme-navdeco-gap: -3px;
+                --theme-scroll: #b88a2f; --theme-scroll-track: #0f0d0c; --theme-sel: rgba(212,166,74,.36);
+            }
+            /* (shared by the set) a typeface for headings, card titles and the brand; the finish under the bar; the drawn layer */
+            html[data-dti-font] :is(h1, h2, h3, .dti-hc-title, .dti-pm-title, .dti-cs-title, .dti-brand, #dti-closet-title, #dti-search-row :is(.chakra-editable__preview, .chakra-editable__input)) {
+                font-family: var(--theme-font) !important; font-weight: var(--theme-font-wt, 700) !important;
+            }
+            html[data-dti-font] .dti-hc-title { font-size: var(--theme-hc-size, 11px) !important; letter-spacing: var(--theme-hc-track, 1.1px) !important; text-transform: var(--theme-hc-case, uppercase) !important; }
+            html[data-dti-font] .dti-brand { letter-spacing: var(--theme-brand-track, -.5px) !important; }
+            html:is(${_thm(_THEMES_3)}) #main-nav::after {
+                content: ''; position: absolute; left: 0; right: 0; top: calc(100% + var(--theme-navdeco-gap, 0px)); height: var(--theme-navdeco-h, 3px);
+                background: var(--theme-navdeco, none); pointer-events: none;
+            }
+            html:is(${_thm(['bauhaus', 'herbarium', 'kraft', 'nautical', 'deco', 'volt', 'chalkboard', 'lumen', 'kintsugi'])}) body::after {
+                content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--theme-decor);
+            }
+            html:is(${_thm(_THEMES_3)}) { scrollbar-color: var(--theme-scroll) var(--theme-scroll-track, transparent); }
+            html:is(${_thm(_THEMES_3)}) ::selection { background: var(--theme-sel); }
+            html:is(${_thm(['atelier', 'bauhaus', 'synthwave', 'phosphor', 'volt', 'lumen'])}) ::selection { color: var(--theme-sel-fg); }
+            @keyframes dti-rise { to { transform: translateY(-420px); } }
+            @keyframes dti-blink { 50% { opacity: 0; } }
+            @media (prefers-reduced-motion: reduce) { html[data-dti-theme] body::after, html[data-dti-theme] .dti-brand::after { animation: none !important; } }
+
+            /* Atelier: the bar's double rule; corners kept small; black buttons that turn cobalt */
+            html[data-dti-theme="atelier"] #main-nav { box-shadow: inset 0 -1px 0 #141416 !important; }
+            html[data-dti-theme="atelier"] :is(${_CARDS}) { border-radius: 4px !important; }
+            html[data-dti-theme="atelier"] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; transition: background .15s !important; }
+            html[data-dti-theme="atelier"] :is(.btn-primary, .dti-nx-new):hover { background: #1f3ad1 !important; }
+            html[data-dti-theme="atelier"] .dti-hc-ico { background: transparent !important; color: #141416 !important; border: 1px solid #141416; border-radius: 50% !important; }
+            /* Bauhaus: black frames and hard shadows, square corners; the gem a red circle */
+            html[data-dti-theme="bauhaus"] #main-nav { box-shadow: none !important; }
+            html[data-dti-theme="bauhaus"] :is(${_CARDS}) { border: 2px solid #151515 !important; border-radius: 0 !important; box-shadow: 5px 5px 0 #151515 !important; }
+            html[data-dti-theme="bauhaus"] .dti-hc-head { border-bottom: 2px solid #151515 !important; }
+            html[data-dti-theme="bauhaus"] :is(.btn-primary, .dti-nx-new) { border-radius: 0 !important; box-shadow: 3px 3px 0 #151515 !important; }
+            html[data-dti-theme="bauhaus"] #main-nav .dti-brand-gem { border-radius: 50% !important; background: #d4322c !important; }
+            html[data-dti-theme="bauhaus"] #main-nav .dti-brand-gem svg :is(path, line) { stroke: #ffffff !important; }
+            html[data-dti-theme="bauhaus"] .dti-hc-ico { border-radius: 0 !important; background: #f2b632 !important; color: #151515 !important; }
+            /* Herbarium: a specimen label's double frame on the cards; italic titles; the bar's gold hairline */
+            html[data-dti-theme="herbarium"] #main-nav { box-shadow: inset 0 -1px 0 rgba(212,178,106,.55), 0 4px 16px rgba(30,45,30,.18) !important; }
+            html[data-dti-theme="herbarium"] :is(.dti-section-card, #dti-hero, .dti-panel-section) { box-shadow: inset 0 0 0 4px var(--surface), inset 0 0 0 5px rgba(61,106,68,.2), var(--shadow-sm) !important; }
+            html[data-dti-theme="herbarium"] .dti-hc-title { font-style: italic; }
+            html[data-dti-theme="herbarium"] .dti-hc-ico { border-radius: 50% !important; }
+            /* Mid-Century: round corners, mustard buttons with a darker lip, circles for icons */
+            html[data-dti-theme="midcentury"] #main-nav { box-shadow: 0 6px 20px rgba(78,50,31,.3) !important; }
+            html[data-dti-theme="midcentury"] :is(${_CARDS}) { border-radius: 18px !important; }
+            html[data-dti-theme="midcentury"] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; box-shadow: 0 2px 0 #a8730f !important; }
+            html[data-dti-theme="midcentury"] .dti-hc-ico { border-radius: 50% !important; background: rgba(224,165,38,.2) !important; color: #9a6510 !important; }
+            /* Porcelain: the bar's scalloped rim; cobalt titles */
+            html[data-dti-theme="porcelain"] #main-nav { box-shadow: none !important; }
+            html[data-dti-theme="porcelain"] :is(${_CARDS}) { border-color: #cdd8ea !important; }
+            html[data-dti-theme="porcelain"] .dti-hc-ico { border-radius: 50% !important; background: #1d4fa3 !important; color: #ffffff !important; }
+            /* Kraft: dashed labels with a strip of tape; a stamped button; the bar's perforated edge */
+            html[data-dti-theme="kraft"] #main-nav { box-shadow: none !important; }
+            html[data-dti-theme="kraft"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) { border: 1.5px dashed rgba(42,34,25,.32) !important; border-radius: 6px !important; }
+            html[data-dti-theme="kraft"] .dti-section-card { position: relative; }
+            html[data-dti-theme="kraft"] .dti-section-card::before {
+                content: ''; position: absolute; z-index: 3; top: -4px; left: 50%; width: 84px; height: 18px; margin-left: -42px; transform: rotate(-2.5deg); pointer-events: none;
+                background: repeating-linear-gradient(45deg, rgba(255,255,255,.22) 0 5px, transparent 5px 10px), rgba(206,186,148,.62); box-shadow: 0 1px 2px rgba(60,40,10,.14);
+            }
+            html[data-dti-theme="kraft"] .dti-section-card:nth-child(even)::before { transform: rotate(2deg); margin-left: -30px; }
+            html[data-dti-theme="kraft"] :is(.btn-primary, .dti-nx-new) { border-radius: 3px !important; box-shadow: inset 0 0 0 2px rgba(255,255,255,.3), inset 0 0 0 3.5px #b5382c !important; letter-spacing: .04em; }
+            html[data-dti-theme="kraft"] .dti-hc-ico { border-radius: 2px !important; background: #23324b !important; color: #f7f0e1 !important; }
+            /* Champagne: bubbles rising (slowly — still, if you'd rather), gold-edged cards, gold titles */
+            html[data-dti-theme="champagne"] body::after {
+                content: ''; position: fixed; left: 0; right: 0; top: 0; height: calc(100vh + 420px); z-index: -1; pointer-events: none;
+                background: ${_BUBBLES} 0 0 / 320px 420px; opacity: .85; animation: dti-rise 70s linear infinite;
+            }
+            html[data-dti-theme="champagne"] #main-nav { box-shadow: 0 6px 24px rgba(150,110,60,.18) !important; }
+            html[data-dti-theme="champagne"] :is(${_CARDS}) { border-color: rgba(201,160,106,.42) !important; }
+            html[data-dti-theme="champagne"] .dti-hc-title { color: #8a5f33 !important; }
+            html[data-dti-theme="champagne"] .dti-hc-ico { border-radius: 50% !important; background: linear-gradient(135deg, #f3e3c6, #c9a06a) !important; color: #3a2a1f !important; }
+            /* Nautical: a navy band along each card's top; round navy icons */
+            html[data-dti-theme="nautical"] #main-nav { box-shadow: 0 4px 16px rgba(20,38,74,.25) !important; }
+            html[data-dti-theme="nautical"] :is(.dti-section-card, #dti-hero) { border-top: 3px solid #172a4a !important; }
+            html[data-dti-theme="nautical"] .dti-hc-ico { border-radius: 50% !important; background: #172a4a !important; color: #f4f1e8 !important; }
+            /* Synthwave: the neon grid running off to the sun; chrome titles; neon edges */
+            html[data-dti-theme="synthwave"] body::after {
+                content: ''; position: fixed; z-index: -1; pointer-events: none; left: -60%; right: -60%; bottom: 0; height: 44vh;
+                background: linear-gradient(rgba(255,62,165,.75) 2px, transparent 2px) 0 0 / 80px 64px, linear-gradient(90deg, rgba(75,227,255,.55) 2px, transparent 2px) 0 0 / 80px 64px, linear-gradient(180deg, #1c0740, #0e0322);
+                transform: perspective(260px) rotateX(58deg); transform-origin: 50% 100%;
+                -webkit-mask-image: linear-gradient(0deg, #000 30%, transparent 96%); mask-image: linear-gradient(0deg, #000 30%, transparent 96%);
+            }
+            html[data-dti-theme="synthwave"] body::before { opacity: .72; }
+            html[data-dti-theme="synthwave"] #main-nav { box-shadow: 0 0 24px rgba(255,62,165,.35) !important; }
+            html[data-dti-theme="synthwave"] #main-nav::after { box-shadow: 0 0 10px rgba(255,62,165,.9), 0 0 22px rgba(75,227,255,.5); }
+            html[data-dti-theme="synthwave"] h1:not(#wardrobe-2020-root h1) {
+                background: linear-gradient(180deg, #ffffff 0%, #ffe3f6 40%, #ff7cc5 54%, #4be3ff 100%); -webkit-background-clip: text; background-clip: text; color: transparent !important;
+                filter: drop-shadow(0 0 10px rgba(255,62,165,.35));
+            }
+            html[data-dti-theme="synthwave"] :is(${_CARDS}) { border-color: rgba(255,62,165,.28) !important; }
+            html[data-dti-theme="synthwave"] .dti-hc-title { color: #4be3ff !important; text-shadow: 0 0 8px rgba(75,227,255,.5); }
+            html[data-dti-theme="synthwave"] :is(.btn-primary, .dti-nx-new) { box-shadow: 0 0 16px rgba(255,62,165,.45) !important; }
+            html[data-dti-theme="synthwave"] .dti-hc-ico { background: rgba(75,227,255,.14) !important; color: #4be3ff !important; box-shadow: 0 0 10px rgba(75,227,255,.25); }
+            /* Phosphor: a CRT over everything — scanlines and a dark edge; glowing type; a cursor after the name */
+            html[data-dti-theme="phosphor"] body::after {
+                content: ''; position: fixed; inset: 0; z-index: 2147483000; pointer-events: none;
+                background: radial-gradient(ellipse 120% 100% at 50% 50%, transparent 64%, rgba(0,0,0,.38) 100%);
+            }
+            /* (the scanlines: on the page behind everything, and over the home page's rotating pet — never behind words or other pictures) */
+            html[data-dti-theme="phosphor"] #dti-pet-display-wrap::after { content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none; background: repeating-linear-gradient(180deg, rgba(0,0,0,.2) 0 1px, transparent 1px 3px); }
+            html[data-dti-theme="phosphor"] :is(h1, h2, .dti-hc-title, .dti-brand, .dti-cs-title) { text-shadow: 0 0 8px rgba(51,240,111,.4); }
+            html[data-dti-theme="phosphor"] .dti-brand::after { content: '▌'; margin-left: -8px; color: #33f06f; animation: dti-blink 1.06s steps(1) infinite; }
+            html[data-dti-theme="phosphor"] #main-nav { box-shadow: 0 0 18px rgba(51,240,111,.12) !important; }
+            html[data-dti-theme="phosphor"] #main-nav::after { box-shadow: 0 0 8px rgba(51,240,111,.8); }
+            html[data-dti-theme="phosphor"] :is(${_CARDS}) { border-radius: 3px !important; border-color: #1c4a29 !important; }
+            html[data-dti-theme="phosphor"] #main-nav :is(.dti-nav-center > .dti-nav-link, .dti-nav-more-btn) { font-family: 'JetBrains Mono', ui-monospace, monospace !important; letter-spacing: -.02em; }
+            html[data-dti-theme="phosphor"] :is(.btn-primary, .dti-nx-new) { border-radius: 3px !important; font-family: 'JetBrains Mono', ui-monospace, monospace !important; }
+            html[data-dti-theme="phosphor"] .dti-hc-ico { border-radius: 3px !important; }
+            /* Deco: rays from the top (fading), gold brackets at the cards' corners, gold titles */
+            html[data-dti-theme="deco"] body::after { -webkit-mask-image: radial-gradient(ellipse 85% 70% at 50% 0%, #000, transparent 78%); mask-image: radial-gradient(ellipse 85% 70% at 50% 0%, #000, transparent 78%); }
+            html[data-dti-theme="deco"] #main-nav { box-shadow: 0 6px 22px rgba(0,0,0,.45) !important; }
+            html[data-dti-theme="deco"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) {
+                border-color: rgba(216,179,106,.3) !important;
+                background: linear-gradient(#d8b36a, #d8b36a) top 3px left 3px / 12px 1px no-repeat, linear-gradient(#d8b36a, #d8b36a) top 3px left 3px / 1px 12px no-repeat,
+                    linear-gradient(#d8b36a, #d8b36a) top 3px right 3px / 12px 1px no-repeat, linear-gradient(#d8b36a, #d8b36a) top 3px right 3px / 1px 12px no-repeat,
+                    linear-gradient(#d8b36a, #d8b36a) bottom 3px left 3px / 12px 1px no-repeat, linear-gradient(#d8b36a, #d8b36a) bottom 3px left 3px / 1px 12px no-repeat,
+                    linear-gradient(#d8b36a, #d8b36a) bottom 3px right 3px / 12px 1px no-repeat, linear-gradient(#d8b36a, #d8b36a) bottom 3px right 3px / 1px 12px no-repeat, var(--surface) !important;
+            }
+            html[data-dti-theme="deco"] :is(#dti-hero, ul#outfits > li, header.item-header) { border-color: rgba(216,179,106,.3) !important; }
+            html[data-dti-theme="deco"] .dti-hc-title { color: var(--accent-text) !important; }
+            html[data-dti-theme="deco"] :is(.btn-primary, .dti-nx-new) { border-radius: 2px !important; letter-spacing: .08em; text-transform: uppercase; }
+            html[data-dti-theme="deco"] .dti-hc-ico { border-radius: 0 !important; transform: rotate(45deg) scale(.86); }
+            html[data-dti-theme="deco"] .dti-hc-ico svg { transform: rotate(-45deg); }
+            /* Volt: everything italic and upper-case; a volt stripe down each card; angled buttons */
+            html[data-dti-theme="volt"] #main-nav { box-shadow: none !important; }
+            html[data-dti-theme="volt"] #main-nav::after { box-shadow: 0 0 14px rgba(212,255,58,.55); }
+            html[data-dti-theme="volt"] :is(h1, h2, h3, .dti-hc-title, .dti-pm-title, .dti-cs-title, .dti-brand) { font-style: italic; text-transform: uppercase; }
+            html[data-dti-theme="volt"] :is(${_CARDS}) { border-radius: 4px !important; }
+            html[data-dti-theme="volt"] .dti-section-card { box-shadow: inset 3px 0 0 #d4ff3a, var(--shadow-sm) !important; }
+            html[data-dti-theme="volt"] :is(.btn-primary, .dti-nx-new) { border-radius: 0 !important; clip-path: polygon(9px 0, 100% 0, calc(100% - 9px) 100%, 0 100%); padding-left: 18px !important; padding-right: 18px !important; text-transform: uppercase; font-style: italic; }
+            html[data-dti-theme="volt"] .dti-hc-ico { border-radius: 2px !important; background: #d4ff3a !important; color: #0b0c0d !important; transform: skewX(-10deg); }
+            /* Verdigris: a riveted copper strip under the bar; copper-edged cards; patina-green titles */
+            html[data-dti-theme="verdigris"] body::before { opacity: .55; }
+            html[data-dti-theme="verdigris"] #dti-search-row :is(h1, .chakra-editable__preview, .chakra-editable__input) { font-size: 29px !important; }
+            html[data-dti-theme="verdigris"] #main-nav { box-shadow: 0 8px 22px rgba(0,0,0,.4) !important; }
+            html[data-dti-theme="verdigris"] :is(${_CARDS}) { border-color: rgba(215,137,90,.26) !important; }
+            html[data-dti-theme="verdigris"] .dti-hc-title { color: #6fd6c3 !important; }
+            html[data-dti-theme="verdigris"] .dti-hc-ico { background: linear-gradient(180deg, #e4a173, #b0633a) !important; color: #1d1009 !important; }
+            /* Chalkboard: chalky type, a wood ledge under the frame, chalk-yellow titles */
+            html[data-dti-theme="chalkboard"] #main-nav { box-shadow: 0 6px 18px rgba(0,0,0,.35) !important; }
+            html[data-dti-theme="chalkboard"] :is(h1, h2, .dti-hc-title, .dti-brand) { text-shadow: 0 0 1px rgba(255,255,255,.45), 0 0 6px rgba(255,255,255,.08); }
+            html[data-dti-theme="chalkboard"] :is(${_CARDS}) { border-color: rgba(255,255,255,.14) !important; border-radius: 8px !important; }
+            html[data-dti-theme="chalkboard"] .dti-hc-title { color: #ffe08f !important; }
+            html[data-dti-theme="chalkboard"] .dti-hc-ico { background: rgba(255,255,255,.08) !important; color: #f3f5ef !important; border: 1.5px dashed rgba(255,255,255,.35); }
+            /* Lumen: frosted glass over the light — the bar, the search row and the big cards */
+            html[data-dti-theme="lumen"] #main-nav { -webkit-backdrop-filter: blur(18px) saturate(160%) !important; backdrop-filter: blur(18px) saturate(160%) !important; box-shadow: 0 1px 0 rgba(255,255,255,.08), 0 8px 30px rgba(0,0,0,.3) !important; }
+            html[data-dti-theme="lumen"] :is(.dti-section-card, #dti-hero, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar, header.item-header, #dti-search-row) {
+                background: rgba(255,255,255,.055) !important; border-color: rgba(255,255,255,.12) !important;
+                -webkit-backdrop-filter: blur(18px) saturate(150%); backdrop-filter: blur(18px) saturate(150%);
+                box-shadow: 0 10px 34px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.07) !important;
+            }
+            html[data-dti-theme="lumen"] ul#outfits > li { background: rgba(255,255,255,.05) !important; border-color: rgba(255,255,255,.1) !important; }
+            html[data-dti-theme="lumen"] .dti-hc-ico { background: rgba(255,255,255,.1) !important; color: #ffffff !important; }
+            /* Kintsugi: gold seams across the page and under the bar; gold titles, vermilion icons */
+            html[data-dti-theme="kintsugi"] body::after { opacity: .85; }
+            html[data-dti-theme="kintsugi"] #main-nav { box-shadow: 0 6px 24px rgba(0,0,0,.5) !important; }
+            html[data-dti-theme="kintsugi"] :is(${_CARDS}) { border-color: rgba(212,166,74,.2) !important; }
+            html[data-dti-theme="kintsugi"] .dti-hc-title { color: var(--accent-text) !important; }
+            html[data-dti-theme="kintsugi"] .dti-hc-ico { background: rgba(200,64,45,.16) !important; color: #e0786a !important; }
+            /* ══ The fourth set — the third's way (a typeface, a drawn layer, a finish under the bar, its scrollbars and selection), and
+               further: some bars and title bars made apart, cards cut, stitched, notched or framed, icons shaped to the theme, a little
+               motion where it belongs (a radar turning, fireflies, marquee bulbs — still, if you'd rather) ══ */
+            :root[data-dti-theme="bitmap"][data-mode][data-style] {
+                --bg: #ffffff; --surface: #ffffff; --surface-2: #f0f0f0; --surface-3: #e4e4e4; --border: #000000; --nav-bg: #ffffff;
+                --text: #000000; --text-muted: #3a3a3a; --text-sub: #6a6a6a;
+                --accent: #000000; --accent-dim: #222222; --accent-glow: rgba(0,0,0,.08); --accent-text: #000000; --accent-fg: #ffffff;
+                --nc: #000000; --np: #4a4a4a;
+                --solid-bg: #ffffff; --solid-fill: #ffffff;
+                --solid-fg: #000000; --solid-fg-2: rgba(0,0,0,.72); --solid-line: #000000; --solid-hover: rgba(0,0,0,.08); --solid-active: rgba(0,0,0,.14);
+                --theme-btn: #ffffff; --theme-btn-fg: #000000;
+                --theme-page: none;
+                --theme-pattern: ${_DITHER}; --theme-pattern-size: 4px 4px;
+                --theme-decor: ${_BM_DISK} right 24px top 92px / 64px 68px no-repeat, ${_BM_TRASH} right 24px top 184px / 64px 68px no-repeat;
+                --shadow-sm: 2px 2px 0 #000; --shadow-md: 3px 3px 0 #000; --shadow-lg: 4px 4px 0 #000;
+                --theme-font: 'Pixelify Sans', ui-monospace, monospace; --theme-font-wt: 600; --theme-hc-size: 14px; --theme-hc-track: .02em; --theme-hc-case: none; --theme-brand-track: 0;
+                --theme-navdeco: #000000; --theme-navdeco-h: 2px;
+                --theme-scroll: #000000; --theme-scroll-track: #ffffff; --theme-sel: #000000; --theme-sel-fg: #ffffff;
+            }
+            :root[data-dti-theme="transit"][data-mode][data-style] {
+                --bg: #f4f4f1; --surface: #ffffff; --surface-2: #f7f7f5; --surface-3: #ececea; --border: #dcdcd8; --nav-bg: #161616;
+                --text: #111111; --text-muted: #4d4d4d; --text-sub: #8a8a8a;
+                --accent: #0039a6; --accent-dim: #002d84; --accent-glow: rgba(0,57,166,.1); --accent-text: #0039a6; --accent-fg: #ffffff;
+                --nc: #b5530c; --np: #00843a;
+                --solid-bg: #161616; --solid-fill: linear-gradient(180deg, #1b1b1b, #121212);
+                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.76); --solid-line: rgba(255,255,255,.22); --solid-hover: rgba(255,255,255,.1); --solid-active: rgba(255,255,255,.18);
+                --theme-btn: #0039a6;
+                --theme-page: linear-gradient(180deg, #f6f6f3, #efefeb);
+                --theme-pattern: ${_SUBWAY}; --theme-pattern-size: 72px 48px;
+                --theme-decor: ${_TRANSIT} center / cover no-repeat;
+                --shadow-sm: 0 1px 2px rgba(0,0,0,.06); --shadow-md: 0 4px 14px rgba(0,0,0,.08); --shadow-lg: 0 12px 34px rgba(0,0,0,.14);
+                --theme-font: 'Archivo', 'Helvetica Neue', Arial, sans-serif; --theme-font-wt: 800; --theme-hc-size: 14px; --theme-hc-track: -.01em; --theme-hc-case: none; --theme-brand-track: -.02em;
+                --theme-navdeco: none; --theme-navdeco-h: 0px;
+                --theme-scroll: #161616; --theme-sel: #fccc0a; --theme-sel-fg: #111111;
+            }
+            :root[data-dti-theme="contour"][data-mode][data-style] {
+                --bg: #efebdc; --surface: #fbf9f1; --surface-2: #f6f3e8; --surface-3: #ece7d6; --border: #d9d2bb; --nav-bg: #2a402f;
+                --text: #1f261c; --text-muted: #55604c; --text-sub: #938f78;
+                --accent: #2f6b3d; --accent-dim: #275a33; --accent-glow: rgba(47,107,61,.12); --accent-text: #2b6238; --accent-fg: #ffffff;
+                --nc: #a5530f; --np: #2c5f8a;
+                --solid-bg: #2a402f; --solid-fill: linear-gradient(180deg, #2c4431, #233828);
+                --solid-fg: #f3f1e4; --solid-fg-2: rgba(243,241,228,.78); --solid-line: rgba(243,241,228,.2); --solid-hover: rgba(243,241,228,.09); --solid-active: rgba(243,241,228,.16);
+                --theme-btn: linear-gradient(180deg, #c95f26, #b04a1a);
+                --theme-page: radial-gradient(1100px 520px at 50% -10%, rgba(255,253,240,.85), transparent 60%), linear-gradient(180deg, #f1edde, #e9e3cf);
+                --theme-pattern: ${_GRAIN('.05')}; --theme-pattern-size: 180px 180px;
+                --theme-decor: ${_CONTOUR} center / cover no-repeat;
+                --shadow-sm: 0 1px 2px rgba(50,60,30,.06); --shadow-md: 0 6px 18px rgba(50,60,30,.09); --shadow-lg: 0 14px 36px rgba(50,60,30,.15);
+                --theme-font: 'Bitter', Georgia, serif; --theme-font-wt: 700; --theme-hc-size: 12px; --theme-hc-track: .1em; --theme-brand-track: .01em;
+                --theme-navdeco: ${_RIDGE} 0 0 / 600px 16px repeat-x; --theme-navdeco-h: 16px; --theme-navdeco-gap: -1px;
+                --theme-scroll: #8c8a70; --theme-sel: rgba(196,85,31,.25);
+            }
+            :root[data-dti-theme="notebook"][data-mode][data-style] {
+                --bg: #fdfcf6; --surface: #ffffff; --surface-2: #fbfaf4; --surface-3: #f1efe6; --border: #dcdde6; --nav-bg: #2b4a9a;
+                --text: #1c2233; --text-muted: #4f5670; --text-sub: #9096aa;
+                --accent: #2350b0; --accent-dim: #1c4194; --accent-glow: rgba(35,80,176,.1); --accent-text: #2350b0; --accent-fg: #ffffff;
+                --nc: #b5521b; --np: #1f7a4f;
+                --solid-bg: #ffffff; --solid-fill: #ffffff;
+                --solid-fg: #1c2233; --solid-fg-2: rgba(28,34,51,.7); --solid-line: rgba(35,80,176,.25); --solid-hover: rgba(35,80,176,.07); --solid-active: rgba(35,80,176,.13);
+                --theme-btn: #2350b0;
+                --theme-page: none;
+                --theme-pattern: linear-gradient(90deg, transparent 0 62px, rgba(222,82,82,.55) 62px 64px, transparent 64px), repeating-linear-gradient(180deg, transparent 0 27px, rgba(80,130,210,.28) 27px 28px);
+                --theme-pattern-size: 100% 100%, 100% 28px; --theme-pattern-repeat: no-repeat, repeat;
+                --theme-decor: ${_NOTEBOOK} center / cover no-repeat;
+                --shadow-sm: 0 1px 0 rgba(0,0,0,.04), 0 2px 6px rgba(28,34,51,.05); --shadow-md: 0 1px 0 rgba(0,0,0,.04), 0 8px 20px rgba(28,34,51,.08); --shadow-lg: 0 16px 40px rgba(28,34,51,.14);
+                --theme-font: 'Caveat', 'Segoe Print', cursive; --theme-font-wt: 700; --theme-hc-size: 20px; --theme-hc-track: 0; --theme-hc-case: none; --theme-brand-track: 0;
+                --theme-navdeco: ${_SPIRAL} 6px 0 / 24px 18px repeat-x; --theme-navdeco-h: 18px; --theme-navdeco-gap: -8px;
+                --theme-scroll: #2350b0; --theme-sel: rgba(255,233,64,.75); --theme-sel-fg: #1c2233;
+            }
+            :root[data-dti-theme="terrazzo"][data-mode][data-style] {
+                --bg: #f3eee8; --surface: #fffdfa; --surface-2: #faf6f1; --surface-3: #f0e9e1; --border: #e3d9cd; --nav-bg: #ecd5c8;
+                --text: #2a2523; --text-muted: #615853; --text-sub: #a0958d;
+                --accent: #b35340; --accent-dim: #9a4534; --accent-glow: rgba(179,83,64,.12); --accent-text: #a64b39; --accent-fg: #ffffff;
+                --nc: #a0620f; --np: #4f7a6a;
+                --solid-bg: #e8cfc1; --solid-fill: linear-gradient(rgba(237,216,204,.55), rgba(237,216,204,.55)), ${_TERRAZZO} 0 0 / 260px 260px, linear-gradient(180deg, #edd8cc, #e5cabb);
+                --solid-fg: #2a2523; --solid-fg-2: rgba(42,37,35,.74); --solid-line: rgba(42,37,35,.18); --solid-hover: rgba(255,255,255,.4); --solid-active: rgba(255,255,255,.62);
+                --theme-btn: linear-gradient(180deg, #bd5a46, #a94c3a);
+                --theme-page: linear-gradient(180deg, #f5f0ea, #efe8e0);
+                --theme-pattern: ${_TERRAZZO}; --theme-pattern-size: 260px 260px;
+                --shadow-sm: 0 1px 3px rgba(90,60,40,.06); --shadow-md: 0 8px 24px rgba(90,60,40,.09); --shadow-lg: 0 18px 44px rgba(90,60,40,.15);
+                --theme-font: 'Syne', 'Poppins', sans-serif; --theme-font-wt: 800; --theme-hc-size: 13px; --theme-hc-track: 0; --theme-hc-case: none; --theme-brand-track: -.01em;
+                --theme-navdeco: linear-gradient(180deg, #f3dca0, #c49a4a 50%, #8f6a2c); --theme-navdeco-h: 3px;
+                --theme-scroll: #c9a49a; --theme-sel: rgba(179,83,64,.22);
+            }
+            :root[data-dti-theme="sampler"][data-mode][data-style] {
+                --bg: #f3eee2; --surface: #fbf8f0; --surface-2: #f6f2e7; --surface-3: #ece5d4; --border: #ddd3bd; --nav-bg: #8f2b2b;
+                --text: #2b2622; --text-muted: #5f574c; --text-sub: #9c9283;
+                --accent: #2f4a7a; --accent-dim: #263d66; --accent-glow: rgba(47,74,122,.12); --accent-text: #2b4370; --accent-fg: #ffffff;
+                --nc: #a35a12; --np: #2f6b47;
+                --solid-bg: #8f2b2b; --solid-fill: linear-gradient(180deg, #932d2d, #812626);
+                --solid-fg: #f8f1e3; --solid-fg-2: rgba(248,241,227,.8); --solid-line: rgba(248,241,227,.22); --solid-hover: rgba(248,241,227,.1); --solid-active: rgba(248,241,227,.18);
+                --theme-btn: linear-gradient(180deg, #34518a, #2f4a7a);
+                --theme-page: radial-gradient(1100px 520px at 50% -10%, rgba(255,252,242,.8), transparent 60%), linear-gradient(180deg, #f4efe4, #ede6d6);
+                --theme-pattern: radial-gradient(rgba(80,62,40,.14) .9px, transparent 1.3px), linear-gradient(90deg, rgba(120,100,70,.045) 1px, transparent 1px), linear-gradient(rgba(120,100,70,.045) 1px, transparent 1px);
+                --theme-pattern-size: 6px 6px, 6px 6px, 6px 6px; --theme-pattern-pos: 0 0, 3px 0, 0 3px;
+                --theme-decor: ${_SAMPLER} center / cover no-repeat;
+                --shadow-sm: 0 1px 2px rgba(70,50,30,.06); --shadow-md: 0 6px 18px rgba(70,50,30,.09); --shadow-lg: 0 14px 36px rgba(70,50,30,.15);
+                --theme-font: 'Fraunces', Georgia, serif; --theme-font-wt: 700; --theme-hc-size: 15px; --theme-hc-track: 0; --theme-hc-case: none;
+                --theme-navdeco: repeating-linear-gradient(90deg, rgba(248,241,227,.78) 0 7px, transparent 7px 12px); --theme-navdeco-h: 1.5px; --theme-navdeco-gap: -7px;
+                --theme-scroll: #b8a888; --theme-sel: rgba(184,49,47,.2);
+            }
+            :root[data-dti-theme="popart"][data-mode][data-style] {
+                --bg: #fff7d6; --surface: #ffffff; --surface-2: #fffbea; --surface-3: #fff2c2; --border: #111111; --nav-bg: #ffd400;
+                --text: #111111; --text-muted: #3d3d3d; --text-sub: #6e6e6e;
+                --accent: #d9221f; --accent-dim: #b81b18; --accent-glow: rgba(217,34,31,.12); --accent-text: #c41d1a; --accent-fg: #ffffff;
+                --nc: #c41d1a; --np: #0068a8;
+                --solid-bg: #ffd400; --solid-fill: radial-gradient(circle, rgba(217,34,31,.16) 28%, transparent 31%) 0 0 / 7px 7px, #ffd400;
+                --solid-fg: #111111; --solid-fg-2: rgba(17,17,17,.78); --solid-line: rgba(17,17,17,.35); --solid-hover: rgba(255,255,255,.5); --solid-active: #ffffff;
+                --theme-btn: #d9221f;
+                --theme-page: radial-gradient(circle at 50% 40%, #fffbe6, #fff3c4 80%);
+                --theme-pattern: radial-gradient(circle, rgba(0,163,224,.32) 30%, transparent 33%); --theme-pattern-size: 12px 12px;
+                --theme-decor: ${_BURST} right -50px top 64px / 330px 330px no-repeat, ${_SPEECH} left 18px bottom 18px / 200px 150px no-repeat;
+                --shadow-sm: 3px 3px 0 #111; --shadow-md: 5px 5px 0 #111; --shadow-lg: 7px 7px 0 #111;
+                --theme-font: 'Bangers', 'Impact', sans-serif; --theme-font-wt: 400; --theme-hc-size: 17px; --theme-hc-track: .06em; --theme-hc-case: uppercase; --theme-brand-track: .05em;
+                --theme-navdeco: #111111; --theme-navdeco-h: 3px;
+                --theme-scroll: #111111; --theme-scroll-track: #fff7d6; --theme-sel: #ffd400; --theme-sel-fg: #111111;
+            }
+            :root[data-dti-theme="zen"][data-mode][data-style] {
+                --bg: #ece6d8; --surface: #fbf9f3; --surface-2: #f5f2ea; --surface-3: #ebe6da; --border: #ddd5c4; --nav-bg: #2e2f2a;
+                --text: #2a2b26; --text-muted: #5c5e55; --text-sub: #9a9a8c;
+                --accent: #4f6b3c; --accent-dim: #425a32; --accent-glow: rgba(79,107,60,.12); --accent-text: #48633a; --accent-fg: #ffffff;
+                --nc: #9a5f1c; --np: #3f6a80;
+                --solid-bg: #2e2f2a; --solid-fill: ${_GRAIN('.06')}, linear-gradient(180deg, #34352f, #2a2b26);
+                --solid-fg: #f3f0e6; --solid-fg-2: rgba(243,240,230,.76); --solid-line: rgba(243,240,230,.18); --solid-hover: rgba(243,240,230,.08); --solid-active: rgba(243,240,230,.15);
+                --theme-btn: linear-gradient(180deg, #56743f, #4a6538);
+                --theme-page: linear-gradient(180deg, #eee8db, #e7e0d0);
+                --theme-pattern: ${_RAKE}, ${_GRAIN('.05')}; --theme-pattern-size: 200px 16px, 180px 180px;
+                --theme-decor: ${_ZEN} center / cover no-repeat;
+                --shadow-sm: 0 1px 2px rgba(60,50,30,.05); --shadow-md: 0 8px 26px rgba(60,50,30,.08); --shadow-lg: 0 18px 46px rgba(60,50,30,.14);
+                --theme-font: 'Zen Maru Gothic', 'Poppins', sans-serif; --theme-font-wt: 700; --theme-hc-size: 13px; --theme-hc-track: .08em; --theme-hc-case: none; --theme-brand-track: .02em;
+                --theme-navdeco: rgba(46,47,42,.4); --theme-navdeco-h: 1px; --theme-navdeco-gap: 3px;
+                --theme-scroll: #a8a08c; --theme-sel: rgba(79,107,60,.2);
+            }
+            :root[data-dti-theme="cathedral"][data-mode][data-style] {
+                --bg: #0c0a10; --surface: #16121b; --surface-2: #1d1824; --surface-3: #241e2d; --border: #342b3f; --nav-bg: #2a1452;
+                --text: #f2ebde; --text-muted: #c2b4a3; --text-sub: #7c6f7e;
+                --accent: #d9b44a; --accent-dim: #bf9a32; --accent-glow: rgba(217,180,74,.16); --accent-text: #e6c46a; --accent-fg: #1a1405;
+                --nc: #e6c46a; --np: #8fb8ff;
+                --solid-bg: #2a1452; --solid-fill: repeating-linear-gradient(90deg, rgba(8,4,12,.55) 0 3px, transparent 3px 92px), linear-gradient(100deg, #5a0f20 0%, #3a1666 38%, #14306b 70%, #0e4a4a 100%);
+                --solid-fg: #f6efe2; --solid-fg-2: rgba(246,239,226,.8); --solid-line: rgba(217,180,74,.35); --solid-hover: rgba(255,255,255,.1); --solid-active: rgba(255,255,255,.17);
+                --theme-btn: linear-gradient(180deg, #ecd07e, #d9b44a 45%, #b8922f); --theme-btn-fg: #1a1405;
+                --theme-page: radial-gradient(900px 700px at 85% -5%, rgba(120,60,160,.18), transparent 60%), radial-gradient(800px 600px at 10% 100%, rgba(30,70,160,.12), transparent 60%), linear-gradient(180deg, #0e0b13, #09070c);
+                --theme-pattern: ${_ASHLAR}; --theme-pattern-size: 160px 80px;
+                --theme-decor: ${_ROSE} right -150px top 64px / 540px 540px no-repeat, ${_LANCET} left 24px bottom -60px / 120px 384px no-repeat,
+                    linear-gradient(135deg, transparent 38%, rgba(179,18,46,.07) 42%, transparent 47%), linear-gradient(135deg, transparent 47%, rgba(29,63,163,.07) 51%, transparent 56%),
+                    linear-gradient(135deg, transparent 56%, rgba(224,154,27,.06) 59%, transparent 63%);
+                --shadow-sm: 0 2px 8px rgba(0,0,0,.4); --shadow-md: 0 10px 28px rgba(0,0,0,.55); --shadow-lg: 0 18px 48px rgba(0,0,0,.7);
+                --theme-font: 'Pirata One', Georgia, serif; --theme-font-wt: 400; --theme-hc-size: 19px; --theme-hc-track: .02em; --theme-hc-case: none; --theme-brand-track: .01em;
+                --theme-navdeco: ${_ARCADE} 0 0 / 26px 10px repeat-x; --theme-navdeco-h: 10px;
+                --theme-scroll: #8a6a2a; --theme-scroll-track: #0c0a10; --theme-sel: rgba(179,18,46,.55); --theme-sel-fg: #ffffff;
+            }
+            :root[data-dti-theme="cockpit"][data-mode][data-style] {
+                --bg: #05080f; --surface: #0a111d; --surface-2: #0e1726; --surface-3: #131e30; --border: #1b2c44; --nav-bg: #0b1424;
+                --text: #d9f2ff; --text-muted: #84a9c4; --text-sub: #4d6b85;
+                --accent: #3fd8ff; --accent-dim: #22b8e0; --accent-glow: rgba(63,216,255,.14); --accent-text: #6fe3ff; --accent-fg: #02121c;
+                --nc: #ffb547; --np: #7dff9a; --success: #7dff9a; --danger: #ff5a5a;
+                --solid-bg: #0b1424; --solid-fill: linear-gradient(180deg, #0d182b, #08101d);
+                --solid-fg: #d9f2ff; --solid-fg-2: rgba(217,242,255,.72); --solid-line: rgba(63,216,255,.28); --solid-hover: rgba(63,216,255,.1); --solid-active: rgba(63,216,255,.18);
+                --theme-btn: linear-gradient(180deg, #5fe4ff, #22b8e0); --theme-btn-fg: #02121c;
+                --theme-page: radial-gradient(1000px 600px at 50% -10%, rgba(40,90,140,.22), transparent 60%), linear-gradient(180deg, #060a12, #04060b);
+                --theme-pattern: ${_HEXGRID}; --theme-pattern-size: 56px 97px;
+                --theme-decor: ${_RADAR} right -120px bottom -120px / 640px 640px no-repeat;
+                --shadow-sm: 0 0 0 1px rgba(63,216,255,.05); --shadow-md: 0 10px 28px rgba(0,0,0,.6); --shadow-lg: 0 18px 46px rgba(0,0,0,.75);
+                --theme-font: 'Chakra Petch', 'Rajdhani', sans-serif; --theme-font-wt: 700; --theme-hc-size: 12px; --theme-hc-track: .16em; --theme-brand-track: .06em;
+                --theme-navdeco: repeating-linear-gradient(90deg, rgba(63,216,255,.55) 0 1px, transparent 1px 10px) 0 0 / 100% 4px no-repeat, repeating-linear-gradient(90deg, rgba(63,216,255,.95) 0 1px, transparent 1px 50px) 0 0 / 100% 8px no-repeat; --theme-navdeco-h: 8px;
+                --theme-scroll: #22b8e0; --theme-scroll-track: #05080f; --theme-sel: #3fd8ff; --theme-sel-fg: #02121c;
+            }
+            :root[data-dti-theme="cyberpunk"][data-mode][data-style] {
+                --bg: #0b0a14; --surface: #13111f; --surface-2: #1a1729; --surface-3: #221e35; --border: #2e2846; --nav-bg: #120d22;
+                --text: #f2edff; --text-muted: #a79fca; --text-sub: #6a6390;
+                --accent: #fcee0a; --accent-dim: #e0d200; --accent-glow: rgba(252,238,10,.13); --accent-text: #fff27a; --accent-fg: #0b0a14;
+                --nc: #ff4f8b; --np: #05d9e8; --success: #3dffb4; --danger: #ff3b5c;
+                --solid-bg: #fcee0a; --solid-fill: linear-gradient(180deg, #fff23a, #f0df00);
+                --solid-fg: #0b0a14; --solid-fg-2: rgba(11,10,20,.76); --solid-line: rgba(11,10,20,.28); --solid-hover: rgba(11,10,20,.08); --solid-active: rgba(11,10,20,.16);
+                --theme-btn: #fcee0a; --theme-btn-fg: #0b0a14;
+                --theme-page: radial-gradient(1200px 500px at 50% 110%, rgba(255,42,109,.22), transparent 60%), radial-gradient(900px 500px at 100% 0%, rgba(5,217,232,.1), transparent 60%), linear-gradient(180deg, #0a0912, #0e0b1c);
+                --theme-pattern: ${_RAIN}; --theme-pattern-size: 140px 180px;
+                --theme-decor: ${_SKYLINE} center bottom / 1600px 440px repeat-x;
+                --shadow-sm: 0 2px 8px rgba(0,0,0,.4); --shadow-md: 0 10px 28px rgba(0,0,0,.55); --shadow-lg: 0 18px 46px rgba(0,0,0,.7);
+                --theme-font: 'Rajdhani', 'Chakra Petch', sans-serif; --theme-font-wt: 700; --theme-hc-size: 15px; --theme-hc-track: .12em; --theme-brand-track: .06em;
+                --theme-navdeco: repeating-linear-gradient(-45deg, #fcee0a 0 7px, #0b0a14 7px 14px); --theme-navdeco-h: 5px;
+                --theme-scroll: #ff2a6d; --theme-scroll-track: #0b0a14; --theme-sel: #ff2a6d; --theme-sel-fg: #ffffff;
+            }
+            :root[data-dti-theme="folio"][data-mode][data-style] {
+                --bg: #17100d; --surface: #221814; --surface-2: #2a1e19; --surface-3: #33251f; --border: #44322a; --nav-bg: #5e1a25;
+                --text: #f1e6d2; --text-muted: #c7b092; --text-sub: #84705c;
+                --accent: #d1a54e; --accent-dim: #b58b38; --accent-glow: rgba(209,165,78,.16); --accent-text: #e0b965; --accent-fg: #1d1407;
+                --nc: #e0b965; --np: #8fbf9a;
+                --solid-bg: #5e1a25; --solid-fill: ${_LEATHER}, linear-gradient(180deg, #63202b, #4f1520);
+                --solid-fg: #f6e7c9; --solid-fg-2: rgba(246,231,201,.8); --solid-line: rgba(209,165,78,.35); --solid-hover: rgba(246,231,201,.09); --solid-active: rgba(246,231,201,.16);
+                --theme-btn: linear-gradient(180deg, #ebc877, #d1a54e 50%, #b58b38); --theme-btn-fg: #1d1407;
+                --theme-page: radial-gradient(1000px 600px at 50% -10%, rgba(209,165,78,.1), transparent 60%), linear-gradient(180deg, #1a120e, #120c0a);
+                --theme-pattern: ${_LEATHER}; --theme-pattern-size: 260px 260px;
+                --theme-decor: ${_SHELF} center bottom / 1300px 203px repeat-x;
+                --shadow-sm: 0 2px 6px rgba(0,0,0,.35); --shadow-md: 0 10px 26px rgba(0,0,0,.5); --shadow-lg: 0 18px 46px rgba(0,0,0,.65);
+                --theme-font: 'IM Fell English', Georgia, serif; --theme-font-wt: 400; --theme-hc-size: 16px; --theme-hc-track: .02em; --theme-hc-case: none; --theme-brand-track: 0;
+                --theme-navdeco: ${_FLEURON} 0 50% / 18px 8px repeat-x; --theme-navdeco-h: 8px; --theme-navdeco-gap: -11px;
+                --theme-scroll: #8a6a3a; --theme-scroll-track: #17100d; --theme-sel: rgba(209,165,78,.35);
+            }
+            :root[data-dti-theme="nocturne"][data-mode][data-style] {
+                --bg: #091114; --surface: #0f191c; --surface-2: #142125; --surface-3: #1a292e; --border: #23363b; --nav-bg: #0f1d22;
+                --text: #eef4f2; --text-muted: #a7bcb7; --text-sub: #627a76;
+                --accent: #c9dceb; --accent-dim: #a9c3d8; --accent-glow: rgba(201,220,235,.14); --accent-text: #d7e6f2; --accent-fg: #0b1417;
+                --nc: #f0d58a; --np: #9fe0c8;
+                --solid-bg: #0f1d22; --solid-fill: linear-gradient(180deg, #12232a, #0c181c);
+                --solid-fg: #eef4f2; --solid-fg-2: rgba(238,244,242,.75); --solid-line: rgba(201,220,235,.2); --solid-hover: rgba(201,220,235,.08); --solid-active: rgba(201,220,235,.15);
+                --theme-btn: linear-gradient(180deg, #eef5fa, #c9dceb 55%, #b3c9db); --theme-btn-fg: #0b1417;
+                --theme-page: radial-gradient(900px 600px at 86% 8%, rgba(160,190,220,.12), transparent 60%), radial-gradient(900px 600px at 0% 100%, rgba(40,90,80,.18), transparent 60%), linear-gradient(180deg, #0a1316, #070d0f);
+                --theme-pattern: ${_GRAIN('.04')}; --theme-pattern-size: 180px 180px;
+                --theme-decor: ${_NOCTURNE} center / cover no-repeat;
+                --shadow-sm: 0 2px 8px rgba(0,0,0,.35); --shadow-md: 0 10px 28px rgba(0,0,0,.5); --shadow-lg: 0 18px 46px rgba(0,0,0,.65);
+                --theme-font: 'Gilda Display', 'Cormorant Garamond', Georgia, serif; --theme-font-wt: 400; --theme-hc-size: 16px; --theme-hc-track: .04em; --theme-hc-case: none;
+                --theme-navdeco: radial-gradient(circle, rgba(225,236,245,.75) 0 1px, transparent 1.6px) 0 50% / 22px 4px repeat-x; --theme-navdeco-h: 4px; --theme-navdeco-gap: 3px;
+                --theme-scroll: #3d5a60; --theme-scroll-track: #091114; --theme-sel: rgba(201,220,235,.3);
+            }
+            :root[data-dti-theme="marquee"][data-mode][data-style] {
+                --bg: #12060a; --surface: #1d0b10; --surface-2: #260f16; --surface-3: #30141c; --border: #43202a; --nav-bg: #8e1a2a;
+                --text: #fbefe1; --text-muted: #d3b59d; --text-sub: #8e6a5c;
+                --accent: #f5c542; --accent-dim: #dcab2a; --accent-glow: rgba(245,197,66,.16); --accent-text: #f7d26a; --accent-fg: #1d0b10;
+                --nc: #f7d26a; --np: #8fd3c8;
+                --solid-bg: #7a1424; --solid-fill: repeating-linear-gradient(90deg, rgba(0,0,0,.16) 0 2px, transparent 2px 7px, rgba(255,255,255,.035) 7px 8px, transparent 8px 13px), linear-gradient(180deg, #951c2d, #6a1220);
+                --solid-fg: #fff3df; --solid-fg-2: rgba(255,243,223,.8); --solid-line: rgba(245,197,66,.35); --solid-hover: rgba(255,243,223,.1); --solid-active: rgba(255,243,223,.17);
+                --theme-btn: linear-gradient(180deg, #ffe08a, #f5c542 50%, #d9a52a); --theme-btn-fg: #2a0c12;
+                --theme-page: radial-gradient(70vw 60vh at 50% -10%, rgba(255,214,140,.16), transparent 60%), linear-gradient(180deg, #160709, #0d0406);
+                --theme-pattern: ${_GRAIN('.05')}; --theme-pattern-size: 180px 180px;
+                --theme-decor: ${_CURTAIN[0]} left top / 210px 100% no-repeat, ${_CURTAIN[1]} right top / 210px 100% no-repeat;
+                --shadow-sm: 0 2px 8px rgba(0,0,0,.4); --shadow-md: 0 10px 28px rgba(0,0,0,.55); --shadow-lg: 0 18px 46px rgba(0,0,0,.7);
+                --theme-font: 'Limelight', 'Poiret One', serif; --theme-font-wt: 400; --theme-hc-size: 13px; --theme-hc-track: .08em; --theme-brand-track: .04em;
+                --theme-navdeco: ${_BULBS} 0 50% / 66px 14px repeat-x, linear-gradient(180deg, #2a0a10, #1d070b); --theme-navdeco-h: 14px;
+                --theme-scroll: #c99a3a; --theme-scroll-track: #12060a; --theme-sel: #f5c542; --theme-sel-fg: #1d0b10;
+            }
+            :root[data-dti-theme="astrolabe"][data-mode][data-style] {
+                --bg: #070b17; --surface: #0d1426; --surface-2: #121b33; --surface-3: #18233f; --border: #23304f; --nav-bg: #0f1730;
+                --text: #ece7d8; --text-muted: #aba796; --text-sub: #6c6a62;
+                --accent: #c79a52; --accent-dim: #ab7f3c; --accent-glow: rgba(199,154,82,.16); --accent-text: #dcb06a; --accent-fg: #160f05;
+                --nc: #dcb06a; --np: #8fb4e8;
+                --solid-bg: #0f1730; --solid-fill: linear-gradient(180deg, #111a36, #0b1226);
+                --solid-fg: #efe9d8; --solid-fg-2: rgba(239,233,216,.76); --solid-line: rgba(199,154,82,.3); --solid-hover: rgba(199,154,82,.1); --solid-active: rgba(199,154,82,.18);
+                --theme-btn: linear-gradient(180deg, #e6c27e, #c79a52 50%, #a87c36); --theme-btn-fg: #160f05;
+                --theme-page: radial-gradient(1200px 700px at 50% -10%, rgba(60,80,150,.2), transparent 60%), linear-gradient(180deg, #080d1b, #050812);
+                --theme-pattern: ${_GRAIN('.04')}; --theme-pattern-size: 180px 180px;
+                --theme-decor: ${_STARCHART} center / cover no-repeat;
+                --shadow-sm: 0 2px 8px rgba(0,0,0,.35); --shadow-md: 0 10px 28px rgba(0,0,0,.5); --shadow-lg: 0 18px 46px rgba(0,0,0,.65);
+                --theme-font: 'Marcellus SC', 'Cinzel', Georgia, serif; --theme-font-wt: 400; --theme-hc-size: 13px; --theme-hc-track: .12em; --theme-hc-case: none; --theme-brand-track: .04em;
+                --theme-navdeco: ${_SCALE} 0 0 / 60px 10px repeat-x; --theme-navdeco-h: 10px;
+                --theme-scroll: #8a6a36; --theme-scroll-track: #070b17; --theme-sel: rgba(199,154,82,.35);
+            }
+            :root[data-dti-theme="groovy"][data-mode][data-style] {
+                --bg: #22140c; --surface: #2c1b11; --surface-2: #352116; --surface-3: #3f281b; --border: #4e3322; --nav-bg: #4a2c18;
+                --text: #f6e7cf; --text-muted: #d1b494; --text-sub: #8f7259;
+                --accent: #e8a33d; --accent-dim: #d48f2a; --accent-glow: rgba(232,163,61,.16); --accent-text: #f0b65a; --accent-fg: #22140c;
+                --nc: #f0b65a; --np: #a9c46a;
+                --solid-bg: #4a2c18; --solid-fill: linear-gradient(180deg, #4e2f1a, #3f2414);
+                --solid-fg: #f6e7cf; --solid-fg-2: rgba(246,231,207,.78); --solid-line: rgba(246,231,207,.2); --solid-hover: rgba(246,231,207,.09); --solid-active: rgba(246,231,207,.16);
+                --theme-btn: linear-gradient(180deg, #ee7a3e, #e26a32 50%, #cc5a24); --theme-btn-fg: #22140c;
+                --theme-page: radial-gradient(900px 600px at 100% 100%, rgba(217,98,43,.16), transparent 60%), radial-gradient(800px 500px at 0% 0%, rgba(232,163,61,.12), transparent 60%), linear-gradient(180deg, #25160d, #1c1009);
+                --theme-pattern: ${_GRAIN('.06')}; --theme-pattern-size: 180px 180px;
+                --theme-decor: ${_GROOVY} center / cover no-repeat;
+                --shadow-sm: 0 2px 8px rgba(0,0,0,.35); --shadow-md: 0 10px 28px rgba(0,0,0,.45); --shadow-lg: 0 18px 46px rgba(0,0,0,.6);
+                --theme-font: 'Shrikhand', Georgia, serif; --theme-font-wt: 400; --theme-hc-size: 15px; --theme-hc-track: .01em; --theme-hc-case: none; --theme-brand-track: 0;
+                --theme-navdeco: ${_WAVES} 0 0 / 120px 17px repeat-x; --theme-navdeco-h: 17px;
+                --theme-scroll: #c9772f; --theme-scroll-track: #22140c; --theme-sel: rgba(232,163,61,.4);
+            }
+            /* (shared by the set, as the third's: the finish under the bar, the drawn layer, scrollbars and selection) */
+            html:is(${_thm(_THEMES_4)}) #main-nav::after {
+                content: ''; position: absolute; left: 0; right: 0; top: calc(100% + var(--theme-navdeco-gap, 0px)); height: var(--theme-navdeco-h, 3px);
+                background: var(--theme-navdeco, none); pointer-events: none;
+            }
+            html:is(${_thm(_THEMES_4.filter(t => t !== 'terrazzo'))}) body::after {
+                content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--theme-decor);
+            }
+            html:is(${_thm(_THEMES_4)}) { scrollbar-color: var(--theme-scroll) var(--theme-scroll-track, transparent); }
+            html:is(${_thm(_THEMES_4)}) ::selection { background: var(--theme-sel); }
+            html:is(${_thm(['bitmap', 'transit', 'notebook', 'popart', 'cathedral', 'cockpit', 'cyberpunk', 'marquee'])}) ::selection { color: var(--theme-sel-fg); }
+            @keyframes dti-radar { to { transform: rotate(360deg); } }
+            @keyframes dti-glow { from { opacity: .25; } to { opacity: 1; } }
+            @keyframes dti-chase { to { background-position: 66px 50%, 0 0; } }
+            @media (prefers-reduced-motion: reduce) { html[data-dti-theme]::after, html[data-dti-theme] #main-nav::after { animation: none !important; } }
+
+            /* Bitmap: a one-bit desktop — windows with black frames and a hard shadow, striped title bars, a menu bar that inverts what you
+               point at, a disk and a trash can on the desktop */
+            html[data-dti-theme="bitmap"] #main-nav { box-shadow: none !important; }
+            html[data-dti-theme="bitmap"] #main-nav :is(.dti-nav-center > .dti-nav-link, .dti-nav-more-btn, .dti-brand-gem) { border-radius: 0 !important; }
+            html[data-dti-theme="bitmap"] #main-nav :is(.dti-nav-center > .dti-nav-link:hover, .dti-nav-more-btn:hover, .dti-nav-center > .dti-nav-link.active, .dti-nav-more-btn.active, .dti-nav-more.open .dti-nav-more-btn) {
+                background: #000 !important; color: #fff !important; border-color: #000 !important;
+            }
+            html[data-dti-theme="bitmap"] :is(${_CARDS}) { border: 2px solid #000 !important; border-radius: 0 !important; box-shadow: 3px 3px 0 #000 !important; }
+            html[data-dti-theme="bitmap"] #dti-home-grid .dti-hc-head { background: repeating-linear-gradient(180deg, #000 0 1px, transparent 1px 3px) 4px 50% / calc(100% - 8px) 11px no-repeat, #fff !important; border-bottom: 2px solid #000 !important; }
+            html[data-dti-theme="bitmap"] #dti-home-grid .dti-hc-title { background: #fff; padding: 0 6px; }
+            html[data-dti-theme="bitmap"] #dti-home-grid .dti-hc-head :is(.dti-hc-count, .dti-seg, .dti-weeknav, .dti-icon-btn, .dti-hc-pill, .dti-spl-badge, .dti-hc-link) { background: #fff !important; }
+            html[data-dti-theme="bitmap"] .dti-hc-ico { border-radius: 0 !important; background: #fff !important; color: #000 !important; box-shadow: inset 0 0 0 1.5px #000; }
+            html[data-dti-theme="bitmap"] :is(.dti-panel-label, .dti-list-section-head) { border-bottom: 2px solid #000 !important; }
+            html[data-dti-theme="bitmap"] :is(.btn-primary, .dti-nx-new) { border: 2px solid #000 !important; border-radius: 7px !important; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #000 !important; font-family: 'Pixelify Sans', ui-monospace, monospace !important; }
+            html[data-dti-theme="bitmap"] :is(.btn-primary, .dti-nx-new):hover { background: #000 !important; color: #fff !important; }
+            /* Transit: black signage with its thin white rule along the top; each card's icon a route bullet in its own line's color; the
+               station's tiles behind, and the map, faint */
+            html[data-dti-theme="transit"] body::after { opacity: .3; }
+            html[data-dti-theme="transit"] #main-nav { box-shadow: inset 0 5px 0 #161616, inset 0 6.5px 0 rgba(255,255,255,.88), 0 3px 12px rgba(0,0,0,.18) !important; }
+            html[data-dti-theme="transit"] #dti-home-grid .dti-hc-head, html[data-dti-theme="transit"] :is(.dti-panel-label, .dti-list-section-head) { box-shadow: inset 0 4px 0 #161616, inset 0 5px 0 rgba(255,255,255,.8); }
+            html[data-dti-theme="transit"] :is(${_CARDS}) { border-radius: 6px !important; }
+            html[data-dti-theme="transit"] .dti-hc-ico { width: 26px; height: 26px; border-radius: 50% !important; background: #ee352e !important; color: #fff !important; }
+            html[data-dti-theme="transit"] #dti-sections-top > :nth-child(2) .dti-hc-ico { background: #00933c !important; }
+            html[data-dti-theme="transit"] #dti-sections-top > :nth-child(3) .dti-hc-ico { background: #fccc0a !important; color: #111 !important; }
+            html[data-dti-theme="transit"] #dti-below-grid > :nth-child(1) .dti-hc-ico { background: #0039a6 !important; }
+            html[data-dti-theme="transit"] #dti-below-grid > :nth-child(2) .dti-hc-ico { background: #ff6319 !important; }
+            html[data-dti-theme="transit"] #dti-sections-bot > :nth-child(1) .dti-hc-ico { background: #b933ad !important; }
+            html[data-dti-theme="transit"] :is(.btn-primary, .dti-nx-new) { border-radius: 6px !important; letter-spacing: -.01em; }
+            /* Contour: the bar's lower edge a mountain ridge; cards ruled like a map's frame, ticked along two edges; summit markers for
+               icons; a trail-orange line under each title bar */
+            html[data-dti-theme="contour"] #main-nav { box-shadow: none !important; }
+            html[data-dti-theme="contour"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) {
+                border: 1.5px solid rgba(42,64,47,.5) !important; border-radius: 3px !important;
+                background: repeating-linear-gradient(90deg, rgba(42,64,47,.4) 0 1px, transparent 1px 24px) left 12px bottom 0 / calc(100% - 24px) 5px no-repeat,
+                    repeating-linear-gradient(180deg, rgba(42,64,47,.4) 0 1px, transparent 1px 24px) left 0 top 56px / 5px calc(100% - 68px) no-repeat, var(--surface) !important;
+            }
+            html[data-dti-theme="contour"] :is(#dti-hero, ul#outfits > li, header.item-header) { border: 1.5px solid rgba(42,64,47,.5) !important; border-radius: 3px !important; }
+            html[data-dti-theme="contour"] #dti-home-grid .dti-hc-head { box-shadow: inset 0 -2px 0 #c55a22; }
+            html[data-dti-theme="contour"] .dti-hc-ico { width: 27px; height: 24px; border-radius: 0 !important; clip-path: polygon(50% 3%, 98% 95%, 2% 95%); background: #c55a22 !important; color: #fff !important; }
+            html[data-dti-theme="contour"] .dti-hc-ico svg { width: 10px; height: 10px; margin-top: 7px; }
+            html[data-dti-theme="contour"] :is(.btn-primary, .dti-nx-new) { border-radius: 3px !important; letter-spacing: .02em; }
+            /* Notebook: the bar's the cover — blue board, the spiral's coils over its edge; ruled paper behind with a red margin and
+               doodles; highlighted titles, ink-drawn icon rings, buttons with hand-drawn corners */
+            html[data-dti-theme="notebook"] #main-nav {
+                --solid-bg: #2b4a9a; --solid-fill: ${_GRAIN('.09')}, linear-gradient(180deg, #2f51a6, #284591);
+                --solid-fg: #ffffff; --solid-fg-2: rgba(255,255,255,.8); --solid-line: rgba(255,255,255,.26); --solid-hover: rgba(255,255,255,.12); --solid-active: rgba(255,255,255,.2);
+                box-shadow: 0 3px 10px rgba(30,40,80,.22) !important;
+            }
+            html[data-dti-theme="notebook"] #dti-home-grid .dti-hc-head, html[data-dti-theme="notebook"] :is(.dti-panel-label, .dti-list-section-head) { box-shadow: inset 0 -1px 0 rgba(80,130,210,.45); }
+            html[data-dti-theme="notebook"] .dti-hc-title { padding: 0 4px; background: linear-gradient(100deg, transparent 2%, rgba(255,233,64,.7) 5% 93%, transparent 97%) 0 70% / 100% 48% no-repeat; }
+            html[data-dti-theme="notebook"] :is(${_CARDS}) { border-radius: 3px !important; }
+            html[data-dti-theme="notebook"] .dti-hc-ico { background: transparent !important; color: #2350b0 !important; box-shadow: inset 0 0 0 2px #2350b0; border-radius: 52% 48% 55% 45% / 47% 55% 45% 53% !important; transform: rotate(-8deg); }
+            html[data-dti-theme="notebook"] :is(.btn-primary, .dti-nx-new) { border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px !important; box-shadow: 0 0 0 1.5px #1c2233, 2px 2px 0 rgba(28,34,51,.25) !important; }
+            /* Terrazzo: the bar a polished slab with a brass strip set in below it; soft cards with brass under their titles; stone-chip
+               icons, each its own color */
+            html[data-dti-theme="terrazzo"] body::before { opacity: .6; }
+            html[data-dti-theme="terrazzo"] #main-nav { box-shadow: 0 4px 14px rgba(120,80,60,.14) !important; }
+            html[data-dti-theme="terrazzo"] :is(${_CARDS}) { border-color: transparent !important; border-radius: 18px !important; }
+            html[data-dti-theme="terrazzo"] #dti-home-grid .dti-hc-head, html[data-dti-theme="terrazzo"] :is(.dti-panel-label, .dti-list-section-head) { box-shadow: inset 0 -2px 0 #c49a4a; }
+            html[data-dti-theme="terrazzo"] .dti-hc-ico { border-radius: 42% 58% 63% 37% / 41% 44% 56% 59% !important; background: #c5664c !important; color: #fff !important; }
+            html[data-dti-theme="terrazzo"] :is(#dti-sections-top > :nth-child(2), #dti-below-grid > :nth-child(2)) .dti-hc-ico { background: #7f9478 !important; border-radius: 58% 42% 38% 62% / 52% 61% 39% 48% !important; }
+            html[data-dti-theme="terrazzo"] :is(#dti-sections-top > :nth-child(3), #dti-sections-bot > :nth-child(1)) .dti-hc-ico { background: #c8962e !important; border-radius: 47% 53% 41% 59% / 60% 38% 62% 40% !important; }
+            html[data-dti-theme="terrazzo"] #dti-below-grid > :nth-child(1) .dti-hc-ico { background: #4d4846 !important; }
+            html[data-dti-theme="terrazzo"] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; }
+            html[data-dti-theme="terrazzo"] #dti-hero-right h1 { font-size: 21px !important; letter-spacing: -.03em !important; }
+            html[data-dti-theme="terrazzo"] #dti-search-row :is(h1, .chakra-editable__preview, .chakra-editable__input) { font-size: 25px !important; letter-spacing: -.02em !important; }
+            /* Sampler: linen with a running stitch along the bar; cards stitched round in red thread; embroidery hoops for icons; buttons
+               stitched inside */
+            html[data-dti-theme="sampler"] #main-nav { box-shadow: 0 4px 14px rgba(110,30,30,.2) !important; }
+            html[data-dti-theme="sampler"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) {
+                border-radius: 8px !important;
+                background: repeating-linear-gradient(90deg, rgba(184,49,47,.55) 0 6px, transparent 6px 10px) left 7px bottom 6px / calc(100% - 14px) 1.5px no-repeat,
+                    repeating-linear-gradient(180deg, rgba(184,49,47,.55) 0 6px, transparent 6px 10px) left 6px top 7px / 1.5px calc(100% - 14px) no-repeat,
+                    repeating-linear-gradient(180deg, rgba(184,49,47,.55) 0 6px, transparent 6px 10px) right 6px top 7px / 1.5px calc(100% - 14px) no-repeat,
+                    repeating-linear-gradient(90deg, rgba(184,49,47,.55) 0 6px, transparent 6px 10px) left 7px top 6px / calc(100% - 14px) 1.5px no-repeat, var(--surface) !important;
+            }
+            html[data-dti-theme="sampler"] #dti-home-grid .dti-hc-head { background: repeating-linear-gradient(90deg, rgba(248,241,227,.6) 0 6px, transparent 6px 10px) left 7px bottom 5px / calc(100% - 14px) 1.5px no-repeat, var(--solid-fill) !important; }
+            html[data-dti-theme="sampler"] .dti-hc-ico { width: 26px; height: 26px; border-radius: 50% !important; background: radial-gradient(circle closest-side, #fbf8f0 0 62%, #d9b67a 64% 80%, #9a7442 82% 100%) !important; color: #b8312f !important; box-shadow: 0 1px 2px rgba(0,0,0,.25) !important; }
+            html[data-dti-theme="sampler"] :is(.btn-primary, .dti-nx-new) { border-radius: 6px !important; outline: 1.5px dashed rgba(255,255,255,.55); outline-offset: -5px; }
+            /* Pop Art: comic panels — thick black frames with an offset print in red or blue; Ben-Day dots fading in from the edges, a burst
+               and a speech balloon; caption-box titles; burst icons */
+            html[data-dti-theme="popart"] body::before { -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 45%, rgba(0,0,0,.15), #000 92%); mask-image: radial-gradient(ellipse 75% 65% at 50% 45%, rgba(0,0,0,.15), #000 92%); }
+            html[data-dti-theme="popart"] #main-nav { box-shadow: none !important; }
+            html[data-dti-theme="popart"] :is(${_CARDS}) { border: 3px solid #111 !important; border-radius: 3px !important; box-shadow: 6px 6px 0 #e8282b !important; }
+            html[data-dti-theme="popart"] :is(.dti-section-card:nth-child(even), ul#outfits > li:nth-child(even)) { box-shadow: 6px 6px 0 #00a3e0 !important; }
+            html[data-dti-theme="popart"] #dti-home-grid .dti-hc-head { border-bottom: 3px solid #111 !important; }
+            html[data-dti-theme="popart"] #dti-home-grid .dti-hc-title { background: #fff; border: 2px solid #111; padding: 2px 6px 0; line-height: 1.1; transform: rotate(-2deg); box-shadow: 2px 2px 0 #111; }
+            html[data-dti-theme="popart"] .dti-hc-ico { width: 30px; height: 30px; border-radius: 0 !important; background: #e8282b !important; color: #fff !important; clip-path: polygon(${_starPoly(10, 50, 37)}); }
+            html[data-dti-theme="popart"] .dti-hc-ico svg { width: 12px; height: 12px; }
+            html[data-dti-theme="popart"] :is(.btn-primary, .dti-nx-new) {
+                border: 2.5px solid #111 !important; border-radius: 4px !important; box-shadow: 3px 3px 0 #111 !important; transition: transform .1s, box-shadow .1s !important;
+                font-family: 'Bangers', 'Impact', sans-serif !important; font-weight: 400 !important; letter-spacing: .06em !important; font-size: 1.12em;
+            }
+            html[data-dti-theme="popart"] :is(.btn-primary, .dti-nx-new):hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 #111 !important; }
+            html[data-dti-theme="popart"] h1:not(#wardrobe-2020-root h1) { text-shadow: 3px 3px 0 #00a3e0; }
+            html[data-dti-theme="popart"] #dti-hero-right h1 span { background: none !important; -webkit-text-fill-color: #d9221f !important; }
+            /* Zen: raked sand and still stones; soft paper cards with no edge; an ink-brush circle round each icon; calm, wide-set titles */
+            html[data-dti-theme="zen"] #main-nav { box-shadow: 0 6px 22px rgba(40,40,30,.16) !important; }
+            html[data-dti-theme="zen"] :is(${_CARDS}) { border-color: transparent !important; border-radius: 12px !important; }
+            html[data-dti-theme="zen"] .dti-hc-ico { width: 30px; height: 30px; border-radius: 0 !important; background: ${_ENSO('rgba(243,240,230,.9)')} center / 100% 100% no-repeat !important; color: #f3f0e6 !important; }
+            html[data-dti-theme="zen"] .dti-hc-ico svg { width: 12px; height: 12px; }
+            html[data-dti-theme="zen"] :is(.btn-primary, .dti-nx-new) { border-radius: 8px !important; letter-spacing: .04em; }
+            /* Cathedral: stained glass for the bar and title bars, leaded; a gilt arcade under the bar; the rose window and a lancet glowing
+               behind, light falling in colors; cards arched at the top; quatrefoil icons; gilt headlines */
+            html[data-dti-theme="cathedral"] body::after { opacity: .5; }
+            html[data-dti-theme="cathedral"] #main-nav { box-shadow: 0 6px 26px rgba(60,20,100,.4) !important; }
+            html[data-dti-theme="cathedral"] :is(${_CARDS}) { border-color: rgba(217,180,74,.24) !important; }
+            html[data-dti-theme="cathedral"] :is(.dti-section-card, #dti-hero) { border-radius: 26px 26px 6px 6px !important; }
+            html[data-dti-theme="cathedral"] .dti-hc-title { color: #f0d488 !important; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+            html[data-dti-theme="cathedral"] #main-nav .dti-brand { font-family: inherit !important; font-weight: 900 !important; letter-spacing: -.5px !important; }
+            html[data-dti-theme="cathedral"] .dti-hc-ico {
+                width: 28px; height: 28px; border-radius: 0 !important; color: #1a1405 !important;
+                background: radial-gradient(circle 7px at 50% 26%, #e6c46a 96%, transparent), radial-gradient(circle 7px at 50% 74%, #e6c46a 96%, transparent),
+                    radial-gradient(circle 7px at 26% 50%, #e6c46a 96%, transparent), radial-gradient(circle 7px at 74% 50%, #e6c46a 96%, transparent),
+                    radial-gradient(circle 8.5px at 50% 50%, #e6c46a 96%, transparent) !important;
+            }
+            html[data-dti-theme="cathedral"] .dti-hc-ico svg { width: 12px; height: 12px; }
+            html[data-dti-theme="cathedral"] h1:not(#wardrobe-2020-root h1) { background: linear-gradient(180deg, #f8e7ae, #d9b44a 60%, #a8842a); -webkit-background-clip: text; background-clip: text; color: transparent !important; }
+            html[data-dti-theme="cathedral"] :is(.btn-primary, .dti-nx-new) { border-radius: 4px !important; letter-spacing: .04em; }
+            /* Cockpit: a flight deck at night — the radar in the corner sweeping round, a heading tape under the bar, panels with cut corners
+               and cyan brackets, hexagon icons, glowing readouts */
+            html[data-dti-theme="cockpit"]::after {
+                content: ''; position: fixed; right: -90px; bottom: -90px; width: 580px; height: 580px; z-index: -1; pointer-events: none; border-radius: 50%;
+                background: conic-gradient(from 0deg, transparent 0deg 290deg, rgba(63,216,255,.05) 310deg, rgba(63,216,255,.26) 359deg, transparent 360deg);
+                animation: dti-radar 6s linear infinite;
+            }
+            html[data-dti-theme="cockpit"] #main-nav { box-shadow: 0 0 0 1px rgba(63,216,255,.12), 0 8px 24px rgba(0,0,0,.55) !important; }
+            html[data-dti-theme="cockpit"] #main-nav::after { filter: drop-shadow(0 0 3px rgba(63,216,255,.7)); }
+            html[data-dti-theme="cockpit"] :is(.dti-section-card, #dti-hero, .dti-panel-section, ul#outfits > li) {
+                border-radius: 0 !important; border-color: rgba(63,216,255,.22) !important;
+                clip-path: polygon(12px 0, calc(100% - 12px) 0, 100% 12px, 100% calc(100% - 12px), calc(100% - 12px) 100%, 12px 100%, 0 calc(100% - 12px), 0 12px);
+            }
+            html[data-dti-theme="cockpit"] :is(.dti-section-card, #dti-hero) { position: relative; }
+            html[data-dti-theme="cockpit"] :is(.dti-section-card, #dti-hero, ul#outfits > li)::after {
+                content: ''; position: absolute; inset: 0; z-index: 6; pointer-events: none;
+                background: linear-gradient(135deg, transparent 7.7px, rgba(63,216,255,.9) 7.7px 9.2px, transparent 9.2px) top left / 16px 16px no-repeat,
+                    linear-gradient(225deg, transparent 7.7px, rgba(63,216,255,.9) 7.7px 9.2px, transparent 9.2px) top right / 16px 16px no-repeat,
+                    linear-gradient(45deg, transparent 7.7px, rgba(63,216,255,.9) 7.7px 9.2px, transparent 9.2px) bottom left / 16px 16px no-repeat,
+                    linear-gradient(315deg, transparent 7.7px, rgba(63,216,255,.9) 7.7px 9.2px, transparent 9.2px) bottom right / 16px 16px no-repeat,
+                    linear-gradient(#3fd8ff, #3fd8ff) top 0 left 12px / 26px 1.5px no-repeat, linear-gradient(#3fd8ff, #3fd8ff) top 0 right 12px / 26px 1.5px no-repeat,
+                    linear-gradient(#3fd8ff, #3fd8ff) bottom 0 left 12px / 26px 1.5px no-repeat, linear-gradient(#3fd8ff, #3fd8ff) bottom 0 right 12px / 26px 1.5px no-repeat;
+            }
+            html[data-dti-theme="cockpit"] .dti-hc-title { color: #6fe3ff !important; }
+            html[data-dti-theme="cockpit"] #dti-home-grid .dti-hc-head { box-shadow: inset 0 -1px 0 rgba(63,216,255,.3); }
+            html[data-dti-theme="cockpit"] .dti-hc-ico { width: 28px; border-radius: 0 !important; clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%); background: rgba(63,216,255,.18) !important; color: #6fe3ff !important; }
+            html[data-dti-theme="cockpit"] :is(.btn-primary, .dti-nx-new) { border-radius: 2px !important; box-shadow: 0 0 0 1px rgba(63,216,255,.55), 0 0 16px rgba(63,216,255,.3) !important; text-transform: uppercase; letter-spacing: .1em; font-family: 'Chakra Petch', sans-serif !important; }
+            html[data-dti-theme="cockpit"] :is(h1, h2, .dti-brand) { text-shadow: 0 0 12px rgba(63,216,255,.4); }
+            /* Cyberpunk: neon in the rain over a city at night; a dark bar on hazard stripes; yellow title bars, hazard-edged; cards with a
+               corner cut away; split-color glitch on the big type; cut-corner buttons */
+            html[data-dti-theme="cyberpunk"] #main-nav {
+                --solid-bg: #120d22; --solid-fill: linear-gradient(90deg, rgba(255,42,109,.18), transparent 32%, transparent 68%, rgba(5,217,232,.16)), linear-gradient(180deg, #17102b, #0e0a1c);
+                --solid-fg: #f2edff; --solid-fg-2: rgba(242,237,255,.76); --solid-line: rgba(255,42,109,.38); --solid-hover: rgba(255,42,109,.14); --solid-active: rgba(255,42,109,.24);
+                box-shadow: 0 0 24px rgba(255,42,109,.22) !important;
+            }
+            html[data-dti-theme="cyberpunk"] :is(h1, h2, .dti-brand) { text-shadow: -2px 0 rgba(255,42,109,.85), 2px 0 rgba(5,217,232,.85); }
+            html[data-dti-theme="cyberpunk"] #dti-hero-right h1 span { background: none !important; -webkit-text-fill-color: #fcee0a !important; }
+            html[data-dti-theme="cyberpunk"] :is(.dti-section-card, #dti-hero, .dti-panel-section, ul#outfits > li) { border-radius: 0 !important; border-color: rgba(255,42,109,.32) !important; clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%); }
+            html[data-dti-theme="cyberpunk"] #dti-home-grid .dti-hc-head { background: repeating-linear-gradient(-45deg, #0b0a14 0 4px, transparent 4px 8px) left bottom / 100% 3px no-repeat, var(--solid-fill) !important; }
+            html[data-dti-theme="cyberpunk"] .dti-hc-ico { border-radius: 0 !important; background: #0b0a14 !important; color: #fcee0a !important; clip-path: polygon(0 0, 100% 0, 100% 68%, 68% 100%, 0 100%); }
+            html[data-dti-theme="cyberpunk"] :is(.btn-primary, .dti-nx-new) { border-radius: 0 !important; clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px)); text-transform: uppercase; letter-spacing: .1em; font-family: 'Rajdhani', sans-serif !important; font-weight: 700 !important; }
+            /* Folio: an old library — oxblood leather, gilt tooling along the bar, gilt corner pieces on the cards, small-capital titles in
+               gilt, gilt medallion icons, a shelf of books below */
+            html[data-dti-theme="folio"] #main-nav { box-shadow: inset 0 -1px 0 rgba(209,165,78,.5), 0 6px 22px rgba(0,0,0,.45) !important; }
+            html[data-dti-theme="folio"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) {
+                border-color: rgba(209,165,78,.26) !important; border-radius: 6px !important;
+                background: ${_GILT[0]} top 5px left 5px / 30px 30px no-repeat, ${_GILT[1]} top 5px right 5px / 30px 30px no-repeat, ${_GILT[2]} bottom 5px right 5px / 30px 30px no-repeat, ${_GILT[3]} bottom 5px left 5px / 30px 30px no-repeat, var(--surface) !important;
+            }
+            html[data-dti-theme="folio"] :is(#dti-hero, ul#outfits > li, header.item-header) { border-color: rgba(209,165,78,.26) !important; }
+            html[data-dti-theme="folio"] #dti-home-grid .dti-hc-head, html[data-dti-theme="folio"] :is(.dti-panel-label, .dti-list-section-head) { box-shadow: inset 0 -1px 0 rgba(209,165,78,.5), inset 0 1px 0 rgba(255,255,255,.05); }
+            html[data-dti-theme="folio"] #dti-home-grid .dti-hc-title { font-family: 'IM Fell English SC', 'IM Fell English', Georgia, serif !important; color: #ecc97f !important; text-shadow: 0 1px 0 rgba(0,0,0,.5); }
+            html[data-dti-theme="folio"] .dti-hc-ico { width: 26px; height: 26px; border-radius: 50% !important; background: radial-gradient(circle at 35% 30%, #f6dea4, #d1a54e 55%, #8c6528) !important; color: #3a0f16 !important; box-shadow: 0 1px 2px rgba(0,0,0,.5), inset 0 0 0 1.5px rgba(90,60,20,.45) !important; }
+            html[data-dti-theme="folio"] :is(.btn-primary, .dti-nx-new) { border-radius: 3px !important; letter-spacing: .03em; box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 2px 6px rgba(0,0,0,.35) !important; }
+            /* Nocturne: a moonlit garden — the moon, moonflowers and moths behind, fireflies glowing and dimming; cards lit from one corner;
+               little moons for icons */
+            html[data-dti-theme="nocturne"]::after {
+                content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: ${_FIREFLIES} center / cover no-repeat;
+                animation: dti-glow 4.5s ease-in-out infinite alternate;
+            }
+            html[data-dti-theme="nocturne"] #main-nav { box-shadow: 0 6px 24px rgba(0,0,0,.45) !important; }
+            html[data-dti-theme="nocturne"] :is(${_CARDS}) { border-color: rgba(201,220,235,.13) !important; border-radius: 16px !important; }
+            html[data-dti-theme="nocturne"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) { background: radial-gradient(420px 240px at 100% 0%, rgba(201,220,235,.07), transparent 70%), var(--surface) !important; }
+            html[data-dti-theme="nocturne"] .dti-hc-ico { border-radius: 50% !important; background: radial-gradient(circle at 38% 34%, #f6f9fc, #c9dceb 60%, #9fb6c8) !important; color: #0b1417 !important; box-shadow: 0 0 10px rgba(201,220,235,.35) !important; }
+            html[data-dti-theme="nocturne"] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; box-shadow: 0 0 18px rgba(201,220,235,.22) !important; }
+            html[data-dti-theme="nocturne"] :is(h1, .dti-brand) { text-shadow: 0 0 18px rgba(201,220,235,.3); }
+            /* Marquee: an old theatre — velvet curtains at the sides, a spotlight from above, a row of bulbs chasing under the bar; tickets for
+               cards (notched, perforated under the title), gilt titles, glowing bulb icons, a lit frame round the hero */
+            html[data-dti-theme="marquee"] #main-nav::after { animation: dti-chase 1.2s steps(3) infinite; }
+            html[data-dti-theme="marquee"] #main-nav { box-shadow: 0 8px 26px rgba(0,0,0,.5) !important; }
+            html[data-dti-theme="marquee"] :is(${_CARDS}) { border-color: rgba(245,197,66,.22) !important; border-radius: 8px !important; }
+            html[data-dti-theme="marquee"] .dti-section-card {
+                -webkit-mask: radial-gradient(circle 8px at 0 44px, transparent 97%, #000) left / 51% 100% no-repeat, radial-gradient(circle 8px at 100% 44px, transparent 97%, #000) right / 51% 100% no-repeat;
+                mask: radial-gradient(circle 8px at 0 44px, transparent 97%, #000) left / 51% 100% no-repeat, radial-gradient(circle 8px at 100% 44px, transparent 97%, #000) right / 51% 100% no-repeat;
+            }
+            html[data-dti-theme="marquee"] #dti-home-grid .dti-hc-head { border-bottom: 2px dashed rgba(245,197,66,.4) !important; }
+            html[data-dti-theme="marquee"] #dti-hero { box-shadow: 0 0 0 2px #f5c542, 0 0 0 6px #12060a, 0 0 0 7px rgba(245,197,66,.45), 0 0 34px rgba(245,197,66,.14) !important; }
+            html[data-dti-theme="marquee"] .dti-hc-title { color: #f7d26a !important; text-shadow: 0 0 8px rgba(245,197,66,.35); }
+            html[data-dti-theme="marquee"] .dti-hc-ico { border-radius: 50% !important; background: radial-gradient(circle at 40% 35%, #fffbe8, #ffe08a 45%, #f5c542 75%) !important; color: #4a1018 !important; box-shadow: 0 0 10px rgba(255,214,94,.55) !important; }
+            html[data-dti-theme="marquee"] :is(.btn-primary, .dti-nx-new) { border-radius: 4px !important; font-family: 'Limelight', serif !important; font-weight: 400 !important; letter-spacing: .06em; box-shadow: 0 0 16px rgba(245,197,66,.3) !important; }
+            html[data-dti-theme="marquee"] h1:not(#wardrobe-2020-root h1) { color: #f7d26a !important; text-shadow: 0 0 14px rgba(245,197,66,.4); }
+            html[data-dti-theme="marquee"] #dti-search-row :is(h1, .chakra-editable__preview, .chakra-editable__input) { font-size: 27px !important; }
+            /* Astrolabe: brass instruments under a chart of the stars — an engraved brass rule under the bar, riveted brass-edged panels,
+               dial icons, brass small capitals */
+            html[data-dti-theme="astrolabe"] #main-nav { box-shadow: 0 8px 24px rgba(0,0,0,.5) !important; }
+            html[data-dti-theme="astrolabe"] :is(${_CARDS}) { border-color: rgba(199,154,82,.3) !important; border-radius: 4px !important; }
+            html[data-dti-theme="astrolabe"] :is(.dti-section-card, .dti-panel-section, #dti-intro-card, #dti-outfits-toolbar) {
+                background: radial-gradient(circle, #f0d49a 0 1.4px, #7a5a2a 2px, transparent 2.6px) bottom 4px left 4px / 8px 8px no-repeat,
+                    radial-gradient(circle, #f0d49a 0 1.4px, #7a5a2a 2px, transparent 2.6px) bottom 4px right 4px / 8px 8px no-repeat,
+                    radial-gradient(circle, #f0d49a 0 1.4px, #7a5a2a 2px, transparent 2.6px) top 4px left 4px / 8px 8px no-repeat,
+                    radial-gradient(circle, #f0d49a 0 1.4px, #7a5a2a 2px, transparent 2.6px) top 4px right 4px / 8px 8px no-repeat, var(--surface) !important;
+            }
+            html[data-dti-theme="astrolabe"] #dti-home-grid .dti-hc-head, html[data-dti-theme="astrolabe"] :is(.dti-panel-label, .dti-list-section-head) { box-shadow: inset 0 -1px 0 rgba(199,154,82,.5); }
+            html[data-dti-theme="astrolabe"] .dti-hc-title { color: #dcb06a !important; }
+            html[data-dti-theme="astrolabe"] .dti-hc-ico {
+                width: 28px; height: 28px; border-radius: 50% !important; color: #dcb06a !important;
+                background: radial-gradient(circle closest-side, #0d1426 0 60%, transparent 62%), repeating-conic-gradient(#dcb06a 0 4deg, transparent 4deg 30deg), radial-gradient(circle closest-side, #1a2440 0 88%, #c79a52 90% 100%) !important;
+            }
+            html[data-dti-theme="astrolabe"] .dti-hc-ico svg { width: 12px; height: 12px; }
+            html[data-dti-theme="astrolabe"] :is(.btn-primary, .dti-nx-new) { border-radius: 3px !important; font-family: 'Marcellus SC', serif !important; letter-spacing: .08em; box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 2px 8px rgba(0,0,0,.35) !important; }
+            /* Groovy: the 70s — wavy stripes under the bar, rainbow arcs in the corners, round cards with striped title bars, target icons,
+               stacked-shadow headlines */
+            html[data-dti-theme="groovy"] #main-nav { box-shadow: none !important; }
+            html[data-dti-theme="groovy"] :is(${_CARDS}) { border-color: rgba(232,163,61,.2) !important; border-radius: 24px !important; }
+            html[data-dti-theme="groovy"] #dti-home-grid .dti-hc-head, html[data-dti-theme="groovy"] :is(.dti-panel-label, .dti-list-section-head) { background: linear-gradient(180deg, #e8a33d 0 2px, #d9622b 2px 4px, #8a4a22 4px 6px) left bottom / 100% 6px no-repeat, var(--solid-fill) !important; }
+            html[data-dti-theme="groovy"] .dti-hc-ico { border-radius: 50% !important; background: radial-gradient(circle closest-side, #f0b65a 0 58%, #d9622b 60% 78%, #8a4a22 80% 100%) !important; color: #22140c !important; }
+            html[data-dti-theme="groovy"] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; font-family: 'Shrikhand', Georgia, serif !important; font-weight: 400 !important; letter-spacing: .02em; }
+            html[data-dti-theme="groovy"] h1:not(#wardrobe-2020-root h1) { text-shadow: 2px 2px 0 #e8a33d, 4px 4px 0 #d9622b, 6px 6px 0 #8a4a22; }
+            html[data-dti-theme="groovy"] #dti-hero-right h1 span { background: none !important; -webkit-text-fill-color: #f6e7cf !important; }
 
             /* ── Badge visibility toggles ──────────────────────────────────── */
             /* Newest Items' NC / NP switch: both badges, whatever the settings above say */
@@ -13784,7 +15561,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-tp-section-body { overflow: hidden; padding-bottom: 16px; }
             .dti-tp-section-body.collapsed { display: none !important; }
             /* Themes: preset cards with a tiny page preview (page · bar · two cards · a button) */
-            .dti-preset-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+            .dti-preset-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+            .dti-preset-group { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; margin: 8px 1px 1px; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+            .dti-preset-group::after { content: ''; flex: 1; height: 1px; background: var(--border); }
             .dti-tp-hint { margin: -2px 0 12px; font-size: 12px; line-height: 1.45; color: var(--text-muted); }
             /* ⚙ panel footer: version · What's new · Shortcuts · GitHub */
             .dti-tp-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin-top: 10px; padding: 10px 2px 2px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--text-muted); }
@@ -13842,34 +15621,40 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             .dti-bk-ask .dti-bk-yes { border-color: var(--accent); background: var(--accent); color: var(--accent-fg, #fff); }
             .dti-preset {
-                position: relative; display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 5px 5px 6px; cursor: pointer;
-                border: 1.5px solid var(--border); border-radius: 12px; background: var(--surface); font-family: inherit;
+                position: relative; display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 4px 4px 5px; cursor: pointer;
+                border: 1.5px solid var(--border); border-radius: 10px; background: var(--surface); font-family: inherit;
                 transition: border-color .13s, box-shadow .13s, transform .13s;
             }
             .dti-preset:hover { border-color: var(--accent); transform: translateY(-1px); }
             .dti-preset.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
             .dti-preset.active::after {
-                content: '✓'; position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%;
+                content: '✓'; position: absolute; top: -5px; right: -5px; width: 16px; height: 16px; border-radius: 50%;
                 display: grid; place-items: center; background: var(--accent); color: var(--accent-fg, #fff);
-                font-size: 10px; font-weight: 900; box-shadow: 0 0 0 2px var(--surface);
+                font-size: 9px; font-weight: 900; box-shadow: 0 0 0 2px var(--surface);
             }
             .dti-preset-pv {
-                position: relative; display: block; height: 48px; border-radius: 8px; overflow: hidden;
+                position: relative; display: block; height: 38px; border-radius: 6px; overflow: hidden;
                 background: var(--pv-page, var(--bg)); box-shadow: inset 0 0 0 1px rgba(0,0,0,.07);
             }
-            .dti-preset-pv::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 9px; background: var(--pv-bar, var(--accent)); }
-            .dti-preset-pv i { position: absolute; top: 14px; bottom: 5px; border-radius: 4px; overflow: hidden; background: var(--pv-card, var(--surface)); box-shadow: 0 1px 2px rgba(0,0,0,.14); }
-            .dti-preset-pv i:first-child { left: 5px; width: calc(58% - 7px); }
-            .dti-preset-pv i:last-child { right: 5px; width: calc(42% - 5px); }
+            .dti-preset-pv::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 7px; background: var(--pv-bar, var(--accent)); }
+            .dti-preset-pv i { position: absolute; top: 11px; bottom: 4px; border-radius: 3px; overflow: hidden; background: var(--pv-card, var(--surface)); box-shadow: 0 1px 2px rgba(0,0,0,.14); }
+            .dti-preset-pv i:first-child { left: 4px; width: calc(58% - 6px); }
+            .dti-preset-pv i:last-child { right: 4px; width: calc(42% - 4px); }
             .dti-preset-pv i:first-child::after {
-                content: ''; position: absolute; left: 4px; bottom: 4px; width: 58%; height: 5px; border-radius: 3px; background: var(--pv-btn, var(--accent));
+                content: ''; position: absolute; left: 3px; bottom: 3px; width: 58%; height: 4px; border-radius: 2px; background: var(--pv-btn, var(--accent));
             }
-            .dti-preset-pv i:last-child::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: var(--pv-bar, var(--accent)); }
+            .dti-preset-pv i:last-child::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--pv-bar, var(--accent)); }
             .dti-preset-name {
                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
-                font-size: 10.5px; font-weight: 700; color: var(--text-muted);
+                font-size: 9.5px; font-weight: 700; color: var(--text-muted);
             }
+            /* "Your colors": a row of its own, over the looks */
+            .dti-preset.own { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 10px; padding: 4px 10px 4px 4px; }
+            .dti-preset.own .dti-preset-pv { width: 76px; flex: none; }
+            .dti-preset.own .dti-preset-name { text-align: left; font-size: 12px; color: var(--text); }
+            .dti-preset.own .dti-preset-name small { display: block; margin-top: 1px; font-size: 10.5px; font-weight: 500; color: var(--text-muted); }
             .dti-preset.active .dti-preset-name { color: var(--accent-text, var(--accent)); }
+            .dti-preset-name.long { font-size: 8.6px; letter-spacing: -.01em; }   /* (Midnight Gold, Ocean Depths: whole, a touch smaller) */
             .dti-tp-note {
                 display: none; margin: 0 0 12px; padding: 8px 10px; border-radius: 10px; font-size: 11.5px; line-height: 1.45;
                 color: var(--accent-text, var(--accent)); background: var(--accent-glow);
@@ -15442,13 +17227,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const themeBody = document.createElement('div'); themeBody.className = 'dti-tp-section-body';
         const presetBody = document.createElement('div'); presetBody.className = 'dti-tp-section-body';
         const presetHint = document.createElement('p'); presetHint.className = 'dti-tp-hint';
-        presetHint.textContent = 'Complete looks with their own colors, gradients and backdrops. “Your colors” goes back to the Colors section.';
+        presetHint.textContent = 'Complete looks with their own colors, gradients and backdrops. Hover one for a word about it.';
         const presetGrid = document.createElement('div'); presetGrid.className = 'dti-preset-grid';
-        presetGrid.innerHTML = [{ id: '', label: 'Your colors' }, ...THEME_PRESETS].map(t => `
-            <button type="button" class="dti-preset${t.id === currentPreset ? ' active' : ''}" data-preset="${t.id}" title="${t.id ? t.label + ' theme' : 'Your own mode, style and accent (below)'}">
-                <span class="dti-preset-pv"${t.pv ? ` style="--pv-page:${t.pv[0]};--pv-bar:${t.pv[1]};--pv-card:${t.pv[2]};--pv-btn:${t.pv[3]}"` : ''}><i></i><i></i></span>
-                <span class="dti-preset-name">${t.label}</span>
-            </button>`).join('');
+        const presetCard = t => `
+            <button type="button" class="dti-preset${t.id ? '' : ' own'}${t.id === currentPreset ? ' active' : ''}" data-preset="${t.id}" title="${noteEsc(t.id ? `${t.label} — ${t.desc}` : 'Your own mode, style and accent, from Colors')}">
+                <span class="dti-preset-pv"${t.pv ? ` style="${noteEsc(`--pv-page:${t.pv[0]};--pv-bar:${t.pv[1]};--pv-card:${t.pv[2]};--pv-btn:${t.pv[3]}`)}"` : ''}><i></i><i></i></span>
+                <span class="dti-preset-name${t.id && t.label.length > 11 ? ' long' : ''}">${noteEsc(t.label)}${t.id ? '' : '<small>Mode, style and accent from Colors</small>'}</span>
+            </button>`;
+        presetGrid.innerHTML = presetCard({ id: '', label: 'Your colors' })
+            + [['light', 'Light'], ['dark', 'Dark']].map(([base, label]) => `<div class="dti-preset-group">${label}</div>${THEME_PRESETS.filter(t => t.base === base).map(presetCard).join('')}`).join('');
         presetGrid.addEventListener('click', e => {
             const b = e.target.closest('.dti-preset');
             if (b && (b.dataset.preset || '') !== currentPreset) applyPreset(b.dataset.preset || '');
@@ -17587,6 +19374,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-list-add { height: 26px; padding: 0 10px 0 8px; font-size: 11.5px; }
             #dti-header-quickadd:hover, .dti-list-add:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-fg, #fff); }
             .dti-list-add[hidden] { display: none; }
+            /* ✎ by a list's title in the middle */
+            .dti-group-edit { display: inline-grid; place-items: center; width: 26px; height: 26px; flex-shrink: 0; box-sizing: border-box; margin: 0; padding: 0; border: 1.5px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text-sub); cursor: pointer; transition: border-color .13s, color .13s; }
+            .dti-group-edit:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-group-edit[hidden] { display: none; }
+            .dti-group-edit svg { width: 13px; height: 13px; }
             /* Counts: one segmented strip */
             #dti-stat-pills-wrap {
                 display: flex; justify-self: end; overflow: hidden;
@@ -19625,7 +21417,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             </div>
             <div id="dti-closet-center-header">
                 <span id="dti-center-title">Select a list</span>
-                ${isOwnPage ? `<button id="dti-center-add" class="dti-list-add" type="button" hidden>${PLUS_ICO}Add item</button>` : ''}
+                ${isOwnPage ? `<button id="dti-center-edit" class="dti-group-edit" type="button" hidden title="Edit list name, type, visibility &amp; description" aria-label="Edit list">${NOTE_PENCIL}</button><button id="dti-center-add" class="dti-list-add" type="button" hidden>${PLUS_ICO}Add item</button>` : ''}
                 <span id="dti-center-count"></span>
                 <span id="dti-center-caps" class="dti-caps-total"></span>
                 <button class="dti-select-toggle-btn" id="dti-select-toggle" title="Pick items one by one" style="display:none">Select</button>
@@ -20298,6 +22090,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     : !want && own === sections.owned.length ? 'own' : !own && want === sections.wanted.length ? 'want' : '';
                 document.querySelectorAll('.dti-quick-sel-btn[data-qs]').forEach(b => b.classList.toggle('on', b.dataset.qs === qs));
             }
+            const editBtn = document.getElementById('dti-center-edit');   // (one list showing: its pencil by the title)
+            if (editBtn) editBtn.hidden = !(activeLists.length === 1 && activeLists[0].lst.editHref);
             const addBtn = document.getElementById('dti-center-add');
             if (addBtn) {
                 addBtn.hidden = activeLists.length !== 1;
@@ -21013,7 +22807,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     const hdr = document.createElement('div'); hdr.className = 'dti-grid-group-header';
                     hdr.id = groupId;
                     const addBtn = isOwnPage && !al.lst.tokShare ? `<button class="dti-list-add" type="button" data-section="${al.section}" data-list-id="${al.lst.listId || ''}" title="Add an item to this list">${PLUS_ICO}Add</button>` : '';   // (your token share list holds no items)
-                    hdr.innerHTML = `<span class="dti-grid-group-name">${noteEsc(al.lst.listName)}</span><span class="dti-grid-group-count">${items.length} item${items.length !== 1 ? 's' : ''}</span><span class="dti-grid-group-caps dti-caps-total"></span>${addBtn}<button class="dti-group-pick" type="button" title="Pick items one by one">Select</button><button class="dti-group-sel" type="button" title="Select all of this list\u2019s items">All</button><button class="dti-group-collapse-btn" title="Collapse/expand list"><svg class="dti-group-collapse-icon${collapsed ? ' collapsed' : ''}" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,5 7,10 12,5"/></svg></button>`;
+                    const editBtn = isOwnPage && al.lst.editHref ? `<button class="dti-group-edit" type="button" title="Edit list name, type, visibility &amp; description" aria-label="Edit ${noteEsc(al.lst.listName)}">${NOTE_PENCIL}</button>` : '';
+                    hdr.innerHTML = `<span class="dti-grid-group-name">${noteEsc(al.lst.listName)}</span>${editBtn}<span class="dti-grid-group-count">${items.length} item${items.length !== 1 ? 's' : ''}</span><span class="dti-grid-group-caps dti-caps-total"></span>${addBtn}<button class="dti-group-pick" type="button" title="Pick items one by one">Select</button><button class="dti-group-sel" type="button" title="Select all of this list\u2019s items">All</button><button class="dti-group-collapse-btn" title="Collapse/expand list"><svg class="dti-group-collapse-icon${collapsed ? ' collapsed' : ''}" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,5 7,10 12,5"/></svg></button>`;
                     gridFrag.appendChild(hdr);
                     fillCaps(hdr.querySelector('.dti-grid-group-caps'), items);
                     if (listDescHtml(al.lst) && !collapsed) {
@@ -21215,6 +23010,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             updateBulkBar();
         }, true);
 
+        // ✎ on a list's header (or beside the single list's title) → the list's own edit popup, as from its tile on the left
+        center.addEventListener('click', e => {
+            const b = e.target.closest('.dti-group-edit');
+            if (!b) return;
+            e.stopPropagation();
+            const al = b.id === 'dti-center-edit' ? activeLists[0] : activeLists.find(a => groupIdOf(a.lst) === b.closest('.dti-grid-group-header')?.id);
+            if (al?.lst.editHref) showNewListPopup(b, null, al.section === 'owned', al.lst.editHref);
+        });
         // ＋ Add on a list's header (or beside the single list's title) → Quick Add with that list picked
         center.addEventListener('click', e => {
             const add = e.target.closest('.dti-list-add');
@@ -23018,11 +24821,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             turbo-frame#item-preview {
                 display: grid !important;
                 grid-template-columns: 420px 260px 1fr !important;
-                grid-template-rows: 1fr auto !important;
+                grid-template-rows: minmax(0, 1fr) auto !important;
                 align-items: stretch !important;
                 margin-bottom: 20px !important;
                 overflow: hidden !important;
-                min-height: 420px !important;
+                min-height: 420px !important; height: 420px !important;   /* (whatever's in it: a long list of zones scrolls) */
                 border: 1px solid var(--border, #a3d9be) !important;
                 border-radius: 18px !important;
                 background: #fff !important;
@@ -23045,7 +24848,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 border-bottom: none !important;
                 display: flex !important; flex-direction: column !important;
                 align-items: center !important; justify-content: space-between !important;
-                gap: 12px !important;
+                gap: 12px !important; min-height: 0 !important; overflow-y: auto !important; overscroll-behavior: contain; scrollbar-width: thin;
             }
             turbo-frame#item-preview > species-color-picker {
                 grid-column: 2 !important; grid-row: 2 !important;
@@ -23057,11 +24860,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 border-left: 1px solid var(--border, #a3d9be) !important;
             }
 
-            /* outfit-viewer: fills the full height of the preview-area column */
+            /* outfit-viewer: a square the width of the preview column (every pet picture is square) — it filled the column's height,
+               and a taller card stretched the picture */
             turbo-frame#item-preview outfit-viewer {
                 display: block !important; position: relative !important;
-                width: 100% !important; flex: 1 1 0 !important; min-height: 420px !important;
-                overflow: hidden !important; flex-shrink: 0 !important;
+                width: 100% !important; height: auto !important; aspect-ratio: 1 / 1 !important; flex: none !important; min-height: 0 !important;
+                overflow: hidden !important;
             }
             /* Keep a plain selector too as fallback */
             outfit-viewer {
@@ -23988,11 +25792,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const _sEl = el => {
                 if (!el) return;
                 const t = el.tagName?.toLowerCase();
-                if (t === 'outfit-viewer') {
+                if (t === 'outfit-viewer') {   // (square — the picture's shape — however tall the card is)
                     el.style.setProperty('display', 'block', 'important');
                     el.style.setProperty('position', 'relative', 'important');
                     el.style.setProperty('width', '100%', 'important');
-                    el.style.setProperty('height', '100%', 'important');
+                    el.style.setProperty('height', 'auto', 'important');
+                    el.style.setProperty('aspect-ratio', '1 / 1', 'important');
                     el.style.setProperty('overflow', 'hidden', 'important');
                     el.style.setProperty('flex-shrink', '0', 'important');
                 } else if (t === 'outfit-layer') {
@@ -26428,6 +28233,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const pop = ui.pop();
             if (!pop) return;
             pickMarks(pop, st, tip);
+            pop.querySelector('.dti-pk-reset').hidden = !(Picks.on(st.cur) || st.cur.all || ItemColors.level !== 4);
             const two = st.cur.inc.length >= 2;
             pop.querySelector('.dti-cpk-both').classList.toggle('off', !two);
             pop.querySelectorAll('.dti-pk-seg button').forEach(b => { b.classList.toggle('on', (b.dataset.all === '1') === st.cur.all); b.disabled = !two; });
@@ -26439,7 +28245,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const ui = pickPopup(btn, pop => {
             pop.className = 'dti-cpk-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Item colors');
             const customVal = [...st.cur.inc, ...st.cur.exc].find(ItemColors.isCustom) || recents()[0] || '#f7a8c4';
-            pop.innerHTML = `<div class="dti-cpk-head">Item color</div><div class="dti-cpk-grid">${[['', 'Any'], ...ITEM_COLORS].map(([k, label]) =>
+            pop.innerHTML = `<div class="dti-cpk-head">Item color<button type="button" class="dti-pk-reset" title="No colors picked, any of them, and the usual match">Reset</button></div><div class="dti-cpk-grid">${[['', 'Any'], ...ITEM_COLORS].map(([k, label]) =>
                 `<button type="button" class="dti-cpk-opt" data-k="${k}">${chip(k)}<span>${label}</span></button>`).join('')}</div>${PICK_TIP}
                 <div class="dti-cpk-sec dti-cpk-both"><span class="dti-cpk-sub">With two or more colors</span>
                     <div class="dti-pk-seg" role="group" aria-label="With two or more colors"><button type="button" data-all="0" title="Items with any one of the colors shown">Any of them</button><button type="button" data-all="1" title="Items with every color shown — two-tone and more">All of them</button></div>
@@ -26458,6 +28264,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 </div>`;
             pop.addEventListener('click', ev => {
                 ev.stopPropagation();
+                if (ev.target.closest('.dti-pk-reset')) {   // (back to: no colors, any of them, the usual match)
+                    st.clear(); st.cur.all = false;
+                    ItemColors.setLevel(4); rng.value = '4'; pop.querySelector('.dti-cpk-match b').textContent = LV[3];
+                    return changed();
+                }
                 const o = ev.target.closest('[data-k]');
                 if (o) { if (o.dataset.k) st.cycle(o.dataset.k); else st.clear(); return changed(); }
                 const a = ev.target.closest('.dti-pk-seg button');
@@ -26504,7 +28315,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     // a click shows that zone's items, a second leaves them out, a third neither (user asked: several zones at once, and some left
     // out); with several shown, items in any of them. zones: the zones offered (or a function giving them). onChange(picks) — Picks.
     // → { el, set(picks), close() }
-    function makeZonePicker(onChange, { zones = [], value = '', cls = '' } = {}) {
+    // every: a name for "every item" (the editor's — '*' in the picks: every item there is, zones clicked then left out); open: a name for
+    // "open zones" (the editor's — '~': only items for the zones still open on the pet, user asked; zones clicked then left out too)
+    function makeZonePicker(onChange, { zones = [], value = '', cls = '', every = '', open = '' } = {}) {
         injectColorPickerCSS();
         const btn = document.createElement('button');
         btn.type = 'button'; btn.className = 'dti-cpk dti-zpk' + (cls ? ' ' + cls : '');
@@ -26512,29 +28325,40 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const st = pickState(value, onChange);
         const paint = () => {
             const p = st.cur, on = Picks.on(p);
-            btn.innerHTML = `${ZONE_ICO}<span class="dti-cpk-name">${on ? noteEsc(Picks.text(p, z => z, 'zone')) : 'All zones'}</span><span class="dti-cpk-arrow" aria-hidden="true">▾</span>`;
+            btn.innerHTML = `${ZONE_ICO}<span class="dti-cpk-name">${on ? noteEsc(Picks.text(p, zn, 'zone')) : 'All zones'}</span><span class="dti-cpk-arrow" aria-hidden="true">▾</span>`;
             btn.classList.toggle('on', on);
-            btn.title = on ? `${p.inc.length ? `Showing ${p.inc.join(', ')} items` : 'Showing every zone'}${p.exc.length ? `, leaving out ${p.exc.join(', ')}` : ''} — click to change`
+            btn.title = on ? `${p.inc.length ? `Showing ${p.inc.map(zn).join(', ')}${p.inc.some(k => k === '*' || k === '~') ? '' : ' items'}` : 'Showing every zone'}${p.exc.length ? `, leaving out ${p.exc.join(', ')}` : ''} — click to change`
                 : 'Show items in some zones — or leave some out';
         };
-        const tip = (z, s) => !z ? 'Items in every zone' : `${z}: ${s === 'in' ? 'shown — click to leave it out' : s === 'out' ? 'left out — click to clear' : 'click to show it, twice to leave it out'}`;
+        const zn = z => z === '*' ? every : z === '~' ? open : z;
+        const wide = () => st.of('*') === 'in' || st.of('~') === 'in';   // (every item, or every one for the open zones: zones clicked are left out)
+        const tip = (z, s) => !z ? 'Items in every zone' : z === '*' ? `${every}: every item this pet can wear — the first time takes a few minutes, then it’s kept (zones clicked then are left out)`
+            : z === '~' ? `${open}: only items for the zones still open on your pet — none in a zone something’s worn in, or kept free by it (zones clicked then are left out too)`
+            : `${z}: ${s === 'in' ? 'shown — click to leave it out' : s === 'out' ? 'left out — click to clear' : wide() ? 'click to leave it out' : 'click to show it, twice to leave it out'}`;
         const ui = pickPopup(btn, pop => {
             pop.className = 'dti-cpk-pop dti-zpk-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Item zones');
-            const list = [...new Set([...(typeof zones === 'function' ? zones() : zones), ...st.cur.inc, ...st.cur.exc])];
-            pop.innerHTML = `<div class="dti-cpk-head">Zones</div><div class="dti-zpk-list"><button type="button" class="dti-zpk-opt" data-k="">All zones</button>${
+            const list = [...new Set([...(typeof zones === 'function' ? zones() : zones), ...st.cur.inc, ...st.cur.exc])].filter(z => z !== '*' && z !== '~');
+            pop.innerHTML = `<div class="dti-cpk-head">Zones<button type="button" class="dti-pk-reset" title="No zones picked">Reset</button></div><div class="dti-zpk-list"><button type="button" class="dti-zpk-opt" data-k="">All zones</button>${
+                every ? `<button type="button" class="dti-zpk-opt dti-zpk-every" data-k="*">${noteEsc(every)}</button>` : ''}${
+                open ? `<button type="button" class="dti-zpk-opt dti-zpk-every" data-k="~">${noteEsc(open)}</button>` : ''}${
                 list.map(z => `<button type="button" class="dti-zpk-opt" data-k="${noteEsc(z)}">${noteEsc(z)}</button>`).join('')}</div>${PICK_TIP}`;
+            const marks = () => { pickMarks(pop, st, tip); pop.querySelector('.dti-pk-reset').hidden = !Picks.on(st.cur); };
             pop.addEventListener('click', ev => {
                 ev.stopPropagation();
                 const o = ev.target.closest('[data-k]');
-                if (!o) return;
-                if (o.dataset.k) st.cycle(o.dataset.k); else st.clear();
-                pickMarks(pop, st, tip); paint(); st.send();
+                const k = o?.dataset.k;
+                if (ev.target.closest('.dti-pk-reset')) st.clear();
+                else if (!o) return;
+                else if (k === '*' || k === '~') st.cur.inc = st.of(k) === 'in' ? [] : [k];   // (every item / open zones: on or off, one of them — the zones left out stay)
+                else if (k && wide()) st.cur.exc = st.cur.exc.includes(k) ? st.cur.exc.filter(x => x !== k) : [...st.cur.exc, k];
+                else if (k) st.cycle(k); else st.clear();
+                marks(); paint(); st.send();
             });
-            pickMarks(pop, st, tip);
+            marks();
             requestAnimationFrame(() => pop.querySelector('.dti-zpk-opt')?.focus({ preventScroll: true }));
         }, () => st.send(true));
         paint();
-        return { el: btn, set(p) { st.set(p); paint(); const pop = ui.pop(); if (pop) pickMarks(pop, st, tip); }, close: ui.close };
+        return { el: btn, set(p) { st.set(p); paint(); const pop = ui.pop(); if (pop) { pickMarks(pop, st, tip); pop.querySelector('.dti-pk-reset').hidden = !Picks.on(st.cur); } }, close: ui.close };
     }
     function injectColorPickerCSS() {
         if (window.__dtiCpkCSS) return;
@@ -26625,6 +28449,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M4.8 8h6.4'/%3E%3C/svg%3E") center / 100% no-repeat, var(--danger, #e11d48);
             }
             .dti-pk-m { display: inline-block; width: 13px; height: 13px; vertical-align: -2px; box-shadow: none; }
+            .dti-cpk-pop .dti-cpk-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; }
+            .dti-pk-reset { margin: 0; padding: 2px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); box-shadow: none; color: var(--text-muted); font-family: inherit; font-size: 10.5px; font-weight: 700; letter-spacing: 0; text-transform: none; line-height: 1.4; cursor: pointer; }
+            .dti-pk-reset:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-pk-reset[hidden] { display: none; }
             .dti-pk-tip { padding: 8px 4px 0; font-size: 10.5px; font-weight: 600; line-height: 1.5; color: var(--text-muted); text-align: center; }
             .dti-cpk-rc { border-radius: 8px; }
             /* With two or more colors: any of them / all of them (dimmed till two are shown) */
@@ -26649,6 +28477,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-zpk-opt:is(.on, .in) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); color: var(--text); }
             .dti-zpk-opt.out { border-color: color-mix(in srgb, var(--danger, #e11d48) 65%, transparent); background: color-mix(in srgb, var(--danger, #e11d48) 7%, var(--surface)); color: var(--danger, #e11d48); text-decoration: line-through; text-decoration-thickness: 1.5px; }
             .dti-zpk-opt:is(.in, .out)::before { width: 14px; height: 14px; margin-left: -4px; box-shadow: none; }
+            .dti-zpk-every:not(.in) { border-style: dashed; }   /* (Every item: not a zone) */
         `);
     }
 
@@ -26670,8 +28499,29 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // The zones and colors picked (Picks: several of each, some left out — user asked); a plain search's every page in one list
         // (user asked — kept till you go back to DTI's pages)
         let edZones = Picks.none(), edColors = Picks.none(), csAll = !!GM_getValue('dti_cs_all', false);
-        let csClearAll = () => {}, kindPaintSoon = () => {};
+        let csClearAll = () => {}, kindPaintSoon = () => {}, sortPaint = () => {};
         const filtersOn = () => Picks.on(edZones) || Picks.on(edColors);
+        // Open zones (user asked: only items for the zones still open on the pet) — '~' in the zone picks: the zones what's worn is in,
+        // or keeps others out of, left out; read from DTI's own data again as the outfit changes
+        const openOn = () => edZones.inc.includes('~');
+        const wornZ = { key: null, taken: [], busy: false };
+        const zoneExc = () => openOn() ? [...new Set([...edZones.exc, ...wornZ.taken])] : edZones.exc;
+        const edZoneRule = () => ({ inc: edZones.inc.filter(z => z !== '*' && z !== '~'), exc: zoneExc(), all: false });   // (the zones as a filter: "every item" and "open zones" aren't ones)
+        const zoneWords = r => openOn() ? Picks.text({ inc: ['~'], exc: edZones.exc, all: false }, z => z === '~' ? 'Open zones' : z, 'zone') : Picks.text(r, z => z, 'zone');
+        async function wornZRefresh() {
+            if (!openOn() || wornZ.busy) return;
+            const s = csBr.get()?.state;
+            const key = s ? [[...(s.wornItemIds || [])].map(String).sort().join(), s.speciesId, s.colorId, s.altStyleId ?? ''].join('|') : '';
+            if (!key || key === wornZ.key) return;
+            wornZ.busy = true;
+            const res = await csBr.zones();
+            wornZ.busy = false;
+            if (!res || res.error) return;   // (tried again in a moment)
+            wornZ.key = key;
+            const taken = [...new Set((res.items || []).flatMap(it => [...it.zones, ...it.restricts]))].sort();
+            if (taken.join('|') !== wornZ.taken.join('|')) { wornZ.taken = taken; if (openOn()) { csPaintSoon(); applyFilters(); } }
+        }
+        setInterval(wornZRefresh, 900);
 
         // Phase 1: wait for the search box + first item to exist, then inject once
         const mountObs = new MutationObserver(() => {
@@ -26690,7 +28540,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     </div>
                     <span id="dti-zcf-zone-slot"></span>
                     <span id="dti-zcf-color-slot"></span>
-                    <div id="dti-view-toggle" style="margin-left:auto">
+                    <button type="button" id="dti-sort" class="dti-cpk dti-cpk-ed" aria-haspopup="dialog" aria-expanded="false" aria-label="Sort the search"></button>
+                    <div id="dti-wz" style="margin-left:auto"><button class="dti-vt-btn dti-wz-btn" type="button" title="Zones on your pet — what’s worn, what’s still open" aria-label="Zones on your pet" aria-haspopup="dialog" aria-expanded="false"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M5.6 2.2 2 4.4l1.4 2.7 1.7-.8v7.5h5.8V6.3l1.7.8L14 4.4l-3.6-2.2c-.4.9-1.3 1.5-2.4 1.5s-2-.6-2.4-1.5z"/></svg></button></div>
+                    <div id="dti-view-toggle">
                         <button class="dti-vt-btn" data-view="list" title="List view" aria-label="List view"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="2" width="12" height="2" rx="1"/><rect x="1" y="6" width="12" height="2" rx="1"/><rect x="1" y="10" width="12" height="2" rx="1"/></svg></button>
                         <button class="dti-vt-btn" data-view="tile" title="Tile view" aria-label="Tile view"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="5.5" height="5.5" rx="1"/><rect x="7.5" y="1" width="5.5" height="5.5" rx="1"/><rect x="1" y="7.5" width="5.5" height="5.5" rx="1"/><rect x="7.5" y="7.5" width="5.5" height="5.5" rx="1"/></svg></button>
                         <button class="dti-vt-btn dti-lay-btn" type="button" title="Layout — items per row, tile size…" aria-label="Layout" aria-haspopup="dialog"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 4h6.5M12.5 4H14M2 8h1.5M7.5 8H14M2 12h8.5M14 12h0"/><circle cx="10.5" cy="4" r="1.6"/><circle cx="5.5" cy="8" r="1.6"/><circle cx="12.5" cy="12" r="1.6"/></svg></button>
@@ -26795,9 +28647,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }).observe(root, { childList: true, subtree: true });
 
             mountOutfitAlts(row);   // (alternate outfits in this custom)
+            mountFromPet(row);   // (a new custom: from one of your pets)
 
             // The zone and color filters: several of each, some left out — searching, their matches from every page show instead
-            const zonePick = makeZonePicker(p => { edZones = p; csSync(); applyFilters(); }, { zones: zoneList, cls: 'dti-cpk-ed' });
+            const zonePick = makeZonePicker(p => { edZones = p; csSync(); applyFilters(); wornZRefresh(); }, { zones: zoneList, cls: 'dti-cpk-ed', every: 'Every item', open: 'Open zones' });
             document.getElementById('dti-zcf-zone-slot')?.replaceWith(zonePick.el);
             // NC / NP: DTI's own search filter (so its pages stay full, and the color's every-page view follows) — the switch
             // shows what DTI has, however it was set (its suggestions too)
@@ -26810,9 +28663,37 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (!b || b.classList.contains('on')) return;
                 if (!csBr.setKind(b.dataset.k)) return dtiToast('Couldn’t change the search — try again', { variant: 'error' });
                 kindPaintSoon();
+                // (the list of every page follows at once, from what's here — DTI's own search for it comes a moment later, and matches)
+                csKindHold = Date.now() + 2500;
+                const pick = csOn() && CS.base && CS.pages && CS.fetched >= CS.pages && csKindPick(CS.base, b.dataset.k.toLowerCase());
+                if (pick) {
+                    Object.assign(CS, { items: pick.items, pages: pick.pages, allPages: pick.allPages, fetched: pick.pages, failed: 0, next: 0, page: 1, checked: pick.items.filter(r => r.pr !== undefined).length });
+                    csPaintSoon();
+                }
             });
             const colorPick = makeColorPicker(p => { edColors = p; csSync(); applyFilters(); }, { cls: 'dti-cpk-ed' });
             document.getElementById('dti-zcf-color-slot')?.replaceWith(colorPick.el);
+            // Sort (user asked: newest, and the like): DTI's pages are A–Z — any other order shows every page of the search, in it
+            const sortBtn = bar.querySelector('#dti-sort');
+            sortPaint = () => {
+                const o = CS_SORTS.find(x => x[0] === CS.sort) || CS_SORTS[0], on = CS.sort !== 'name';
+                sortBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 2.5v11M2.5 11 5 13.5 7.5 11M11 13.5v-11M8.5 5 11 2.5 13.5 5"/></svg><span class="dti-cpk-name">${on ? o[1] : 'Sort'}</span><span class="dti-cpk-arrow" aria-hidden="true">▾</span>`;
+                sortBtn.classList.toggle('on', on);
+                sortBtn.title = on ? `${o[2]} — every page of the search, in one list` : 'Sort a search — newest, oldest, by color, zone, rarity or yours first';
+            };
+            sortPaint();
+            pickPopup(sortBtn, pop => {
+                pop.className = 'dti-cpk-pop dti-sort-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Sort');
+                pop.innerHTML = `<div class="dti-cpk-head">Sort</div><div class="dti-sort-list">${CS_SORTS.map(([k, label, tip]) => `<button type="button" class="dti-sort-opt${k === CS.sort ? ' on' : ''}" data-k="${k}"><b>${label}</b><span>${tip}</span></button>`).join('')}</div>`
+                    + '<div class="dti-pk-tip">Any order but A–Z shows every page of the search, in one list</div>';
+                pop.addEventListener('click', ev => {
+                    const b = ev.target.closest('.dti-sort-opt');
+                    if (!b) return;
+                    CS.sort = b.dataset.k; GM_setValue('dti_cs_sort', CS.sort); CS.page = 1;
+                    pop.querySelectorAll('.dti-sort-opt').forEach(x => x.classList.toggle('on', x === b));
+                    sortPaint(); csSync(); csPump(CS.gen); csPaintSoon();
+                });
+            });
             csClearAll = () => {
                 edZones = Picks.none(); edColors = Picks.none();
                 zonePick.set(edZones); colorPick.set(edColors);
@@ -26822,56 +28703,93 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             // ── View toggle (list / tile) ────────────────────────────────
             let _edView = GM_getValue('dti_editor_view', 'list');
 
-            // ── Layout: items per row in list view; zones per row, items per row and tile size in tile view — kept apart for the
-            // full page and the pop-up window (its panel is far narrower). CSS reads them from variables on the root. ──
+            // ── Layout: items per row in list view; zones per row, items per row and tile size in tile view — and each part of a tile
+            // on its own (user asked): its picture, item names and zone labels (the words can be hidden). Kept apart for the full page
+            // and the pop-up window (its panel is far narrower). CSS reads them from variables on the root. ──
             const LAY_KEY = 'dti_ed_layout' + (window.top !== window ? '_pop' : '');
-            const LAY_DEF = { lcols: 1, zones: 0, items: 0, size: 100, hideKind: 0 };
+            const LAY_DEF = { lcols: 1, zones: 0, items: 0, size: 100, hideKind: 0, pic: 100, nm: 2, lb: 2 };
+            const LAY_TXT = [0, 0.85, 1, 1.2, 1.4];   // (words: Off, S, M — the usual — L, XL)
+            const LAY_TXT_SEG = [[0, 'Off'], [1, 'S'], [2, 'M'], [3, 'L'], [4, 'XL']];
+            const layVal = (k, v) => v + '%';   // (the sliders: tile size, picture)
             let _edLay = { ...LAY_DEF, ...(GM_getValue(LAY_KEY, null) || {}) }, _layPop = null, _layFit = 0;
+            if (_edLay.name !== undefined) {   // (the words had 7 sizes before: each to the nearest of the 5 now)
+                const was = [0, 1, 1, 2, 3, 3, 4];
+                _edLay.nm = was[_edLay.name] ?? 2; _edLay.lb = was[_edLay.lbl] ?? 2;
+                delete _edLay.name; delete _edLay.lbl;
+            }
             // (the panel's width — a window resize, the page settling, the pop-up resized — fits the tiles again)
             let _layBox = null, _layW = -1, _layRaf = 0;
             const _layRO = new ResizeObserver(es => {
                 const w = Math.round(es[es.length - 1].contentRect.width);
-                if (w === _layW) return;
+                // (a few pixels — a scrollbar coming and going as the tiles change size — isn't a new width: no fitting again, round and round)
+                if (Math.abs(w - _layW) < 20) return;
                 _layW = w;
                 cancelAnimationFrame(_layRaf);
                 _layRaf = requestAnimationFrame(() => { _applyEdLayout(); _paintLayFit(); });
             });
             function _applyEdLayout() {
                 const { lcols, zones, items, size } = _edLay;
+                // (a tile: as wide as its picture needs, its picture's area, and the words under it — a name of up to 3 lines, a row of
+                // labels — each its own size, or gone)
+                const pic = (_edLay.pic || 100) / 100, nm = LAY_TXT[_edLay.nm] ?? 1, lb = LAY_TXT[_edLay.lb] ?? 1;
+                // (as wide as its picture needs — a smaller picture, a narrower tile: no wide empty sides; a tile with more labels than a row
+                // holds grows to show them all)
+                const TW = Math.max(100, Math.round(104 * pic + 30)), TH = Math.round(114 * pic);
+                const nameH = nm ? Math.ceil(39 * nm) : 0, lblH = lb || !_edLay.hideKind ? Math.ceil(13 * (lb || 1)) + 2 : 0;
+                const TX = nameH || lblH ? 8 + nameH + (nameH && lblH ? 2 : 0) + lblH : 0;
                 let z = size / 100;
-                // (the zones and items picked must fit across the panel — else the tiles shrink till they do, to 45% at most)
+                // (items per row picked: the tiles fill the row, that many across — the panel's width shared out, 45% to 220% of the usual
+                // size; zones per row alone: the tiles shrink if one wouldn't fit a zone's column, to 45% at most)
                 _layFit = 0;
                 const zb = root.querySelector('.dti-zone-2col'), box = zb || root.querySelector('.dti-tile-grid')?.parentElement;
                 if (box && box !== _layBox) { _layRO.disconnect(); _layRO.observe(box); _layBox = box; }   // (its width changing fits again)
                 if (root.classList.contains('dti-tile-mode') && (zones > 0 || items > 0) && box?.clientWidth) {
                     const Z = zb ? zones || 1 : 1, I = items || 1;
-                    const fit = Math.floor(((box.clientWidth - (Z - 1) * 4) / Z - (I - 1) * 7 - 20) / (I * 134) * 100) / 100;
-                    if (fit < z) z = _layFit = Math.max(0.45, fit);
+                    const fit = Math.floor(((box.clientWidth - (Z - 1) * 4) / Z - (I - 1) * 7 - 20) / (I * TW) * 100) / 100;
+                    if (items > 0) z = Math.min(2.2, Math.max(0.45, fit));
+                    else if (fit < z) z = _layFit = Math.max(0.45, fit);
                 }
-                const zoneW = Math.ceil(items * 134 * z + (items - 1) * 7 + 20);   // (a zone exactly that many tiles wide)
+                const zoneW = Math.ceil(items * TW * z + (items - 1) * 7 + 20);   // (a zone exactly that many tiles wide)
                 root.classList.toggle('dti-lay-lcols', lcols > 1);
                 root.classList.toggle('dti-hide-kind', !!_edLay.hideKind);
-                root.style.setProperty('--dti-lcols', String(lcols));
-                root.style.setProperty('--dti-tz', String(z));
-                root.style.setProperty('--dti-ipr', items > 0 ? String(items) : 'auto-fill');
-                root.style.setProperty('--dti-zcols', zones > 0
-                    ? `repeat(${zones}, ${items > 0 ? zoneW + 'px' : `minmax(${Math.ceil(134 * z + 20)}px, 1fr)`})`
-                    : items > 0 ? `repeat(auto-fill, ${zoneW}px)` : `repeat(auto-fit, minmax(${Math.round(280 * z)}px, 1fr))`);
+                root.classList.toggle('dti-hide-name', !nm);
+                root.classList.toggle('dti-hide-zone', !lb);
+                root.classList.toggle('dti-tile-nolbl', !lblH);
+                root.classList.toggle('dti-tile-notext', !TX);
+                const css = {
+                    '--dti-lcols': lcols, '--dti-tz': z, '--dti-ipr': items > 0 ? items : 'auto-fill',
+                    '--dti-tw': TW + 'px', '--dti-th': TH + 'px', '--dti-tx': TX + 'px', '--dti-tt': TH + TX + 4 + 'px', '--dti-nm': nm || 1, '--dti-lb': lb || 1,
+                    // (every page's tiles fill their place — the picture grows with the tile: the tile size sets how wide at least)
+                    '--dti-cz': size / 100, '--dti-pic': pic,
+                    '--dti-csc': items > 0 ? `repeat(${items}, minmax(0, 1fr))` : `repeat(auto-fill, minmax(${Math.round(TW * size / 100)}px, 1fr))`,
+                    '--dti-zcols': zones > 0
+                        ? `repeat(${zones}, ${items > 0 ? zoneW + 'px' : `minmax(${Math.ceil(TW * z + 20)}px, 1fr)`})`
+                        : items > 0 ? `repeat(auto-fill, ${zoneW}px)` : `repeat(auto-fit, minmax(${Math.round((TW * 2 + 12) * z)}px, 1fr))`,
+                };
+                Object.entries(css).forEach(([k, v]) => root.style.setProperty(k, String(v)));
             }
             _applyEdLayout();
             const layBtn = bar.querySelector('.dti-lay-btn');
             const closeLay = () => { _layPop?.remove(); _layPop = null; layBtn?.classList.remove('open'); };
             function _renderLayPop() {
-                const tile = _edView === 'tile', L = _edLay;
-                const seg = (k, vals) => `<div class="dti-lay-seg" data-k="${k}">${vals.map(([v, t]) => `<button type="button" data-v="${v}"${L[k] === v ? ' class="on"' : ''}>${t}</button>`).join('')}</div>`;
+                const tile = _edView === 'tile', L = _edLay, fill = L.items > 0;
+                const seg = (k, vals, tip = '') => `<div class="dti-lay-seg" data-k="${k}"${tip ? ` title="${tip}"` : ''}>${vals.map(([v, t]) => `<button type="button" data-v="${v}"${L[k] === v ? ' class="on"' : ''}>${t}</button>`).join('')}</div>`;
+                const rng = (k, label, min, max, step, more = '', tip = '', off = '') => `<div class="dti-lay-row${off ? ' off' : ''}"><span>${label} <b>${off || layVal(k, L[k])}</b></span><input type="range" min="${min}" max="${max}" step="${step}" value="${L[k]}" data-k="${k}" aria-label="${label}"${tip ? ` title="${tip}"` : ''}${off ? ' disabled' : ''}>${more}</div>`;
+                const perRow = seg('items', [[0, 'Auto'], ...[1, 2, 3, 4, 5, 6, 7, 8].map(n => [n, String(n)])], 'Auto: as many as fit at the tile size — a number: that many, filling the row');
+                // (a tile's parts: tile view's tiles — and every page's, whichever the view; items per row picked, the tiles fill the row: no
+                // size of their own then)
+                const parts = rng('size', 'Tile size', 70, 150, 5, tile ? '<small class="dti-lay-fit" hidden></small>' : '', fill ? 'Items per row sets it — the tiles fill the row' : 'The whole tile — picture and words together', fill ? 'Fills the row' : '')
+                    + rng('pic', 'Picture', 60, 170, 5, '', 'The picture — the tile fits around it')
+                    + `<div class="dti-lay-row"><span>Item names</span>${seg('nm', LAY_TXT_SEG, 'Their size — Off hides them')}</div>`
+                    + `<div class="dti-lay-row"><span>Zone labels</span>${seg('lb', LAY_TXT_SEG, 'Their size — Off hides them')}</div>`;
                 _layPop.innerHTML = `
                     <div class="dti-lay-h">${tile ? 'Tile view' : 'List view'}<button type="button" class="dti-lay-reset" title="Back to the usual layout">Reset</button></div>
                     ${tile ? `
                     <div class="dti-lay-row"><span>Zones per row</span>${seg('zones', [[0, 'Auto'], [1, '1'], [2, '2'], [3, '3'], [4, '4']])}</div>
-                    <div class="dti-lay-row"><span>Items per row <b>${L.items || 'Auto'}</b></span><input type="range" min="0" max="8" step="1" value="${L.items}" data-k="items" aria-label="Items per row"></div>
-                    <div class="dti-lay-row"><span>Tile size <b>${L.size}%</b></span><input type="range" min="70" max="150" step="5" value="${L.size}" data-k="size" aria-label="Tile size"><small class="dti-lay-fit" hidden></small></div>`
+                    <div class="dti-lay-row"><span>Items per row</span>${perRow}</div>${parts}`
                     : `<div class="dti-lay-row"><span>Items per row</span>${seg('lcols', [[1, '1'], [2, '2'], [3, '3']])}</div>`}
-                    <div class="dti-lay-row"><span>NC / NP labels</span>${seg('hideKind', [[0, 'Show'], [1, 'Hide']])}</div>`;
+                    <div class="dti-lay-row"><span>NC / NP labels</span>${seg('hideKind', [[0, 'Show'], [1, 'Hide']])}</div>
+                    ${!tile && csOn() ? `<div class="dti-lay-sub">Every page’s tiles</div><div class="dti-lay-row"><span>Items per row</span>${perRow}</div>${parts}` : ''}`;
                 _paintLayFit();
             }
             function _paintLayFit() {   // (the menu says when the tiles were shrunk to fit)
@@ -26906,12 +28824,72 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     _applyEdLayout();
                     _paintLayFit();
                     const b = sl.parentElement.querySelector('b');
-                    if (b) b.textContent = sl.dataset.k === 'size' ? sl.value + '%' : (+sl.value || 'Auto');
+                    if (b) b.textContent = layVal(sl.dataset.k, sl.value);
                 });
                 _layPop.addEventListener('change', ev => { if (ev.target.matches('input[type="range"][data-k]')) GM_setValue(LAY_KEY, _edLay); });
             });
             document.addEventListener('mousedown', e => { if (_layPop && !_layPop.contains(e.target) && !layBtn.contains(e.target)) closeLay(); }, true);
             document.addEventListener('keydown', e => { if (e.key === 'Escape' && _layPop) closeLay(); });
+
+            // ── Zones on the pet (user asked): what's worn in each zone, the ones what's worn keeps others out of, and the ones still open —
+            // a click on one shows every item for it. Read from DTI's own data while it's open, as the outfit changes. ──
+            const wzBtn = bar.querySelector('.dti-wz-btn');
+            let _wzPop = null, _wzKey = '', _wzT = 0, _wzGen = 0;
+            const closeWz = () => { clearInterval(_wzT); _wzT = 0; _wzGen++; _wzPop?.remove(); _wzPop = null; wzBtn?.classList.remove('open'); wzBtn?.setAttribute('aria-expanded', 'false'); };
+            const wzKey = () => { const s = csBr.get()?.state; return s ? [[...(s.wornItemIds || [])].map(String).sort().join(), s.speciesId, s.colorId, s.altStyleId ?? ''].join('|') : ''; };
+            const _wzPlace = () => {
+                if (!_wzPop) return;
+                const r = wzBtn.getBoundingClientRect();
+                _wzPop.style.top = Math.max(8, Math.min(r.bottom + 6, innerHeight - _wzPop.offsetHeight - 8)) + 'px';
+                _wzPop.style.left = Math.max(8, Math.min(r.right - _wzPop.offsetWidth, innerWidth - _wzPop.offsetWidth - 8)) + 'px';
+            };
+            async function _wzLoad() {
+                const gen = ++_wzGen, res = await csBr.zones();
+                if (gen === _wzGen && _wzPop) { _wzPaint(res); _wzPlace(); }
+            }
+            function _wzPaint(res) {
+                const body = _wzPop.querySelector('.dti-wz-body');
+                if (!res || res.error) { body.innerHTML = '<div class="dti-wz-note">Couldn’t read the zones just now — close this and try again</div>'; return; }
+                const items = res.items || [], worn = new Map(), kept = new Map();   // (zone → what's in it / what keeps others out of it)
+                const add = (m, z, it) => { const a = m.get(z) || []; if (!a.includes(it)) a.push(it); m.set(z, a); };
+                items.forEach(it => { it.zones.forEach(z => add(worn, z, it)); it.restricts.forEach(z => add(kept, z, it)); });
+                const used = DTI_ZONES.filter(z => worn.has(z)), blocked = DTI_ZONES.filter(z => !worn.has(z) && kept.has(z)), open = DTI_ZONES.filter(z => !worn.has(z) && !kept.has(z));
+                const names = a => a.map(it => it.name).join(', '), off = items.filter(it => !it.zones.length);
+                const part = (cls, n) => n ? `<i class="${cls}" style="flex:${n}"></i>` : '';
+                // (a zone DTI can search by: a click shows every item for it — the pet's own zones some items use too can't be)
+                const row = z => { const its = worn.get(z), can = DTI_ZONES.includes(z), tag = can ? 'button' : 'div';
+                    return `<${tag}${can ? ` type="button" data-z="${noteEsc(z)}" title="Every item for ${noteEsc(z)}"` : ''} class="dti-wz-row"><img src="${noteEsc(its[0].img)}" alt="" loading="lazy"><b>${noteEsc(z)}</b><span>${noteEsc(names(its))}</span></${tag}>`; };
+                body.innerHTML = `
+                    <div class="dti-wz-meter" aria-hidden="true">${part('w', used.length)}${part('b', blocked.length)}${part('o', open.length)}</div>
+                    <div class="dti-wz-legend"><span><i class="w"></i><b>${used.length}</b> worn</span>${blocked.length ? `<span><i class="b"></i><b>${blocked.length}</b> blocked</span>` : ''}<span><i class="o"></i><b>${open.length}</b> open</span></div>
+                    ${worn.size ? `<div class="dti-wz-sec">Worn</div><div class="dti-wz-list">${[...worn.keys()].sort((a, b) => a.localeCompare(b)).map(row).join('')}</div>` : '<div class="dti-wz-note">Nothing worn yet — every zone is open</div>'}
+                    ${off.length ? `<div class="dti-wz-note">Worn, but not shown on this pet: ${noteEsc(names(off))}</div>` : ''}
+                    ${blocked.length ? `<div class="dti-wz-sec">Blocked by what’s worn</div><div class="dti-wz-pills">${blocked.map(z => `<button type="button" class="dti-wz-pill b" data-z="${noteEsc(z)}" title="Can’t be worn with ${noteEsc(names(kept.get(z)))} — click for every item for it">${noteEsc(z)}</button>`).join('')}</div>` : ''}
+                    ${open.length ? `<div class="dti-wz-sec">Open<small>click one for everything that fits there</small></div><div class="dti-wz-pills">${open.map(z => `<button type="button" class="dti-wz-pill" data-z="${noteEsc(z)}">${noteEsc(z)}</button>`).join('')}</div>` : ''}
+                    ${open.length && (worn.size || openOn()) ? `<button type="button" class="dti-wz-only${openOn() ? ' on' : ''}" data-open="1">${openOn() ? 'Showing items for open zones only — show all' : 'Only show items for the open zones'}</button>` : ''}`;
+            }
+            wzBtn?.addEventListener('click', e => {
+                e.stopPropagation();
+                if (_wzPop) return closeWz();
+                _wzPop = document.createElement('div');
+                _wzPop.className = 'dti-wz-pop';
+                _wzPop.setAttribute('role', 'dialog'); _wzPop.setAttribute('aria-label', 'Zones on your pet');
+                _wzPop.innerHTML = '<div class="dti-wz-h">Zones on your pet</div><div class="dti-wz-body"><div class="dti-wz-note">Reading what’s worn…</div></div>';
+                document.body.appendChild(_wzPop);
+                _wzPlace();
+                wzBtn.classList.add('open'); wzBtn.setAttribute('aria-expanded', 'true');
+                _wzKey = wzKey(); _wzLoad();
+                _wzT = setInterval(() => { const k = wzKey(); if (k !== _wzKey) { _wzKey = k; _wzLoad(); } }, 700);   // (the outfit changing: read again)
+                _wzPop.addEventListener('click', ev => {   // (a zone: every item for it — the zone filter set to it; or open zones only, on or off)
+                    const z = ev.target.closest('[data-z]')?.dataset.z, only = ev.target.closest('[data-open]');
+                    if (!z && !only) return;
+                    closeWz();
+                    edZones = only ? (openOn() ? Picks.none() : { inc: ['~'], exc: [], all: false }) : { inc: [z], exc: [], all: false };
+                    zonePick.set(edZones); csSync(); applyFilters(); wornZRefresh();
+                });
+            });
+            document.addEventListener('mousedown', e => { if (_wzPop && !_wzPop.contains(e.target) && !wzBtn.contains(e.target)) closeWz(); }, true);
+            document.addEventListener('keydown', e => { if (e.key === 'Escape' && _wzPop) closeWz(); });
 
             function _setEdView(mode) {
                 _edView = mode; GM_setValue('dti_editor_view', mode);
@@ -26937,9 +28915,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             // The box holding a zone's items (.dti-tile-grid) and the box holding the zones (.dti-zone-2col, when there are a few) —
             // laid out by CSS in both views. (An item that doesn't fit the pet has no label around it: the item itself is the tile.)
             function _stampTileGrid() {
-                root.querySelectorAll('.item-container .chakra-wrap__listitem:not([data-dti-kb])').forEach(li => {
-                    li.dataset.dtiKb = '1';
-                    if (/^(NC|NP|PB)$/.test(li.textContent.trim())) li.classList.add('dti-kind-badge');
+                root.querySelectorAll('.item-container .chakra-wrap__listitem:not(.dti-kind-badge):not(.dti-zone-badge):not(.dti-own-badge)').forEach(li => {
+                    const t = li.textContent.trim();
+                    li.classList.add(/^(NC|NP|PB)$/.test(t) ? 'dti-kind-badge' : /^(Own|Wanted)$/i.test(t) ? 'dti-own-badge' : 'dti-zone-badge');   // (else: the zones it's in)
                 });
                 const boxes = new Set(), zoneBoxes = new Map();
                 root.querySelectorAll('.item-container').forEach(ic => {
@@ -26963,13 +28941,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 root.querySelectorAll('.item-container:not([data-dti-eb])').forEach(ic => {
                     ic.dataset.dtiEb = '1';
                     const nameDiv = ic.querySelector('[id*="-item-"][id$="-name"]');
-                    const itemId = nameDiv?.id?.match(/item-(\d+)-name/)?.[1];
+                    // (its id: its name's, in the outfit's own list — a search result's name has none: its "More info" link's then)
+                    const itemId = nameDiv?.id?.match(/item-(\d+)-name/)?.[1] || ic.querySelector('a[href*="/items/"]')?.getAttribute('href')?.match(/\/items\/(\d+)/)?.[1] || ic.dataset.dtiItem;
 
                     const trashBtn = document.createElement('button');
                     trashBtn.className = 'dti-ed-remove-btn';
-                    trashBtn.title = 'Remove from outfit';
-                    trashBtn.setAttribute('aria-label', 'Remove from outfit');
-                    trashBtn.innerHTML = `<svg width="10" height="11" viewBox="0 0 10 11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M1.5 3h7M4 3V2h2v1M2.5 3l.5 6h4l.5-6"/></svg>`;
+                    trashBtn.title = 'Remove from the custom';
+                    trashBtn.setAttribute('aria-label', 'Remove from the custom');
+                    trashBtn.innerHTML = ED_TRASH;
                     trashBtn.addEventListener('click', e => {
                         e.stopPropagation();
                         ic.querySelector('button[aria-label="Remove"]')?.click();
@@ -26982,7 +28961,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         infoBtn.title = 'Item info';
                         infoBtn.setAttribute('aria-label', 'Item info');
                         infoBtn.textContent = '?';
-                        const itemName = nameDiv?.textContent?.trim() || '';
+                        const itemName = nameDiv?.textContent?.trim() || ic.querySelector('img')?.alt?.replace(/^Thumbnail art for /, '').trim() || '';
                         const itemImg  = ic.querySelector('img')?.src || '';
                         infoBtn.dataset.id   = itemId;
                         infoBtn.dataset.name = itemName;
@@ -27011,7 +28990,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             let refilterT = 0;
             const isItems = n => n.nodeType === 1 && (n.classList.contains('item-container') || !!n.querySelector('.item-container') || !!n.closest('.item-container'));
             new MutationObserver(ms => {
-                if (!filtersOn() && !csAll) return;
+                if (!filtersOn() && !csAll && CS.sort === 'name') return;
                 if (!ms.some(m => m.type === 'attributes' ? !!m.target.closest('.item-container') : [...m.addedNodes].some(isItems))) return;
                 clearTimeout(refilterT);
                 refilterT = setTimeout(() => { csSync(); applyFilters(); }, 60);
@@ -27036,7 +29015,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
         async function applyFilters() {
             const gen = ++_filterGen;
-            const colorsOn = Picks.on(edColors), zonesOn = Picks.on(edZones);
+            const colorsOn = Picks.on(edColors), zoneRule = edZoneRule(), zonesOn = Picks.on(zoneRule);
             let colorMatchCount = 0;
             const noMatch = document.getElementById('dti-zcf-nomatch');
             const items = [...root.querySelectorAll('.item-container')];
@@ -27053,7 +29032,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     const zs = [...item.querySelectorAll('.chakra-wrap__listitem')].map(b => b.textContent.trim());
                     const head = item.closest('div:has(> h2.chakra-heading)')?.querySelector(':scope > h2.chakra-heading')?.textContent.trim();
                     if (head) zs.push(head);
-                    if (!Picks.pass(edZones, z => zs.includes(z))) { showTile(item, false); continue; }
+                    // (open zones: what's worn stays — the zone it took is no longer open, but it's what you just put on)
+                    if (!Picks.pass(zoneRule, z => zs.includes(z) || zs.includes(zoneShort(z))) && !(openOn() && tileOf(item).querySelector('input:checked'))) { showTile(item, false); continue; }
                 }
                 if (!colorsOn) { showTile(item, true); continue; }
                 const src = item.querySelector('img')?.src, pr = src ? ItemColors.get(src) : false;
@@ -27088,16 +29068,27 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
         // ── Every page of a search (user asked: search "background", pick a color, see every one of them — in one list, or in pages
         // full of them, 30 a page): with zones or colors picked — or for any search, if you like (user asked: a plain search with no
-        // pages). DTI's own search asked for every page (50 a time, its most), each picture's colors read once (kept) when a color is
+        // pages); with nothing typed, every item in the zones shown. DTI's own search asked for every page (50 a time, its most), each picture's colors read once (kept) when a color is
         // picked, the matches shown where DTI's pages were; a click puts one on (or takes it off) through DTI's own step. ──
         const CS_PER_PAGE = 30, CS_MAX_PAGES = 80;   // (80 × 50 = the first 4,000 items)
+        // [key, its name on the button, what it does, a few words for the panel] — newest: DTI's numbers go up as it finds new items
+        const CS_SORTS = [['name', 'A–Z', 'By name — DTI’s own order', ''], ['za', 'Z–A', 'By name, backwards', 'Z–A'],
+            ['new', 'Newest', 'Newest first — the latest items DTI has', 'newest first'], ['old', 'Oldest', 'Oldest first', 'oldest first'],
+            ['color', 'Color', 'By color — rainbow order, light to dark in each', 'in color order'], ['mine', 'Yours first', 'What you own first, then your wishlist, then the rest', 'yours first'],
+            ['zone', 'By zone', 'Grouped by the zone each is in', 'by zone'], ['rare', 'Rarest', 'Rarest first (NC items last)', 'rarest first'],
+            ['caps', 'Cap value', 'Highest NC value first — items with no value last', 'by cap value']];
+        const CS_ALL_PAGES = 700, CS_ALL_KEEP = 3 * 864e5;   // (every item: up to 35,000 — DTI has ~28,500; kept 3 days, its pictures' colors for good)
         const csBr = edBridge();
-        const CS = { base: '', gen: 0, items: [], pages: 0, allPages: 0, fetched: 0, failed: 0, checked: 0, next: 0, active: 0, page: 1,
-            mode: GM_getValue('dti_cs_mode', 'list') === 'pages' ? 'pages' : 'list', tiles: new Map(), memo: new Map() };   // (memo: the last few searches, whole)
-        let csPanel = null, csPaintT = 0, csWornT = 0;
+        const CS = { base: '', gen: 0, items: [], seen: new Set(), pages: 0, allPages: 0, fetched: 0, failed: 0, checked: 0, next: 0, active: 0, page: 1,
+            mode: GM_getValue('dti_cs_mode', 'list') === 'pages' ? 'pages' : 'list', tiles: new Map(), memo: new Map(),   // (memo: the last few searches, whole)
+            sort: (k => CS_SORTS.some(o => o[0] === k) ? k : 'name')(GM_getValue('dti_cs_sort', 'name')) };   // (A–Z — DTI's own — or another order: user asked)
+        let csPanel = null, csPaintT = 0, csWornT = 0, csCapAsk = false;
         const LIST_ICO = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>';
         // (its zones; its colors — by the picture's colors, the name only when the picture can't be read; not read yet: not yet)
-        const csMatch = r => Picks.pass(edZones, z => r.zones.includes(z)) && (!Picks.on(edColors) || r.pr !== undefined
+        // (every item in some zones: DTI found them by zone — only the zones left out are looked at here)
+        // (open zones: what's worn stays — the zone it took is no longer open, but it's what you just put on)
+        let csWornNow = null;
+        const csMatch = r => (csWornNow?.has(r.id) || Picks.pass(/^(Z|ALL)\|/.test(CS.base) ? { inc: [], exc: zoneExc(), all: false } : edZoneRule(), z => r.zones.includes(z))) && (!Picks.on(edColors) || r.pr !== undefined
             && (r.pr ? ItemColors.pass(r.pr, edColors) : Picks.pass(edColors, k => (COLOR_KEYWORDS[k] || []).some(kw => r.name.toLowerCase().includes(kw)))));
         const csOn = () => !!csPanel?.isConnected;
         function csOff() {
@@ -27116,14 +29107,46 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             return false;
         };
+        // (nothing typed — NC / NP at most: with zones shown, every item in them instead)
+        const blankSearch = u => {
+            for (let i = 0; u.has(`q[${i}][key]`); i++) {
+                const k = u.get(`q[${i}][key]`);
+                if (k === 'name' ? (u.get(`q[${i}][value]`) || '').trim() : !/^(fits|is_nc|is_np|is_pb)$/.test(k)) return false;
+            }
+            return true;
+        };
+        const zoneBase = (from, z) => {   // (DTI's own search for one zone: its zone filter added)
+            const v = new URLSearchParams(from);
+            let n = 0;
+            while (v.has(`q[${n}][key]`)) n++;
+            v.set(`q[${n}][key]`, 'occupied_zone_set_name'); v.set(`q[${n}][value]`, z);
+            return v.toString();
+        };
+        // What every page shows: DTI's search — or, with nothing typed and zones shown, every item in those zones (user asked: no
+        // words needed), each zone asked of DTI on its own; never every item there is. → { base, zone } or null
+        function csTarget() {
+            const p = csBr.search()[0], u = p ? new URLSearchParams(p) : null;
+            if (u) { u.delete('page'); u.delete('per_page'); }
+            const every = edZones.inc.includes('*') || openOn(), zr = edZoneRule();   // (open zones, nothing typed: every item — those that fit what's open)
+            if ((every || zr.inc.length) && (!u || blankSearch(u))) {
+                let from = u;
+                if (!from) {   // (DTI not asking anything yet: the pet on screen)
+                    const st = csBr.get()?.state;
+                    if (!st?.speciesId) return null;
+                    from = new URLSearchParams({ 'q[0][key]': 'name', 'q[0][value]': '', 'q[1][key]': 'fits', 'q[1][value][species_id]': st.speciesId,
+                        'q[1][value][color_id]': st.colorId, 'with_appearances_for[species_id]': st.speciesId, 'with_appearances_for[color_id]': st.colorId });
+                }
+                // (every item: DTI's own search with nothing typed — everything this pet can wear)
+                return { base: every ? 'ALL|' + from.toString() : 'Z|' + zr.inc.map(z => zoneBase(from, z)).join('|'), zone: true };
+            }
+            return (filtersOn() || csAll || CS.sort !== 'name') && u && isSearch(u) ? { base: u.toString(), zone: false } : null;
+        }
+        let csKindHold = 0;   // (an NC / NP switch: DTI has no search running for a moment while it swaps — the list stays meanwhile)
         function csSync() {
-            if (!filtersOn() && !csAll) return csOff();
-            const p = csBr.search()[0], u = p && new URLSearchParams(p);
-            if (!u || !isSearch(u)) return csOff();
-            u.delete('page'); u.delete('per_page');
-            const base = u.toString();
-            csPlace();
-            if (base !== CS.base) return csStart(base);
+            const t = csTarget();
+            if (!t) return Date.now() < csKindHold && csOn() ? undefined : csOff();
+            csPlace(t.zone);
+            if (t.base !== CS.base) return csStart(t.base);
             csPump(CS.gen);   // (a color picked since: the pictures read now)
             csPaintSoon();
         }
@@ -27155,11 +29178,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (!csOn() || !e.target.matches?.('input.react-autosuggest__input')) return;
             clearTimeout(csInT); csInT = setTimeout(csSync, 450);
         }, true);
-        // Where DTI's results are (its pager and the items): the panel there, DTI's own pages hidden under it
-        function csPlace() {
-            const ic = root.querySelector('.item-container');
-            const list = ic && (ic.parentElement?.tagName === 'LABEL' ? ic.parentElement : ic).parentElement;
-            const wrap = list?.parentElement;
+        // Where DTI's results are (its pager and the items) — every item in some zones: where the outfit's own items are (none yet in a
+        // new custom), all of them. The panel there, what DTI shows hidden under it.
+        function csPlace(zone) {
+            let wrap = zone ? document.getElementById('dti-search-row')?.parentElement?.nextElementSibling : null;
+            if (wrap?.id === 'dti-cs') wrap = wrap.nextElementSibling;
+            if (!wrap) {
+                const ic = root.querySelector('.item-container');
+                const list = ic && (ic.parentElement?.tagName === 'LABEL' ? ic.parentElement : ic).parentElement;
+                wrap = list?.parentElement;
+            }
             if (!wrap || wrap === root || wrap.id === 'dti-cs') return;
             if (!csPanel) csPanel = csBuild();
             if (csPanel.nextElementSibling !== wrap) wrap.before(csPanel);
@@ -27167,25 +29195,54 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             wrap.classList.add('dti-cs-hide');
             if (!csWornT) csWornT = setInterval(() => {
                 if (!csOn()) { clearInterval(csWornT); csWornT = 0; return; }
-                const sp = csBr.search()[0];
-                if (!sp || !isSearch(new URLSearchParams(sp))) return csOff();   // (not searching any more: DTI's own list again)
+                if (csTarget()?.base !== CS.base) return csSync();   // (the search changed or was cleared, with no new items coming in)
                 csPaintWorn();
             }, 1200);
         }
         const CS_KEEP = 12 * 3600e3;
+        // (a search's parts with its NC / NP / PB filter apart — the same search as All or one kind then compares equal, however DTI
+        // numbered its parts)
+        const kindSplit = base => {
+            const pre = /^(ALL|Z)\|/.exec(base)?.[0] || '';
+            let kind = null;
+            const keys = base.slice(pre.length).split('|').map(q => {
+                const u = new URLSearchParams(q), parts = [], rest = [];
+                for (let i = 0; u.has(`q[${i}][key]`); i++) {
+                    const k = u.get(`q[${i}][key]`), at = `q[${i}][value]`;
+                    if (/^is_(nc|np|pb)$/.test(k)) { kind = k.slice(3); continue; }
+                    parts.push(k + ':' + [...u.entries()].filter(([p]) => p.startsWith(at)).map(([p, v]) => p.slice(at.length) + '=' + v).sort().join('&'));
+                }
+                for (const [p, v] of u.entries()) if (!p.startsWith('q[')) rest.push(p + '=' + v);
+                return parts.sort().join(';') + '#' + rest.sort().join('&');
+            });
+            return { kind, key: pre + keys.join('|') };
+        };
+        // (this search as All / NC / NP from what's here: that very list, kept — or NC / NP picked out of its All, whole)
+        const csKindPick = (base, kind) => {
+            const me = kindSplit(base);
+            let whole = null;
+            for (const [b, m] of CS.memo) {
+                const o = kindSplit(b);
+                if (o.key !== me.key) continue;
+                if ((o.kind || '') === kind) return m;
+                if (!o.kind && m.pages >= m.allPages) whole = m;
+            }
+            return whole && (kind === 'nc' || kind === 'np') ? { pages: whole.pages, allPages: whole.allPages, items: whole.items.filter(r => kind === 'nc' ? r.nc : !r.nc && !r.pb) } : null;
+        };
+        const csKindOf = base => { const k = kindSplit(base).kind; return k === 'nc' || k === 'np' ? csKindPick(base, k) : null; };
         async function csStart(base, fresh) {
             const gen = ++CS.gen;
-            Object.assign(CS, { base, items: [], pages: 0, allPages: 0, fetched: 0, failed: 0, checked: 0, next: 0, active: 0, page: 1 });
+            Object.assign(CS, { base, items: [], seen: new Set(), pages: 0, allPages: 0, fetched: 0, failed: 0, checked: 0, next: 0, active: 0, page: 1 });
             CS.tiles.clear();
             csPaintSoon();
             await ItemColors.ready();
-            let had = !fresh && CS.memo.get(base);   // (a search seen a moment ago — NC / NP / All flipped back: no asking again)
+            let had = !fresh && (CS.memo.get(base) || csKindOf(base));   // (a search seen a moment ago — NC / NP / All flipped back — or NC / NP of an All that's here whole: no asking again)
             if (!had && !fresh) {   // (or within the last 12 hours, kept in this browser)
                 const disk = await DTICache.get('cs:' + base);
                 if (gen !== CS.gen) return;
-                if (disk && Date.now() - disk.at < CS_KEEP && Array.isArray(disk.items)) {
+                if (disk && Date.now() - disk.at < (base.startsWith('ALL|') ? CS_ALL_KEEP : CS_KEEP) && Array.isArray(disk.items) && (!disk.items.length || disk.items[0].length >= 8)) {
                     had = { pages: disk.pages, allPages: disk.allPages, at: disk.at,
-                        items: disk.items.map(([id, name, img, nc, pb, zones, ord]) => ({ id, name, img, nc: !!nc, pb: !!pb, zones, ord, pr: undefined })) };
+                        items: disk.items.map(([id, name, img, nc, pb, zones, ord, rar]) => ({ id, name, img, nc: !!nc, pb: !!pb, zones, ord, rar: rar ?? null, pr: undefined })) };
                     CS.memo.set(base, had);
                 }
             }
@@ -27195,23 +29252,27 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 csPump(gen);
                 return csPaintSoon();
             }
-            const get = async p => {
-                const r = await fetch(`/items.json?${base}&page=${p}&per_page=50`, { credentials: 'include' });
+            const every = base.startsWith('ALL|');
+            const parts = base.startsWith('Z|') ? base.slice(2).split('|') : [every ? base.slice(4) : base];   // (every item in some zones: each zone's search)
+            const get = async (k, p) => {
+                const r = await fetch(`/items.json?${parts[k]}&page=${p}&per_page=50`, { credentials: 'include' });
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
                 return r.json();
             };
-            let first;
-            try { first = await get(1); } catch (_) { if (gen === CS.gen) { CS.failed = 1; csPaintSoon(); } return; }
+            let firsts;
+            try { firsts = await Promise.all(parts.map((_, k) => get(k, 1))); } catch (_) { if (gen === CS.gen) { CS.failed = 1; csPaintSoon(); } return; }
             if (gen !== CS.gen) return;
-            CS.allPages = first.total_pages || 1;
-            CS.pages = Math.min(CS.allPages, CS_MAX_PAGES);
-            csTake(first, 1, gen);
             const queue = [];
-            for (let p = 2; p <= CS.pages; p++) queue.push(p);
+            firsts.forEach((first, k) => {
+                const all = first.total_pages || 1, pages = Math.min(all, every ? CS_ALL_PAGES : CS_MAX_PAGES);
+                CS.allPages += all; CS.pages += pages;
+                for (let p = 2; p <= pages; p++) queue.push([k, p]);
+            });
+            firsts.forEach((first, k) => csTake(first, 1, gen, k));
             const worker = async () => {   // (four pages at a time)
                 while (queue.length && gen === CS.gen) {
-                    const p = queue.shift();
-                    try { csTake(await get(p), p, gen); } catch (_) { if (gen === CS.gen) { CS.failed++; CS.fetched++; csPaintSoon(); } }
+                    const [k, p] = queue.shift();
+                    try { csTake(await get(k, p), p, gen, k); } catch (_) { if (gen === CS.gen) { CS.failed++; CS.fetched++; csPaintSoon(); } }
                 }
             };
             await Promise.all([worker(), worker(), worker(), worker()]);
@@ -27219,7 +29280,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             CS.memo.set(base, { items: CS.items, pages: CS.pages, allPages: CS.allPages });   // (kept whole only)
             while (CS.memo.size > 4) CS.memo.delete(CS.memo.keys().next().value);
             DTICache.set('cs:' + base, { at: Date.now(), pages: CS.pages, allPages: CS.allPages,
-                items: CS.items.map(r => [r.id, r.name, r.img, r.nc ? 1 : 0, r.pb ? 1 : 0, r.zones, r.ord]) });
+                items: CS.items.map(r => [r.id, r.name, r.img, r.nc ? 1 : 0, r.pb ? 1 : 0, r.zones, r.ord, r.rar ?? null]) });
+            if (every) {   // (every item: one pet's list at a time, apart from the searches)
+                DTICache.get('cs:every').then(old => { if (old && old !== base) DTICache.del('cs:' + old); DTICache.set('cs:every', base); });
+                return;
+            }
             DTICache.get('cs:index').then(ix => {   // (the last 8 searches)
                 const list = (Array.isArray(ix) ? ix : []).filter(k => k !== base);
                 list.push(base);
@@ -27227,12 +29292,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 DTICache.set('cs:index', list);
             });
         }
-        function csTake(j, p, gen) {
+        function csTake(j, p, gen, k = 0) {
             if (gen !== CS.gen) return;
             (j.items || []).forEach((it, i) => {
+                const id = String(it.id);
+                if (CS.seen.has(id)) return;   // (in two of the zones asked: once)
+                CS.seen.add(id);
                 const ap = j.appearances?.[it.id];
-                CS.items.push({ id: String(it.id), name: it.name || '', img: it.thumbnail_url || '', nc: !!it['nc?'], pb: !!it['pb?'],
-                    zones: [...new Set((ap?.swf_assets || []).map(a => a.zone?.label).filter(Boolean))], ord: (p - 1) * 50 + i, pr: undefined });
+                CS.items.push({ id, name: it.name || '', img: it.thumbnail_url || '', nc: !!it['nc?'], pb: !!it['pb?'], rar: it.rarity_index ?? null,
+                    zones: [...new Set((ap?.swf_assets || []).map(a => a.zone?.label).filter(Boolean))], ord: k * 1e6 + (p - 1) * 50 + i, pr: undefined });
             });
             CS.fetched++;
             csPump(gen);
@@ -27241,7 +29309,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // (pictures' colors, a color picked: the ones already read at once, the rest a few dozen at a time — a newer search drops the
         // older one's)
         function csPump(gen) {
-            if (!Picks.on(edColors)) return;   // (no color picked: no need)
+            if (!Picks.on(edColors) && CS.sort !== 'color') return;   // (no color picked, not in color order: no need)
             while (gen === CS.gen && CS.active < 32 && CS.next < CS.items.length) {
                 const r = CS.items[CS.next++];
                 if (r.pr !== undefined) continue;   // (read already)
@@ -27269,9 +29337,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (m) { CS.mode = m.dataset.m; GM_setValue('dti_cs_mode', CS.mode); CS.page = 1; return csPaint(); }
                 const pg = e.target.closest('.dti-cs-pg');
                 if (pg) { CS.page += +pg.dataset.d; csPaint(); p.scrollIntoView({ block: 'start' }); return; }
-                if (e.target.closest('.dti-cs-clear')) {   // (zones or colors picked: those cleared — else back to DTI's pages)
+                if (e.target.closest('.dti-cs-clear')) {   // (zones or colors picked: those cleared — else back to DTI's pages, A–Z)
                     if (filtersOn()) return csClearAll();
                     csAll = false; GM_setValue('dti_cs_all', false);
+                    if (CS.sort !== 'name') { CS.sort = 'name'; GM_setValue('dti_cs_sort', 'name'); sortPaint(); }
                     return csSync();
                 }
                 if (e.target.closest('.dti-cs-again')) { CS.memo.delete(CS.base); DTICache.del('cs:' + CS.base); return csStart(CS.base, true); }
@@ -27280,6 +29349,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (e.target.closest('.dti-cs-i')) {
                     const r = CS.items.find(x => x.id === t.dataset.id);
                     if (r) _showItemInfoPopup(r.id, r.name, r.img, e.target.closest('.dti-cs-i'));
+                    return;
+                }
+                if (e.target.closest('.dti-cs-x')) {   // (out of the custom altogether — a click on the tile only takes it off)
+                    if (!csBr.remove(t.dataset.id)) dtiToast('Couldn’t remove that — try again', { variant: 'error' });
+                    setTimeout(csPaintWorn, 120);
                     return;
                 }
                 if (e.target.closest('.dti-mine, .dti-note-btn, .dti-list-btn, .dti-copy-btn') || t.classList.contains('busy')) return;
@@ -27302,23 +29376,44 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             t.className = 'dti-cs-tile'; t.tabIndex = 0; t.setAttribute('role', 'button');
             t.dataset.id = r.id; t.dataset.dtiItem = r.id; t.title = r.name;
             t.innerHTML = `<img src="${noteEsc(r.img.replace(/^http:/, 'https:'))}" alt="" loading="lazy"><span class="n">${noteEsc(r.name)}</span>`
-                + `<span class="b">${r.nc ? '<i class="k nc">NC</i>' : r.pb ? '<i class="k pb">PB</i>' : '<i class="k">NP</i>'}${r.zones[0] ? `<i>${noteEsc(r.zones[0])}</i>` : ''}</span>`
-                + '<button type="button" class="dti-cs-i" title="Item info" aria-label="Item info">?</button>';
+                // (every zone it's in, A–Z as on DTI's tiles — shortened as its labels are, the whole name on hover)
+                + `<span class="b">${r.nc ? '<i class="k nc">NC</i>' : r.pb ? '<i class="k pb">PB</i>' : '<i class="k">NP</i>'}${[...r.zones].sort((a, b) => a.localeCompare(b)).map(z =>`<i title="${noteEsc(z)}">${noteEsc(zoneShort(z))}</i>`).join('')}</span>`
+                + '<button type="button" class="dti-cs-i" title="Item info" aria-label="Item info">?</button>'
+                + `<button type="button" class="dti-cs-x" title="Remove from the custom" aria-label="Remove from the custom">${ED_TRASH}</button>`;
             paintMineMark(t);   // (✓ / ♥: you own it, it's on your wishlist)
             CS.tiles.set(r.id, t);
             return t;
         }
-        function csPaintSoon() { if (!csPaintT) csPaintT = setTimeout(() => { csPaintT = 0; csPaint(); }, 180); }
+        function csPaintSoon() { if (!csPaintT) csPaintT = setTimeout(() => { csPaintT = 0; csPaint(); }, CS.items.length > 4000 ? 900 : 180); }
+        const csRank = r => r.pr === undefined ? [100, 0] : r.rk || (r.rk = ItemColors.rank(r.pr));   // (the Color order: not read yet, last)
         function csPaint() {
             if (!csOn()) return;
-            const p = csPanel, colorsOn = Picks.on(edColors), zonesOn = Picks.on(edZones), filtered = colorsOn || zonesOn;
-            const all = CS.items.length, loading = !!CS.base && (CS.fetched < CS.pages || !CS.pages || (colorsOn && CS.checked < all));
-            const matches = (filtered ? CS.items.filter(csMatch) : [...CS.items]).sort((a, b) => a.ord - b.ord);
+            const zoneRule = edZoneRule(), colorsOn = Picks.on(edColors), zonesOn = Picks.on(zoneRule), filtered = colorsOn || zonesOn;
+            csWornNow = openOn() ? new Set((csBr.get()?.state?.wornItemIds || []).map(String)) : null;
+            const p = csPanel, reading = colorsOn || CS.sort === 'color';
+            const all = CS.items.length, loading = !!CS.base && (CS.fetched < CS.pages || !CS.pages || (reading && CS.checked < all));
+            const everyAll = CS.base.startsWith('ALL|'), zoneAll = everyAll || CS.base.startsWith('Z|');
+            const where = everyAll ? 'everything this pet can wear' : zoneAll ? Picks.text({ inc: zoneRule.inc, exc: [], all: false }, z => z, 'zone') : 'this search';
+            const byName = (a, b) => a.name.localeCompare(b.name);
+            // (thousands still coming in for the Color order: A–Z till they're all read, then in color order once — re-sorting thousands as
+            // each comes in made the page heavy)
+            const settle = CS.sort === 'color' && loading && all > 4000;
+            const mineRank = r => { const m = mineOf(r.id); return m?.own ? 0 : m?.want ? 1 : 2; }, rareOf = r => r.nc ? -1 : r.rar ?? 0;
+            if (CS.sort === 'caps' && _lebronMap === null && !csCapAsk) { csCapAsk = true; _lookupLebron('', () => { csCapAsk = false; csPaintSoon(); }); }
+            const capMemo = new Map(), capOf = r => {
+                if (!capMemo.has(r.id)) { const c = capNums(_lebronMap?.[_normNcName(r.name)] || _valisarMap?.[r.name.trim().replace(/\s+/g, ' ').toLowerCase()]); capMemo.set(r.id, c ? (c[0] + c[1]) / 2 : null); }
+                return capMemo.get(r.id);
+            };
+            const ORDER = { za: (a, b) => byName(b, a), new: (a, b) => b.id - a.id, old: (a, b) => a.id - b.id, mine: (a, b) => mineRank(a) - mineRank(b) || byName(a, b),
+                zone: (a, b) => (a.zones[0] || '~').localeCompare(b.zones[0] || '~') || byName(a, b), rare: (a, b) => rareOf(b) - rareOf(a) || byName(a, b),
+                caps: (a, b) => (capOf(b) ?? -1) - (capOf(a) ?? -1) || byName(a, b) };
+            const matches = (filtered ? CS.items.filter(csMatch) : [...CS.items]).sort(CS.sort === 'color' && !settle ? (a, b) => { const x = csRank(a), y = csRank(b); return x[0] - y[0] || x[1] - y[1] || byName(a, b); }
+                : ORDER[CS.sort] || (zoneAll || settle ? byName : (a, b) => a.ord - b.ord));
             const expect = CS.fetched < CS.pages || !CS.pages ? Math.max(all, CS.pages * 50) : all;
-            const what = [colorsOn ? Picks.text(edColors, itemColorName, 'color') : '', zonesOn ? Picks.text(edZones, z => z, 'zone') : ''].filter(Boolean).join(' · ');
+            const what = [colorsOn ? Picks.text(edColors, itemColorName, 'color') : '', zonesOn || openOn() ? zoneWords(zoneRule) : ''].filter(Boolean).join(' · ');
             p.querySelector('.dti-cs-sw').innerHTML = colorsOn ? pickChips(edColors, 3) : zonesOn ? ZONE_ICO : LIST_ICO;
             const title = p.querySelector('.dti-cs-title');
-            title.textContent = filtered ? `${what} — every page` : 'Every page';
+            title.textContent = everyAll ? (what ? `${what} — every item` : 'Every item') : filtered ? `${what} — ${zoneAll ? 'every item' : 'every page'}` : 'Every page';
             title.title = filtered ? what : '';
             p.querySelector('.dti-cs-count').textContent = `${matches.length.toLocaleString()} ${loading ? 'so far' : filtered ? 'found' : `item${matches.length === 1 ? '' : 's'}`}`;
             const mode = filtered ? CS.mode : 'list';   // (a plain search: one list — its pages are DTI's own)
@@ -27326,16 +29421,18 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             seg.hidden = !filtered;
             seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === mode));
             const clr = p.querySelector('.dti-cs-clear');
-            clr.title = !filtered ? 'Back to DTI’s own pages' : csAll ? 'Clear the zone and color filters' : 'Back to DTI’s own pages (no zone or color filter)';
+            clr.title = zoneAll ? 'Clear the zone and color filters — back to the outfit’s items' : !filtered ? 'Back to DTI’s own pages' : csAll ? 'Clear the zone and color filters' : 'Back to DTI’s own pages (no zone or color filter)';
             clr.setAttribute('aria-label', clr.title);
             p.querySelector('.dti-cs-sub').textContent = loading
-                ? (!CS.pages ? 'Looking through the search…' : colorsOn ? `Reading colors… ${CS.checked.toLocaleString()} of ${expect.toLocaleString()} items` : `Looking through the search… ${CS.fetched} of ${CS.pages} pages`)
-                : `${filtered ? `${matches.length.toLocaleString()} of ${all.toLocaleString()}` : all.toLocaleString()} item${all === 1 ? '' : 's'} in this search`
+                ? (!CS.pages ? `Looking through ${zoneAll ? where : 'the search'}…` : CS.fetched < CS.pages || !reading ? `Looking through ${zoneAll ? where : 'the search'}… ${CS.fetched} of ${CS.pages} pages`
+                    : `Reading colors… ${CS.checked.toLocaleString()} of ${expect.toLocaleString()} items${everyAll ? ' (once — they’re kept)' : ''}${settle ? ' · in color order once they’re read' : ''}`)
+                : `${filtered ? `${matches.length.toLocaleString()} of ${all.toLocaleString()}` : all.toLocaleString()} item${all === 1 ? '' : 's'} ${everyAll ? 'this pet can wear' : `in ${where}`}`
+                    + (CS.sort !== 'name' ? ` · ${CS_SORTS.find(o => o[0] === CS.sort)?.[3] || ''}` : '')
                     + (CS.allPages > CS.pages ? ` · the first ${(CS.pages * 50).toLocaleString()} (narrow the search for the rest)` : '')
                     + (CS.failed ? ` · ${CS.failed} page${CS.failed === 1 ? '' : 's'} didn’t load` : '');
             const bar = p.querySelector('.dti-cs-bar');
             bar.hidden = !loading;
-            bar.firstElementChild.style.width = (colorsOn ? (expect ? Math.min(100, CS.checked / expect * 100) : 4) : (CS.pages ? CS.fetched / CS.pages * 100 : 4)) + '%';
+            bar.firstElementChild.style.width = (CS.fetched < CS.pages || !reading ? (CS.pages ? CS.fetched / CS.pages * 100 : 4) : (expect ? Math.min(100, CS.checked / expect * 100) : 4)) + '%';
             const pages = Math.max(1, Math.ceil(matches.length / CS_PER_PAGE));
             CS.page = Math.min(Math.max(1, CS.page), pages);
             const shown = (mode === 'pages' ? matches.slice((CS.page - 1) * CS_PER_PAGE, CS.page * CS_PER_PAGE) : matches).map(csTile);
@@ -27352,15 +29449,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             });
             const empty = p.querySelector('.dti-cs-empty');
             empty.hidden = matches.length > 0;
-            empty.textContent = loading ? 'Looking…' : filtered ? 'Nothing in this search matches these filters' : 'Nothing found';
+            empty.textContent = loading ? 'Looking…' : filtered ? `Nothing in ${where} matches these filters` : 'Nothing found';
             csPaintWorn();
         }
-        function csPaintWorn() {   // (what's on the pet now: its tiles ringed)
+        function csPaintWorn() {   // (what's on the pet now: its tiles ringed — and what's in the custom, worn or not: a trash)
             if (!csOn()) return;
-            const worn = new Set((csBr.get()?.state?.wornItemIds || []).map(String));
+            const st = csBr.get()?.state, worn = new Set((st?.wornItemIds || []).map(String)), kept = new Set((st?.closetedItemIds || []).map(String));
             csPanel.querySelectorAll('.dti-cs-tile').forEach(t => {
                 const on = worn.has(t.dataset.id);
                 t.classList.toggle('worn', on);
+                t.classList.toggle('in', on || kept.has(t.dataset.id));
                 t.setAttribute('aria-pressed', String(on));
             });
         }
@@ -27408,10 +29506,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 const A = (n, v) => ({ kind: 'Argument', name: N(n), value: V(v) });
                 const T = (t, nn) => nn ? { kind: 'NonNullType', type: { kind: 'NamedType', name: N(t) } } : { kind: 'NamedType', name: N(t) };
                 const D = (v, type) => ({ kind: 'VariableDefinition', variable: V(v), type, directives: [] });
-                const WEARABLE = { kind: 'Document', definitions: [{ kind: 'OperationDefinition', operation: 'query', name: N('DtiEnhanceWearable'),
+                // (items as they look on this pet: the zones they're in and the ones they keep others out of — names and pictures too, for
+                // the zones view)
+                const onPet = (name, more, zone) => ({ kind: 'Document', definitions: [{ kind: 'OperationDefinition', operation: 'query', name: N(name),
                     variableDefinitions: [D('itemIds', { kind: 'NonNullType', type: { kind: 'ListType', type: T('ID', true) } }), D('speciesId', T('ID', true)), D('colorId', T('ID', true)), D('altStyleId', T('ID'))],
-                    directives: [], selectionSet: { kind: 'SelectionSet', selections: [F('items', [F('id'), F('appearanceOn', [F('id'), F('layers', [F('id'), F('zone', [F('id')])]), F('restrictedZones', [F('id')])],
-                        [A('speciesId', 'speciesId'), A('colorId', 'colorId'), A('altStyleId', 'altStyleId')])], [A('ids', 'itemIds')])] } }] };
+                    directives: [], selectionSet: { kind: 'SelectionSet', selections: [F('items', [F('id'), ...more, F('appearanceOn', [F('id'), F('layers', [F('id'), F('zone', zone())]), F('restrictedZones', zone())],
+                        [A('speciesId', 'speciesId'), A('colorId', 'colorId'), A('altStyleId', 'altStyleId')])], [A('ids', 'itemIds')])] } }] });
+                const WEARABLE = onPet('DtiEnhanceWearable', [], () => [F('id')]);
+                const WORN_ZONES = onPet('DtiEnhanceWornZones', [F('name'), F('thumbnailUrl')], () => [F('id'), F('label')]);
                 const toolbar = () => {   // (DTI's search box component: its query and how it changes it — React keeps two copies of
                     // each component, the one on screen and the one drawn before, and a page element can point at either: the one whose
                     // query is what's in the box)
@@ -27449,6 +29551,23 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                             if (t) { t.onChange(Object.assign({}, t.query, box ? { value: box.value } : {}, { filterToItemKind: req.kind || null })); out = { ok: true }; }
                         }
                         else if (c && req.op === 'unwear') { c.dispatchToOutfit({ type: 'unwearItem', itemId: String(req.id) }); out = { ok: true }; }
+                        else if (c && req.op === 'remove') { c.dispatchToOutfit({ type: 'removeItem', itemId: String(req.id), itemIdsToReconsider: [] }); out = { ok: true }; }
+                        else if (c && req.op === 'zones') {   // (what's worn: each item's zones on this pet, and the ones it keeps others out of)
+                            const st = c.outfitState, client = window.__APOLLO_CLIENT__, ids = Array.from(st.wornItemIds || []).map(String);
+                            if (!ids.length) out = { items: [] };
+                            else {
+                                out = { pending: true };
+                                (async () => {
+                                    try {
+                                        if (!client) throw new Error('DTI\u2019s data client isn\u2019t there');
+                                        const r = await client.query({ query: WORN_ZONES, variables: { itemIds: ids, speciesId: st.speciesId, colorId: st.colorId, altStyleId: st.altStyleId == null ? null : st.altStyleId } });
+                                        const labels = zs => Array.from(new Set((zs || []).map(z => z && z.label).filter(Boolean)));
+                                        done(req.rid, { items: (r.data.items || []).filter(Boolean).map(i => ({ id: String(i.id), name: i.name || '', img: i.thumbnailUrl || '',
+                                            zones: labels(i.appearanceOn && i.appearanceOn.layers.map(l => l.zone)), restricts: labels(i.appearanceOn && i.appearanceOn.restrictedZones) })) });
+                                    } catch (e) { done(req.rid, { error: String((e && e.message) || e) }); }
+                                })();
+                            }
+                        }
                         else if (c && req.op === 'wear') {
                             const st = c.outfitState, client = window.__APOLLO_CLIENT__;
                             out = { pending: true };
@@ -27501,12 +29620,92 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             },
             setKind: k => ask({ op: 'kind', kind: k })?.ok === true,
             wear: id => askLater({ op: 'wear', id }), unwear: id => ask({ op: 'unwear', id })?.ok === true,
+            remove: id => ask({ op: 'remove', id })?.ok === true, zones: () => askLater({ op: 'zones' }),
         };
     }
     // Alternate outfits in one custom (user asked: several looks for one pet in one save, not a custom each): a strip under the
     // custom's name — click one to switch to it (its items, color, pose and style), double-click to rename, × to remove (Undo), + for
     // another (a copy of the look on screen, to change). The one on screen follows your changes — and DTI saves your customs as you
     // go, so it's the custom's own look too; the others' items stay in its closet. A custom is saved (and yours) before it can hold them.
+    // A new custom from one of your pets (user asked — like My Items' pet preview): its name typed, its picture shown, then DTI's own
+    // "load my pet" — its colors, pose and what it's wearing now, its name as the custom's. Only while the custom is new (not saved yet).
+    function mountFromPet(row) {
+        if (document.getElementById('dti-from-pet')) return;
+        const RECENT = 'dti_recent_pets';
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.id = 'dti-from-pet';
+        btn.title = 'Start this custom from one of your pets — its look, what it’s wearing and its name';
+        btn.setAttribute('aria-haspopup', 'dialog'); btn.setAttribute('aria-expanded', 'false');
+        btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><ellipse cx="3.6" cy="6.6" rx="1.55" ry="1.95"/><ellipse cx="6.4" cy="3.4" rx="1.55" ry="1.95"/><ellipse cx="9.8" cy="3.4" rx="1.55" ry="1.95"/><ellipse cx="12.5" cy="6.6" rx="1.55" ry="1.95"/><path d="M8.1 7.6c1.9 0 4.1 2.7 4.1 4.5 0 1.3-1 1.9-2.1 1.8-.8-.1-1.3-.5-2-.5s-1.3.4-2 .5c-1.1.1-2.1-.5-2.1-1.8 0-1.8 2.2-4.5 4.1-4.5z"/></svg><span>Load a pet</span>';
+        row.appendChild(btn);   // (last: the row's first three are placed by their position — its own order puts it by the name)
+        let pop = null, typeT = 0;
+        const close = () => { clearTimeout(typeT); pop?.remove(); pop = null; btn.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); };
+        const paint = () => { const isNew = location.pathname === '/outfits/new'; btn.hidden = !isNew; if (!isNew && pop) close(); };
+        paint(); setInterval(paint, 1000);   // (saved: it's no longer new)
+        const keep = (list, seen = new Set()) => list.map(n => String(n || '').trim()).filter(n => n && !seen.has(n.toLowerCase()) && seen.add(n.toLowerCase())).slice(0, 6);
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if (pop) return close();
+            const rec = keep([...(GM_getValue(RECENT, []) || []), GM_getValue('dti_preview_pet', '')]);   // (the pets loaded here, newest first — and My Items' preview pet)
+            pop = document.createElement('div');
+            pop.className = 'dti-fp-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Load a pet');
+            pop.innerHTML = `<div class="dti-fp-h">Start from your pet</div>
+                <div class="dti-fp-body"><div class="dti-fp-pic"><img alt="" hidden><span>Type its name</span></div>
+                <div class="dti-fp-side"><input type="text" placeholder="Pet name" aria-label="Pet name" spellcheck="false" autocomplete="off">
+                <button type="button" class="dti-fp-go" disabled>Use this pet</button>
+                <p class="dti-fp-note">Its colors, pose and what it’s wearing now — and its name</p></div></div>
+                ${rec.length ? `<div class="dti-fp-recent"><span>Recent</span>${rec.map(n => `<button type="button" data-n="${noteEsc(n)}">${noteEsc(n)}</button>`).join('')}</div>` : ''}`;
+            document.body.appendChild(pop);
+            const r = btn.getBoundingClientRect();
+            pop.style.top = Math.max(8, Math.min(r.bottom + 6, innerHeight - pop.offsetHeight - 8)) + 'px';
+            pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + 'px';
+            btn.classList.add('open'); btn.setAttribute('aria-expanded', 'true');
+            const inp = pop.querySelector('input'), img = pop.querySelector('img'), ph = pop.querySelector('.dti-fp-pic span'), go = pop.querySelector('.dti-fp-go'), note = pop.querySelector('.dti-fp-note');
+            const NOTE = note.textContent;
+            const show = name => {   // (its picture — Neopets' own, once you stop typing)
+                note.textContent = NOTE; note.classList.remove('err');
+                go.disabled = !name;
+                if (!name) { img.hidden = true; img.removeAttribute('src'); ph.hidden = false; ph.textContent = 'Type its name'; return; }
+                const url = `https://pets.neopets.com/cpn/${encodeURIComponent(name)}/1/4.png`;
+                if (img.getAttribute('src') === url) return;
+                if (img.hidden) { ph.hidden = false; ph.textContent = 'Looking…'; } else img.classList.add('dim');
+                img.onload = () => { if (img.getAttribute('src') !== url) return; img.classList.remove('dim'); img.hidden = false; ph.hidden = true; };
+                img.onerror = () => { if (img.getAttribute('src') !== url) return; img.classList.remove('dim'); img.hidden = true; ph.hidden = false; ph.textContent = 'No pet by that name'; };
+                img.src = url;
+            };
+            inp.addEventListener('input', () => { clearTimeout(typeT); go.disabled = !inp.value.trim(); typeT = setTimeout(() => show(inp.value.trim()), 450); });
+            inp.addEventListener('keydown', ev => { if (ev.key === 'Enter' && inp.value.trim()) { clearTimeout(typeT); show(inp.value.trim()); go.click(); } });
+            pop.querySelector('.dti-fp-recent')?.addEventListener('click', ev => {
+                const n = ev.target.closest('button[data-n]')?.dataset.n;
+                if (n) { inp.value = n; clearTimeout(typeT); show(n); inp.focus(); }
+            });
+            go.addEventListener('click', async () => {
+                const name = inp.value.trim();
+                if (!name || go.dataset.busy) return;
+                go.dataset.busy = '1'; go.disabled = true; go.textContent = 'Loading…';
+                try {
+                    // (DTI's own step: it looks the pet up on Neopets and answers with a new custom of it — a name it can't find: its home
+                    // page, saying so)
+                    const res = await fetch(`/pets/load?name=${encodeURIComponent(name)}`, { credentials: 'same-origin' });
+                    const u = new URL(res.url);
+                    if (res.ok && /^\/(outfits\/new|wardrobe)/.test(u.pathname)) {
+                        GM_setValue(RECENT, keep([name, ...(GM_getValue(RECENT, []) || [])]));
+                        location.assign(u.pathname + u.search);
+                        return;
+                    }
+                    const said = new DOMParser().parseFromString(await res.text(), 'text/html').querySelector('.flash, .alert, [class*="flash"]')?.textContent.trim();
+                    throw new Error(said || '');
+                } catch (err) {
+                    note.textContent = err?.message || 'Couldn’t load that pet — try again';
+                    note.classList.add('err');
+                    delete go.dataset.busy; go.disabled = false; go.textContent = 'Use this pet';
+                }
+            });
+            setTimeout(() => inp.focus(), 30);
+        });
+        document.addEventListener('mousedown', e => { if (pop && !pop.contains(e.target) && !btn.contains(e.target)) close(); }, true);
+        document.addEventListener('keydown', e => { if (e.key === 'Escape' && pop) close(); });
+    }
     function mountOutfitAlts(row) {
         if (document.getElementById('dti-alts')) return;
         const br = edBridge();
@@ -27515,6 +29714,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         row.appendChild(strip);
         const me = (GM_getValue('dti_user_slug', '') || '').match(/^\d+/)?.[0] || '';
         let outfitId = '', painted = null, pending = null;   // (pending: a switch on its way — the look it puts on screen, till it shows)
+        let showAll = !!GM_getValue('dti_alts_all', false);   // (every outfit's items in the list — else each outfit's own)
         const ids = a => [...(a || [])].map(String).sort().join();
         const sameLook = (s, a) => !!s && !!a && String(s.speciesId) === String(a.speciesId) && String(s.colorId) === String(a.colorId) && s.pose === a.pose
             && String(s.altStyleId ?? '') === String(a.altStyleId ?? '') && ids(s.wornItemIds) === ids(a.worn);
@@ -27532,6 +29732,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const cur = e.alts.find(a => a.id === e.on) || e.alts[0];
             if (!sameLook(s, cur) && e.alts.some(a => a !== cur && sameLook(s, a))) return false;
             const next = look(s, cur);
+            // (and what it has set aside: what it had, and anything new in the custom no other outfit has — not once worn, or gone)
+            const closet = new Set((s.closetedItemIds || []).map(String)), worn = new Set(next.worn), had = new Set(cur.kept || []);
+            const others = new Set(e.alts.filter(a => a !== cur).flatMap(a => [...a.worn, ...(a.kept || [])]));
+            next.kept = [...closet].filter(x => !worn.has(x) && (had.has(x) || !others.has(x))).sort();
             if (cur.id === e.on && JSON.stringify(next) === JSON.stringify(cur)) return false;
             Object.assign(cur, next); e.on = cur.id;
             return true;
@@ -27540,13 +29744,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const nextName = alts => { for (let n = 1; ; n++) if (!alts.some(a => a.name === `Outfit ${n}`)) return `Outfit ${n}`; };
         const paint = () => {
             const e = outfitId ? DTIAlts.of(outfitId) : null;
-            const key = JSON.stringify(e ? [e.on, e.alts.map(a => [a.id, a.name])] : outfitId);
+            const key = JSON.stringify(e ? [e.on, e.alts.map(a => [a.id, a.name]), showAll] : outfitId);
             if (key === painted || strip.querySelector('.dti-alt-in')) return;   // (not while a name is being typed)
             painted = key;
             strip.classList.toggle('on', !!e);
             strip.innerHTML = !outfitId ? ''
-                : !e ? `<button type="button" class="dti-alt-start" title="Keep alternate outfits in this one custom \u2014 each with its own items, color and pose">${ALT_ICO}Alternate outfits</button>`
-                : `<span class="dti-alts-lbl">${ALT_ICO}Outfits</span>${e.alts.map(a => `<span class="dti-alt${a.id === e.on ? ' cur' : ''}" data-alt="${noteEsc(a.id)}" role="button" tabindex="0" title="${a.id === e.on ? 'On screen' : 'Switch to it'} \u00b7 double-click to rename"><span class="n">${noteEsc(a.name)}</span><button type="button" class="x" data-del="${noteEsc(a.id)}" title="Remove it" aria-label="Remove ${noteEsc(a.name)}">${POP_ICO.close}</button></span>`).join('')}<button type="button" class="dti-alt-add" title="Another outfit \u2014 a copy of the one on screen, to change" aria-label="Another outfit">+</button>`;
+                : !e ? `<button type="button" class="dti-alt-start" aria-label="Alternate outfits" title="Keep alternate outfits in this one custom \u2014 each with its own items, color and pose">${ALT_ICO}Alternate outfits</button>`
+                : `<span class="dti-alts-lbl">${ALT_ICO}Outfits</span>${e.alts.map(a => `<span class="dti-alt${a.id === e.on ? ' cur' : ''}" data-alt="${noteEsc(a.id)}" role="button" tabindex="0" title="${a.id === e.on ? 'On screen' : 'Switch to it'} \u00b7 double-click to rename"><span class="n">${noteEsc(a.name)}</span><button type="button" class="x" data-del="${noteEsc(a.id)}" title="Remove it" aria-label="Remove ${noteEsc(a.name)}">${POP_ICO.close}</button></span>`).join('')}<button type="button" class="dti-alt-add" title="Another outfit \u2014 a copy of the one on screen, to change" aria-label="Another outfit">+</button>`
+                    + `<button type="button" class="dti-alt-all${showAll ? ' on' : ''}" aria-pressed="${showAll}" aria-label="All items" title="${showAll ? 'Every outfit\u2019s items \u2014 the others\u2019 dimmed and labeled (click: just this outfit\u2019s)' : 'Just this outfit\u2019s items (click: every outfit\u2019s)'}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>All items</button>`;
         };
         // the one on screen, kept up to date — and which one the custom is saved with
         const capture = () => {
@@ -27564,14 +29769,44 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const e = outfitId && DTIAlts.of(outfitId);
             if (e && keep(e, s)) DTIAlts.put(outfitId, e);
             paint();
+            itemsSoon();
         };
+        // Each outfit shows its own items (user asked) — what's set aside in the custom for the others is hidden from its list (never a
+        // worn one), unless All items is on: then every one, the others' dimmed and labeled with their outfit
+        const itemIdOf = ic => ic.dataset.dtiItem || ic.querySelector('[id*="-item-"][id$="-name"]')?.id.match(/item-(\d+)-name/)?.[1]
+            || ic.querySelector('a[href*="/items/"]')?.getAttribute('href')?.match(/\/items\/(\d+)/)?.[1] || '';
+        const paintItems = () => {
+            const root = document.getElementById('wardrobe-2020-root');
+            if (!root) return;
+            const e = outfitId && DTIAlts.of(outfitId), cur = e && e.alts.find(a => a.id === e.on);
+            const mine = new Set(cur ? [...cur.worn, ...(cur.kept || [])] : []), whose = new Map();   // (an item → the other outfits it's in)
+            if (cur) e.alts.forEach(a => { if (a !== cur) [...a.worn, ...(a.kept || [])].forEach(i => { if (!mine.has(i)) whose.set(i, [...(whose.get(i) || []), a.name]); }); });
+            const boxes = new Set();
+            // (the outfit's own list: its items have radios — or no label at all, when one doesn't fit the pet)
+            root.querySelectorAll('label:has(> input[type="radio"]) > .item-container, .dti-tile-grid > .item-container').forEach(ic => {
+                const t = ic.parentElement?.tagName === 'LABEL' ? ic.parentElement : ic, id = itemIdOf(ic);
+                const other = whose.has(id) && !t.querySelector('input:checked');
+                t.classList.toggle('dti-alt-hide', other && !showAll);
+                t.classList.toggle('dti-alt-other', other && showAll);
+                const tag = other && showAll ? whose.get(id).join(' \u00b7 ') : '';
+                if ((ic.dataset.dtiAltOf || '') !== tag) { if (tag) ic.dataset.dtiAltOf = tag; else delete ic.dataset.dtiAltOf; }
+                if (t.parentElement) boxes.add(t.parentElement);
+            });
+            boxes.forEach(b => {   // (a zone with none of its items shown: gone too)
+                const z = b.parentElement;
+                if (z && z !== root) z.classList.toggle('dti-alt-hide', ![...b.querySelectorAll(':scope > label, :scope > .item-container')].some(c => !c.classList.contains('dti-alt-hide')));
+            });
+        };
+        let itemsRaf = 0;
+        function itemsSoon() { if (!itemsRaf) itemsRaf = requestAnimationFrame(() => { itemsRaf = 0; paintItems(); }); }
+        new MutationObserver(itemsSoon).observe(document.getElementById('wardrobe-2020-root') || document.body, { childList: true, subtree: true });
         const tick = setInterval(capture, 1200);
         const switchTo = id => {
             const r = br.get(), s = r?.state, e = DTIAlts.of(outfitId);
             const to = e?.alts.find(a => a.id === id);
             if (!s || !to) return false;
             if (settled(s)) keep(e, s);   // (the outfit on screen as it is now — not while a switch is still drawing)
-            const worn = to.worn.map(String), closet = new Set([...s.wornItemIds, ...s.closetedItemIds, ...e.alts.flatMap(a => a.worn)].map(String));
+            const worn = to.worn.map(String), closet = new Set([...s.wornItemIds, ...s.closetedItemIds, ...e.alts.flatMap(a => [...a.worn, ...(a.kept || [])])].map(String));
             worn.forEach(x => closet.delete(x));   // (every outfit's items stay in the custom)
             if (!br.set({ id: s.id, name: s.name, speciesId: to.speciesId, colorId: to.colorId, pose: to.pose, appearanceId: to.appearanceId ?? null,
                 altStyleId: to.altStyleId ?? null, wornItemIds: worn, closetedItemIds: [...closet] })) {
@@ -27589,11 +29824,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (!s || s.speciesId == null) return;
             if (!outfitId) return dtiToast(s.id ? 'Only your own customs can hold alternate outfits' : 'Save this custom first \u2014 then it can hold alternate outfits', { variant: 'error' });
             const e = DTIAlts.of(outfitId) || { on: '', alts: [] };
-            if (!e.alts.length) {   // (the look on screen is the first)
-                const a = look(s, { id: newId(), name: 'Outfit 1' });
+            if (!e.alts.length) {   // (the look on screen is the first — with everything set aside in the custom)
+                const a = look(s, { id: newId(), name: 'Outfit 1', kept: (s.closetedItemIds || []).map(String).sort() });
                 e.alts.push(a); e.on = a.id;
             } else if (settled(s)) keep(e, s);
-            const a = look(s, { id: newId(), name: nextName(e.alts) });
+            const a = look(s, { id: newId(), name: nextName(e.alts), kept: [] });
             e.alts.push(a); e.on = a.id;
             DTIAlts.put(outfitId, e);
             paint();
@@ -27623,13 +29858,23 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (e.on === id && !switchTo(e.alts.find(x => x.id !== id).id)) return;   // (another one on screen first)
             const e2 = DTIAlts.of(outfitId);
             if (!e2) return;
-            const onNow = e2.on;
+            const onNow = e2.on, gone = e2.alts.find(x => x.id === id) || a;
             e2.alts = e2.alts.filter(x => x.id !== id);
             DTIAlts.put(outfitId, e2);   // (one left: a plain custom again)
-            painted = null; paint();
+            // (its own items — none of the others have them — go out of the custom with it, or they'd turn up in the one on screen; Undo
+            // brings the outfit back, and its items with it the next time it's put on)
+            const its = new Set([...gone.worn, ...(gone.kept || [])]);
+            e2.alts.forEach(x => [...x.worn, ...(x.kept || [])].forEach(i => its.delete(i)));
+            its.forEach(i => br.remove(i));
+            painted = null; paint(); itemsSoon();
             dtiToast(`${a.name} removed`, { duration: 5000, undo: () => { DTIAlts.put(outfitId, { ...before, on: onNow }); painted = null; paint(); } });
         };
         strip.addEventListener('click', ev => {
+            if (ev.target.closest('.dti-alt-all')) {
+                showAll = !showAll; GM_setValue('dti_alts_all', showAll);
+                painted = null; paint(); paintItems();
+                return;
+            }
             const x = ev.target.closest('[data-del]');
             if (x) { ev.stopPropagation(); return remove(x.dataset.del); }
             if (ev.target.closest('.dti-alt-add, .dti-alt-start')) return add();
@@ -27669,6 +29914,20 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #dti-alts .dti-alt-add:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
             #dti-alts .dti-alt-start { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 99px; border: 1px dashed var(--border); background: none; color: var(--text-muted); font-family: inherit; font-size: 11.5px; font-weight: 700; white-space: nowrap; cursor: pointer; }
             #dti-alts .dti-alt-start:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            #dti-alts .dti-alt-all { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 11px 0 9px; border-radius: 99px; border: 1px solid var(--border); background: none; color: var(--text-muted); font-family: inherit; font-size: 11.5px; font-weight: 700; white-space: nowrap; cursor: pointer; transition: border-color .12s, color .12s, background .12s; }
+            #dti-alts .dti-alt-all:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            #dti-alts .dti-alt-all.on { border-color: var(--accent); color: var(--accent-text, var(--accent)); background: var(--accent-glow); }
+            /* (each outfit's own items: the others' hidden — or, with All items on, dimmed and labeled with their outfit) */
+            #wardrobe-2020-root .dti-alt-hide { display: none !important; }
+            #wardrobe-2020-root .dti-alt-other { opacity: .55; transition: opacity .12s; }
+            #wardrobe-2020-root .dti-alt-other:hover { opacity: 1; }
+            #wardrobe-2020-root .item-container[data-dti-alt-of]::after {
+                content: attr(data-dti-alt-of); position: absolute; z-index: 3; right: 8px; bottom: 6px; max-width: calc(100% - 16px); box-sizing: border-box;
+                padding: 1px 7px; border-radius: 99px; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted);
+                font-size: 9.5px; font-weight: 800; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; transition: opacity .12s;
+            }
+            #wardrobe-2020-root.dti-tile-mode .item-container[data-dti-alt-of]::after { top: calc(var(--dti-th, 114px) - 22px); bottom: auto; right: 50%; transform: translateX(50%); }
+            #wardrobe-2020-root .item-container[data-dti-alt-of]:hover::after { opacity: 0; }
             #dti-alts .dti-alt-in { height: 28px; width: 130px; padding: 0 12px; box-sizing: border-box; border-radius: 99px; border: 1.5px solid var(--accent); background: var(--surface); color: var(--text); font-family: inherit; font-size: 12.5px; font-weight: 700; outline: none; }
             /* ── Search + Filter row ────────────────────────────────────────── */
             #dti-search-row {
@@ -28229,6 +30488,26 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #wardrobe-2020-root .dti-ed-remove-btn:hover { background: var(--danger, #f85149) !important; }
             #wardrobe-2020-root .dti-ed-info-btn { top: 4px; left: 4px; font-size: 11px; font-weight: 700; }
             #wardrobe-2020-root .dti-ed-info-btn:hover { background: var(--accent, #7c3aed) !important; }
+            #wardrobe-2020-root .item-container :is(.dti-ed-remove-btn, .dti-ed-info-btn) {
+                background: var(--surface) !important; color: var(--text) !important;
+                box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 28%, transparent), 0 1px 5px rgba(0,0,0,.4) !important;
+            }
+            #wardrobe-2020-root .item-container .dti-ed-remove-btn:hover { background: var(--danger, #f85149) !important; color: #fff !important; }
+            #wardrobe-2020-root .item-container .dti-ed-info-btn:hover { background: var(--accent) !important; color: var(--accent-fg, #fff) !important; }
+            #wardrobe-2020-root .item-container :is(.dti-note-btn, .dti-list-btn, .dti-copy-btn) {
+                background: var(--surface); color: var(--text);
+                box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 28%, transparent), 0 1px 5px rgba(0,0,0,.4);
+            }
+            #wardrobe-2020-root .item-container :is(.dti-note-btn, .dti-list-btn, .dti-copy-btn):hover,
+            #wardrobe-2020-root .item-container .dti-list-btn.open { background: var(--accent); color: var(--accent-fg, #fff); }
+            #wardrobe-2020-root .item-container .dti-copy-btn.done { background: var(--success, #16a34a); color: #fff; }
+            /* The trash: only on what's in the custom (DTI's own Remove is there) — on a worn search result always, to take it out of the
+               custom in one click (user asked) */
+            #wardrobe-2020-root .item-container:not(:has(button[aria-label="Remove"])) .dti-ed-remove-btn { display: none !important; }
+            #wardrobe-2020-root label:has(> input[type="checkbox"]:checked) .dti-ed-remove-btn { opacity: 1 !important; pointer-events: auto !important; }
+            /* Tile view: the hover buttons on the picture's corners, the words under it left clear — the pencil up top with no trash above it */
+            #wardrobe-2020-root.dti-tile-mode label > input + .item-container :is(.dti-copy-btn, .dti-list-btn) { top: calc(var(--dti-th, 114px) - 24px); bottom: auto; }
+            #wardrobe-2020-root.dti-tile-mode .item-container:not(:has(button[aria-label="Remove"])) .dti-note-btn { top: 4px; }
 
             /* ── Shopping list button — recolor from Chakra purple to accent */
             #wardrobe-2020-root button[data-dti-shop="1"] {
@@ -28598,11 +30877,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-lay-btn.open { background: var(--accent-glow) !important; color: var(--accent-text, var(--accent)) !important; }
             /* ── Layout menu (beside list / tile) ── */
             .dti-lay-pop {
-                position: fixed; z-index: 10050; width: 240px; box-sizing: border-box; padding: 10px 12px 12px;
+                position: fixed; z-index: 10050; width: 256px; box-sizing: border-box; padding: 10px 12px 12px;
                 background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
                 box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,.25)); color: var(--text); font-size: 12px;
-                display: flex; flex-direction: column; gap: 11px;
+                display: flex; flex-direction: column; gap: 11px; max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain;
             }
+            .dti-lay-sub { margin-top: 2px; padding-top: 9px; border-top: 1px solid var(--border); font-size: 10.5px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--text-muted); }
             .dti-lay-h { display: flex; align-items: center; justify-content: space-between; font-size: 10.5px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--text-muted); }
             .dti-lay-reset { background: none; border: none; padding: 0; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--accent-text, var(--accent)); }
             .dti-lay-reset:hover { text-decoration: underline; }
@@ -28610,11 +30890,93 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-lay-row > span { display: flex; justify-content: space-between; font-weight: 600; }
             .dti-lay-row > span b { font-weight: 700; color: var(--accent-text, var(--accent)); }
             .dti-lay-seg { display: flex; gap: 2px; padding: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
-            .dti-lay-seg button { flex: 1; padding: 4px 0; border: none; border-radius: 6px; background: transparent; color: var(--text-muted); font: inherit; font-weight: 700; cursor: pointer; }
+            .dti-lay-seg button { flex: 1 1 0; min-width: 0; padding: 4px 0; border: none; border-radius: 6px; background: transparent; color: var(--text-muted); font: inherit; font-weight: 700; cursor: pointer; }
             .dti-lay-seg button:hover:not(.on) { color: var(--text); background: var(--surface); }
             .dti-lay-seg button.on { background: var(--accent); color: var(--accent-fg, #fff); }
             .dti-lay-row input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); cursor: pointer; }
             .dti-lay-fit { font-size: 10.5px; color: var(--text-muted); margin-top: -2px; }
+            .dti-lay-row.off > span b { color: var(--text-muted); font-weight: 600; }
+            .dti-lay-row input[type="range"]:disabled { opacity: .35; cursor: default; }
+            .dti-lay-seg[data-k="items"] button { flex: 1 1 auto; padding: 4px 3px; }
+            /* ── Zones on the pet (beside list / tile) ── */
+            #dti-wz { display: flex; flex-shrink: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+            .dti-wz-btn.open { background: var(--accent-glow) !important; color: var(--accent-text, var(--accent)) !important; }
+            .dti-wz-pop {
+                position: fixed; z-index: 10050; width: 292px; box-sizing: border-box; padding: 12px;
+                background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+                box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,.25)); color: var(--text); font-size: 12px;
+                display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain;
+            }
+            .dti-wz-h { font-size: 10.5px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--text-muted); }
+            .dti-wz-body { display: flex; flex-direction: column; gap: 10px; }
+            .dti-wz-meter { display: flex; gap: 2px; height: 6px; }
+            .dti-wz-meter i { display: block; min-width: 6px; border-radius: 99px; }
+            .dti-wz-meter .w, .dti-wz-legend .w { background: var(--accent); }
+            .dti-wz-meter .b, .dti-wz-legend .b { background: repeating-linear-gradient(135deg, var(--accent) 0 2px, transparent 2px 4px); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+            .dti-wz-meter .o, .dti-wz-legend .o { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); }
+            .dti-wz-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: -3px; font-size: 11px; font-weight: 600; color: var(--text-muted); }
+            .dti-wz-legend span { display: inline-flex; align-items: center; gap: 5px; }
+            .dti-wz-legend i { display: block; width: 9px; height: 9px; border-radius: 3px; }
+            .dti-wz-legend b { color: var(--text); font-weight: 800; }
+            .dti-wz-sec { margin-top: 2px; font-size: 10px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--text-muted); }
+            .dti-wz-sec small { margin-left: 7px; font-size: 10.5px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+            .dti-wz-list { display: flex; flex-direction: column; gap: 1px; margin: -6px -6px 0; }
+            .dti-wz-row { display: grid; grid-template-columns: 34px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 9px; align-items: center; width: 100%; box-sizing: border-box; padding: 5px 6px; border: none; border-radius: 9px; background: none; font: inherit; color: inherit; text-align: left; }
+            button.dti-wz-row { cursor: pointer; }
+            button.dti-wz-row:hover { background: var(--surface-2); }
+            .dti-wz-row img { grid-row: 1 / 3; width: 34px; height: 34px; object-fit: contain; border-radius: 8px; background: #fff; border: 1px solid var(--border); box-sizing: border-box; }
+            .dti-wz-row b { align-self: end; font-size: 12px; font-weight: 700; color: var(--text); }
+            .dti-wz-row span { align-self: start; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-muted); }
+            .dti-wz-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: -4px; }
+            .dti-wz-pill { padding: 3px 9px; border: 1px solid var(--border); border-radius: 99px; background: var(--surface); font: inherit; font-size: 11px; font-weight: 600; color: var(--text); cursor: pointer; transition: border-color .12s, color .12s, background .12s; }
+            .dti-wz-pill:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); background: var(--accent-glow); }
+            .dti-wz-pill.b { border-style: dashed; color: var(--text-muted); }
+            .dti-wz-note { font-size: 11.5px; line-height: 1.4; color: var(--text-muted); }
+            /* ── Sort (beside Color) ── */
+            .dti-sort-pop { width: 248px; }
+            .dti-sort-list { display: flex; flex-direction: column; gap: 1px; margin: 0 -4px; }
+            .dti-sort-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 6px 10px 6px 26px; border: none; border-radius: 8px; background: none; font: inherit; text-align: left; color: var(--text); cursor: pointer; position: relative; }
+            .dti-sort-opt:hover { background: var(--surface-2); }
+            .dti-sort-opt b { font-size: 12.5px; font-weight: 700; }
+            .dti-sort-opt span { font-size: 11px; color: var(--text-muted); }
+            .dti-sort-opt.on b { color: var(--accent-text, var(--accent)); }
+            .dti-sort-opt.on::before { content: ''; position: absolute; left: 10px; top: 11px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+            .dti-wz-only { width: 100%; padding: 7px 10px; border: 1px dashed color-mix(in srgb, var(--accent) 50%, var(--border)); border-radius: 9px; background: none; font: inherit; font-size: 11.5px; font-weight: 700; color: var(--accent-text, var(--accent)); cursor: pointer; transition: background .12s, border-color .12s; }
+            .dti-wz-only:hover, .dti-wz-only.on { border-style: solid; border-color: var(--accent); background: var(--accent-glow); }
+            /* ── A new custom: from one of your pets (by its name) ── */
+            #wardrobe-2020-root #dti-from-pet {
+                order: 1; align-self: center; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+                height: 30px !important; min-height: 0 !important; min-width: 0 !important; margin: 0 !important; padding: 0 12px 0 10px !important;
+                border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border)) !important; border-radius: 99px !important; background: transparent !important;
+                color: var(--accent-text, var(--accent)) !important; font-size: 12px !important; font-weight: 700 !important; line-height: 1 !important; white-space: nowrap; cursor: pointer;
+                transition: background .12s, border-color .12s !important;
+            }
+            #wardrobe-2020-root #dti-from-pet:hover, #wardrobe-2020-root #dti-from-pet.open { border-style: solid !important; border-color: var(--accent) !important; background: var(--accent-glow) !important; }
+            #wardrobe-2020-root #dti-from-pet[hidden] { display: none !important; }
+            .dti-fp-pop {
+                position: fixed; z-index: 10050; width: 300px; box-sizing: border-box; padding: 12px;
+                background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+                box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,.25)); color: var(--text); font-size: 12px;
+                display: flex; flex-direction: column; gap: 10px;
+            }
+            .dti-fp-h { font-size: 10.5px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--text-muted); }
+            .dti-fp-body { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 12px; align-items: start; }
+            .dti-fp-pic { width: 100px; height: 100px; box-sizing: border-box; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); display: grid; place-items: center; overflow: hidden; }
+            .dti-fp-pic img { width: 100%; height: 100%; object-fit: contain; transition: opacity .15s; }
+            .dti-fp-pic img.dim { opacity: .4; }
+            .dti-fp-pic img[hidden], .dti-fp-pic span[hidden] { display: none; }
+            .dti-fp-pic span { padding: 8px; font-size: 11px; line-height: 1.35; color: var(--text-muted); text-align: center; }
+            .dti-fp-side { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+            .dti-fp-side input { width: 100%; height: 32px; box-sizing: border-box; padding: 0 10px; border: 1.5px solid var(--border); border-radius: 9px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 13px; font-weight: 600; outline: none; }
+            .dti-fp-side input:focus { border-color: var(--accent); }
+            .dti-fp-go { height: 32px; border: none; border-radius: 9px; background: var(--accent); color: var(--accent-fg, #fff); font: inherit; font-size: 12.5px; font-weight: 800; cursor: pointer; transition: opacity .12s; }
+            .dti-fp-go:disabled { opacity: .45; cursor: default; }
+            .dti-fp-note { margin: 0; font-size: 11px; line-height: 1.4; color: var(--text-muted); }
+            .dti-fp-note.err { color: var(--danger, #e5484d); font-weight: 600; }
+            .dti-fp-recent { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-top: 10px; border-top: 1px solid var(--border); }
+            .dti-fp-recent > span { margin-right: 4px; font-size: 10px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--text-muted); }
+            .dti-fp-recent button { padding: 3px 10px; border: 1px solid var(--border); border-radius: 99px; background: var(--surface); color: var(--text); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+            .dti-fp-recent button:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
             /* NC / NP switch (search results) — under both ids: the editor's own button styles would win otherwise */
             #dti-kind { display: flex; gap: 2px; flex-shrink: 0; padding: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
             #wardrobe-2020-root #dti-kind button { height: auto !important; min-height: 0 !important; min-width: 0 !important; padding: 3px 9px !important; border: none !important; border-radius: 6px !important;
@@ -28628,15 +30990,21 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             /* NC / NP labels hidden (the layout menu) */
             #wardrobe-2020-root.dti-hide-kind :is(.dti-kind-badge, .dti-cs-tile .b .k) { display: none !important; }
             #dti-cs { padding: 10px 10px 18px; }
-            .dti-cs-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 9px; }
+            .dti-cs-head { display: flex; align-items: center; gap: 6px 9px; }   /* (one line: a long title is cut short) */
+            .dti-cs-head > :not(.dti-cs-title) { flex: none; }
             .dti-cs-sw { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--text-sub); }
             .dti-cs-sw .dti-cpk-chip { width: 14px; height: 14px; border-radius: 50%; }
             .dti-cs-sw .dti-cpk-chip + .dti-cpk-chip { margin-left: -4px; outline: 1.5px solid var(--surface); }
-            .dti-cs-title { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 800; color: var(--text); }
-            .dti-cs-count { font-size: 12px; font-weight: 700; color: var(--accent-text, var(--accent)); }
+            .dti-cs-title { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 800; color: var(--text); }
+            .dti-cs-count { white-space: nowrap; font-size: 12px; font-weight: 700; color: var(--accent-text, var(--accent)); }
             .dti-cs-mode { margin-left: auto; display: flex; gap: 2px; padding: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
             .dti-cs-mode[hidden] { display: none; }
-            .dti-cs-mode[hidden] + .dti-cs-again { margin-left: auto; }
+            .dti-cs-sort { margin-left: auto; display: flex; gap: 2px; padding: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
+            .dti-cs-sort + .dti-cs-mode { margin-left: 0; }
+            #wardrobe-2020-root #dti-cs .dti-cs-sort button { height: auto !important; min-height: 0 !important; min-width: 0 !important; padding: 3px 10px !important; border: none !important; border-radius: 6px !important; background: transparent !important; color: var(--text-muted) !important; font-size: 11.5px !important; font-weight: 700 !important; line-height: 1.5 !important; cursor: pointer; }
+            #wardrobe-2020-root #dti-cs .dti-cs-sort button:hover:not(.on) { color: var(--text) !important; background: var(--surface) !important; }
+            #wardrobe-2020-root #dti-cs .dti-cs-sort button.on { background: var(--accent) !important; color: var(--accent-fg, #fff) !important; }
+            .dti-cs-mode[hidden] + .dti-cs-again { margin-left: auto; }   /* (no pages switch: the buttons still at the right) */
             /* A plain search: every page in one list — a button by DTI's own pages */
             #wardrobe-2020-root #dti-cs-all { display: inline-flex; align-items: center; gap: 5px; height: 28px !important; min-height: 0 !important; min-width: 0 !important; margin: 0 0 0 10px; padding: 0 10px !important; border: 1px solid var(--border) !important; border-radius: 8px !important; background: var(--surface) !important; color: var(--text-muted) !important; font-size: 12px !important; font-weight: 700 !important; line-height: 1 !important; white-space: nowrap; cursor: pointer; }
             #wardrobe-2020-root #dti-cs-all:hover { border-color: var(--accent) !important; color: var(--accent-text, var(--accent)) !important; }
@@ -28652,27 +31020,40 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-cs-bar { height: 3px; margin: -3px 0 10px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
             .dti-cs-bar[hidden] { display: none; }
             .dti-cs-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
-            .dti-cs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(122px * var(--dti-tz, 1)), 1fr)); gap: 8px; }
+            .dti-cs-grid { display: grid; grid-template-columns: var(--dti-csc, repeat(auto-fill, minmax(134px, 1fr))); gap: 8px; }
             .dti-cs-tile {
-                position: relative; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 6px 7px;
+                position: relative; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: calc(4px * var(--dti-cz, 1));
+                padding: calc(9px * var(--dti-cz, 1)) 6px calc(7px * var(--dti-cz, 1)); container-type: inline-size;
+                content-visibility: auto; contain-intrinsic-size: auto 190px;   /* (off screen: not drawn — every item is thousands) */
                 border: 1px solid var(--border); border-radius: 11px; background: var(--surface); cursor: pointer; text-align: center;
                 transition: border-color .12s, box-shadow .12s, background .12s; outline: none;
             }
             .dti-cs-tile:is(:hover, :focus-visible) { border-color: var(--accent); box-shadow: 0 2px 10px var(--accent-glow); }
             .dti-cs-tile.worn { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent), 0 0 12px var(--accent-glow); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
             .dti-cs-tile.busy { opacity: .55; pointer-events: none; }
-            .dti-cs-tile img { width: 80px; height: 80px; object-fit: contain; border-radius: 8px; }
-            .dti-cs-tile .n { width: 100%; font-size: 11px; font-weight: 600; line-height: 1.25; color: var(--text); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-            .dti-cs-tile .b { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 6px; font-size: 8px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; color: var(--text-muted); }
+            .dti-cs-tile img { width: min(100cqi, calc(80cqi * var(--dti-pic, 1))); height: auto; aspect-ratio: 1; object-fit: contain; border-radius: 8px; }
+            .dti-cs-tile .n { width: 100%; font-size: calc(11px * var(--dti-cz, 1) * var(--dti-nm, 1)); font-weight: 600; line-height: 1.25; color: var(--text); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+            .dti-cs-tile .b { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 6px; font-size: calc(8px * var(--dti-cz, 1) * var(--dti-lb, 1)); font-weight: 800; letter-spacing: .3px; text-transform: uppercase; color: var(--text-muted); }
             .dti-cs-tile .b i { font-style: normal; }
             .dti-cs-tile .b .nc { color: var(--nc, #d97706); }
             #dti-cs .dti-cs-i {
                 position: absolute; top: 5px; right: 5px; width: 20px !important; height: 20px !important; min-width: 0 !important; padding: 0 !important; display: grid; place-items: center;
-                border-radius: 50% !important; border: 1px solid var(--border) !important; background: var(--surface) !important; color: var(--text-muted) !important;
+                border-radius: 50% !important; border: none !important; background: var(--surface) !important; color: var(--text) !important;
+                box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 28%, transparent), 0 1px 5px rgba(0,0,0,.4) !important;
                 font-size: 11px !important; font-weight: 800 !important; line-height: 1 !important; cursor: pointer; opacity: 0; transition: opacity .12s !important;
             }
             #dti-cs .dti-cs-tile:is(:hover, :focus-within) .dti-cs-i { opacity: 1; }
-            #dti-cs .dti-cs-i:hover { border-color: var(--accent) !important; color: var(--accent-text, var(--accent)) !important; }
+            #dti-cs .dti-cs-i:hover { background: var(--accent) !important; color: var(--accent-fg, #fff) !important; }
+            /* (in the custom — worn or not: a trash to take it out; on a worn one always, else on hover — the ? under it then) */
+            #dti-cs .dti-cs-x {
+                position: absolute; top: 5px; right: 5px; width: 20px !important; height: 20px !important; min-width: 0 !important; padding: 0 !important; display: none; place-items: center;
+                border-radius: 50% !important; border: none !important; background: var(--surface) !important; color: var(--text) !important; cursor: pointer; opacity: 0; transition: opacity .12s, background .12s !important;
+                box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 28%, transparent), 0 1px 5px rgba(0,0,0,.4) !important;
+            }
+            #dti-cs .dti-cs-tile.in .dti-cs-x { display: grid; }
+            #dti-cs .dti-cs-tile.in:is(:hover, :focus-within) .dti-cs-x, #dti-cs .dti-cs-tile.worn .dti-cs-x { opacity: 1; }
+            #dti-cs .dti-cs-x:hover { background: var(--danger, #f85149) !important; color: #fff !important; }
+            #dti-cs .dti-cs-tile.in .dti-cs-i { top: 29px; }
             .dti-cs-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 10px 0; font-size: 12px; font-weight: 600; color: var(--text-muted); }
             .dti-cs-pager[hidden], .dti-cs-empty[hidden] { display: none; }
             #wardrobe-2020-root #dti-cs .dti-cs-pager button { height: auto !important; min-height: 0 !important; min-width: 0 !important; padding: 5px 12px !important; border: 1px solid var(--border) !important; border-radius: 9px !important; background: var(--surface) !important; color: var(--text) !important; font-size: 12px !important; font-weight: 700 !important; line-height: 1.4 !important; cursor: pointer; }
@@ -28693,9 +31074,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             /* .dti-tile-grid: the box holding a zone's items (stamped via JS) */
             #wardrobe-2020-root.dti-tile-mode .dti-tile-grid {
-                display: grid !important; grid-template-columns: repeat(var(--dti-ipr, auto-fill), calc(134px * var(--dti-tz, 1))) !important;
+                display: grid !important; grid-template-columns: repeat(var(--dti-ipr, auto-fill), calc(var(--dti-tw, 134px) * var(--dti-tz, 1))) !important;
                 gap: 7px !important; padding: 10px !important; align-content: start !important;
-                align-items: start !important;
+                align-items: stretch !important;   /* (a row's tiles: one height — the tallest's) */
             }
             /* Zone headings inside grid → full width, same compact style */
             #wardrobe-2020-root.dti-tile-mode .dti-tile-grid > h2,
@@ -28714,8 +31095,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             /* Label = tile card */
             #wardrobe-2020-root.dti-tile-mode label:has(> .item-container) {
                 zoom: var(--dti-tz, 1);   /* (tile size: everything on the tile, smaller or bigger together) */
-                width: 134px !important; min-width: 134px !important; max-width: 134px !important;
-                height: 182px !important; min-height: 182px !important; max-height: 182px !important;
+                width: var(--dti-tw, 134px) !important; min-width: var(--dti-tw, 134px) !important; max-width: var(--dti-tw, 134px) !important;
+                /* (as tall as the usual tile at least — taller when its labels need another row: every zone shown, none cut short) */
+                height: auto !important; min-height: var(--dti-tt, 182px) !important; max-height: none !important;
+                display: flex !important; flex-direction: column !important;
                 padding: 0 !important; overflow: hidden !important; flex-shrink: 0 !important;
                 border-radius: 10px !important; border: 1px solid var(--border) !important;
                 background: var(--surface) !important;
@@ -28732,70 +31115,88 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 box-shadow: inset 0 3px 0 var(--accent), 0 0 14px var(--accent-glow) !important;
                 background: color-mix(in srgb, var(--accent) 12%, var(--surface)) !important;
             }
+            /* (the tile's insides fill it — the same whether its border is the thin one or the worn one: the picture centered either way) */
             #wardrobe-2020-root.dti-tile-mode .item-container {
-                width: 134px !important; height: 182px !important;
-                padding: 0 !important; overflow: hidden !important; flex-shrink: 0 !important;
+                width: auto !important; align-self: stretch !important; height: auto !important; min-height: calc(var(--dti-tt, 182px) - 4px) !important; margin: 0 !important;
+                padding: 0 !important; overflow: hidden !important; flex: 1 0 auto !important;
                 flex-direction: column !important; align-items: stretch !important;
             }
             /* An item that doesn't fit the pet (no label around it): the item is the tile — dimmed, as it can't be worn */
             #wardrobe-2020-root.dti-tile-mode .dti-tile-grid > .item-container {
                 zoom: var(--dti-tz, 1); border-radius: 10px !important; border: 1px solid var(--border) !important;
-                background: var(--surface) !important; opacity: .7;
+                background: var(--surface) !important; opacity: .7; width: var(--dti-tw, 134px) !important; min-height: var(--dti-tt, 182px) !important;
             }
             #wardrobe-2020-root.dti-tile-mode .item-container > :first-child {
-                width: 134px !important; height: 182px !important; overflow: hidden !important; flex-shrink: 0 !important;
+                display: flex !important; flex-direction: column !important; width: 100% !important; height: auto !important; flex: 1 0 auto !important; overflow: hidden !important;
             }
             #wardrobe-2020-root.dti-tile-mode .item-container > :first-child > :first-child {
-                flex-direction: column !important; width: 134px !important;
-                height: 182px !important; overflow: hidden !important; align-items: stretch !important;
+                flex-direction: column !important; width: 100% !important;
+                height: auto !important; flex: 1 0 auto !important; overflow: hidden !important; align-items: stretch !important;
             }
             #wardrobe-2020-root.dti-tile-mode .item-container > :last-child:not(:first-child):not(.dti-ed-remove-btn):not(.dti-ed-info-btn):not(.dti-note-btn):not(.dti-list-btn) { display: none !important; }
+            /* (DTI's own buttons' box — they're hidden, ours are over the tile: gone, or it'd add a strip under the words) */
+            #wardrobe-2020-root.dti-tile-mode .item-container > :not(:first-child):is(:has(> a[aria-label="More info"]), :has(> button[aria-label="Remove"])) { display: none !important; }
 
-            /* Thumbnail: top 114px */
+            /* Thumbnail: the top of the tile (114px usually — the Picture setting) */
             #wardrobe-2020-root.dti-tile-mode .item-container > :first-child > :first-child > :first-child {
-                width: 134px !important; height: 114px !important; flex-shrink: 0 !important;
+                width: 100% !important; height: var(--dti-th, 114px) !important; flex-shrink: 0 !important;
                 display: flex !important; align-items: center !important; justify-content: center !important;
                 background: transparent !important; overflow: hidden !important;
             }
             #wardrobe-2020-root.dti-tile-mode .item-container > :first-child > :first-child > :first-child > *,
             #wardrobe-2020-root.dti-tile-mode .item-container > :first-child > :first-child > :first-child > * > *,
             #wardrobe-2020-root.dti-tile-mode .item-container > :first-child > :first-child > :first-child > * > * > * {
-                display: flex !important; align-items: center !important; justify-content: center !important;
-                width: 108px !important; height: 108px !important; flex-shrink: 0 !important;
+                /* (centered — DTI's list view gives the picture a margin on its right: none here) */
+                display: flex !important; align-items: center !important; justify-content: center !important; margin: 0 !important;
+                width: calc(var(--dti-th, 114px) - 6px) !important; height: calc(var(--dti-th, 114px) - 6px) !important; flex-shrink: 0 !important;
             }
             #wardrobe-2020-root.dti-tile-mode .item-container img {
-                width: 104px !important; height: 104px !important;
+                width: calc(var(--dti-th, 114px) - 10px) !important; height: calc(var(--dti-th, 114px) - 10px) !important;
                 object-fit: contain !important; display: block !important; flex-shrink: 0 !important;
                 margin: auto !important;
             }
 
-            /* Text area: bottom 68px */
+            /* Text area: the bottom of the tile (as tall as the words shown need) */
             #wardrobe-2020-root.dti-tile-mode .item-container > :first-child > :first-child > :last-child:not(:only-child) {
                 display: flex !important; flex-direction: column !important;
-                width: 134px !important; flex-shrink: 0 !important;
-                height: 68px !important; overflow: hidden !important;
+                width: 100% !important; flex: 1 0 auto !important;
+                height: auto !important; min-height: var(--dti-tx, 68px) !important; overflow: hidden !important;
                 padding: 4px 6px !important; gap: 2px !important;
                 border-top: 1px solid var(--border) !important; background: var(--surface) !important;
                 align-items: flex-start !important; justify-content: flex-start !important;
             }
-            /* Item name: 4-line clamp */
+            /* Item name: up to 3 lines (its size: the Item names setting) */
             #wardrobe-2020-root.dti-tile-mode .item-container > :first-child > :first-child > :last-child:not(:only-child) > :first-child {
-                font-size: 10px !important; font-weight: 600 !important; line-height: 1.3 !important;
-                color: var(--text) !important; overflow: hidden !important;
-                display: -webkit-box !important; -webkit-line-clamp: 4 !important;
+                font-size: calc(10px * var(--dti-nm, 1)) !important; font-weight: 600 !important; line-height: 1.3 !important;
+                color: var(--text) !important; overflow: hidden !important; flex-shrink: 0 !important; max-height: 3.9em !important;
+                display: -webkit-box !important; -webkit-line-clamp: 3 !important;
                 -webkit-box-orient: vertical !important; white-space: normal !important;
                 max-width: 100% !important;
             }
-            /* Badge row: compact pills */
+            /* Labels: compact pills, every one shown — onto another row when they don't fit one (user asked: no zone cut short) */
             #wardrobe-2020-root.dti-tile-mode .item-container > :first-child > :first-child > :last-child:not(:only-child) > :not(:first-child) {
-                display: flex !important; flex-wrap: wrap !important; gap: 2px !important; overflow: hidden !important;
+                display: block !important; overflow: visible !important; flex-shrink: 0 !important; min-width: 0 !important; max-width: 100% !important;
             }
-            #wardrobe-2020-root.dti-tile-mode .item-container > :first-child > :first-child > :last-child:not(:only-child) [class*="Badge"],
-            #wardrobe-2020-root.dti-tile-mode .item-container > :first-child > :first-child > :last-child:not(:only-child) [class*="badge"],
+            #wardrobe-2020-root.dti-tile-mode .item-container > :first-child > :first-child > :last-child:not(:only-child) > :not(:first-child) ul {
+                display: flex !important; flex-wrap: wrap !important; gap: calc(2px * var(--dti-lb, 1)) calc(3px * var(--dti-lb, 1)) !important; margin: 0 !important; padding: 0 !important; min-width: 0 !important;
+            }
             #wardrobe-2020-root.dti-tile-mode .item-container > :first-child > :first-child > :last-child:not(:only-child) li {
-                font-size: 8px !important; padding: 0 3px !important;
-                height: 13px !important; line-height: 13px !important; border-radius: 3px !important;
+                margin: 0 !important; padding: 0 !important; min-width: 0 !important; max-width: 100% !important; height: auto !important;
+                font-size: calc(8px * var(--dti-lb, 1)) !important; line-height: calc(13px * var(--dti-lb, 1)) !important;
             }
+            #wardrobe-2020-root.dti-tile-mode .item-container > :first-child > :first-child > :last-child:not(:only-child) :is([class*="Badge"], [class*="badge"]):not(li) {
+                font-size: calc(8px * var(--dti-lb, 1)) !important; padding: 0 calc(3px * var(--dti-lb, 1)) !important; max-width: 100% !important;
+                height: auto !important; min-height: calc(13px * var(--dti-lb, 1)) !important; line-height: calc(13px * var(--dti-lb, 1)) !important; border-radius: 3px !important;
+                white-space: normal !important; overflow-wrap: anywhere !important;
+            }
+            /* The words on the tiles, hidden if you like (the layout menu): names, zone labels — the labels row once nothing's left in it,
+               the words area once there are no words */
+            #wardrobe-2020-root.dti-tile-mode.dti-hide-name .item-container > :first-child > :first-child > :last-child:not(:only-child) > :first-child,
+            #wardrobe-2020-root.dti-tile-mode.dti-hide-zone .item-container .dti-zone-badge,
+            #wardrobe-2020-root.dti-tile-mode.dti-tile-nolbl .item-container > :first-child > :first-child > :last-child:not(:only-child) > :not(:first-child),
+            #wardrobe-2020-root.dti-tile-mode.dti-tile-notext .item-container > :first-child > :first-child > :last-child:not(:only-child),
+            #wardrobe-2020-root.dti-hide-name .dti-cs-tile .n,
+            #wardrobe-2020-root.dti-hide-zone .dti-cs-tile .b i:not(.k) { display: none !important; }
         `);
     }
 
