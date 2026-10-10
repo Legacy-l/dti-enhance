@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      2.8.3
+// @version      2.8.4
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -12833,6 +12833,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['2.8.4', [
+            'Customs editor: the border round each item\u2019s picture can be any color you like, or hidden \u2014 in the layout menu',
+        ]],
         ['2.8.3', [
             'Color and zone filters: a switch by the tip turns off \u201ctwice to leave out\u201d \u2014 then a click just turns a color or zone on and off',
             'Color filter: your own colors have an \u00d7 (on hover) to remove them',
@@ -28702,10 +28705,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             // on its own (user asked): its picture, item names and zone labels (the words can be hidden). Kept apart for the full page
             // and the pop-up window (its panel is far narrower). CSS reads them from variables on the root. ──
             const LAY_KEY = 'dti_ed_layout' + (window.top !== window ? '_pop' : '');
-            const LAY_DEF = { lcols: 1, zones: 0, items: 0, size: 100, hideKind: 0, caps: 0, pic: 100, nm: 2, lb: 2 };
+            const LAY_DEF = { lcols: 1, zones: 0, items: 0, size: 100, hideKind: 0, caps: 0, pic: 100, nm: 2, lb: 2, bdrHide: 0, bdrC: '' };
             const LAY_TXT = [0, 0.85, 1, 1.2, 1.4];   // (words: Off, S, M — the usual — L, XL)
             const LAY_TXT_SEG = [[0, 'Off'], [1, 'S'], [2, 'M'], [3, 'L'], [4, 'XL']];
             const layVal = (k, v) => v + '%';   // (the sliders: tile size, picture)
+            // (the border DTI draws round each item's picture — its green, your own colour, or none; a colour only if it's a real one)
+            const PB_GREEN = '#276749';
+            function edPicBorder(L) {
+                const c = typeof L.bdrC === 'string' && /^#[0-9a-f]{6}$/i.test(L.bdrC) ? L.bdrC.toLowerCase() : '';
+                return { hide: !!L.bdrHide, color: L.bdrHide ? '' : c };
+            }
             let _edLay = { ...LAY_DEF, ...(GM_getValue(LAY_KEY, null) || {}) }, _layPop = null, _layFit = 0;
             if (_edLay.name !== undefined) {   // (the words had 7 sizes before: each to the nearest of the 5 now)
                 const was = [0, 1, 1, 2, 3, 3, 4];
@@ -28771,6 +28780,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 root.classList.toggle('dti-lay-lcols', lcols > 1);
                 root.classList.toggle('dti-hide-kind', !!_edLay.hideKind);
                 root.classList.toggle('dti-show-caps', !!_edLay.caps);
+                const pb = edPicBorder(_edLay);
+                root.classList.toggle('dti-pbdr', !!pb.color);
+                root.classList.toggle('dti-pbdr-hide', pb.hide);
+                if (pb.color) root.style.setProperty('--dti-pbdr', pb.color); else root.style.removeProperty('--dti-pbdr');
                 _paintCapsSoon();
                 root.classList.toggle('dti-hide-name', !nm);
                 root.classList.toggle('dti-hide-zone', !lb);
@@ -28795,6 +28808,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 const tile = _edView === 'tile', L = _edLay, fill = L.items > 0;
                 const seg = (k, vals, tip = '') => `<div class="dti-lay-seg" data-k="${k}"${tip ? ` title="${tip}"` : ''}>${vals.map(([v, t]) => `<button type="button" data-v="${v}"${L[k] === v ? ' class="on"' : ''}>${t}</button>`).join('')}</div>`;
                 const rng = (k, label, min, max, step, more = '', tip = '', off = '') => `<div class="dti-lay-row${off ? ' off' : ''}"><span>${label} <b>${off || layVal(k, L[k])}</b></span><input type="range" min="${min}" max="${max}" step="${step}" value="${L[k]}" data-k="${k}" aria-label="${label}"${tip ? ` title="${tip}"` : ''}${off ? ' disabled' : ''}>${more}</div>`;
+                // (the border round each item's picture: Show / Hide, its colour — DTI's green until you pick one — and ↺ back to the green)
+                const pb = edPicBorder(L), pbC = pb.color || PB_GREEN;
+                const pbRow = `<div class="dti-lay-pb">${seg('bdrHide', [[0, 'Show'], [1, 'Hide']])}`
+                    + `<label class="dti-lay-sw${pb.hide ? ' off' : ''}" title="${pb.hide ? 'Hidden' : 'Its color — click to pick one'}"><input type="color" data-k="bdrC" value="${pbC}" aria-label="Picture border color"${pb.hide ? ' disabled' : ''}><i style="--c:${pbC}"></i></label>`
+                    + (pb.color ? '<button type="button" class="dti-lay-pbx" title="Back to DTI’s green" aria-label="Back to DTI’s green">↺</button>' : '') + '</div>';
                 const perRow = seg('items', [[0, 'Auto'], ...[1, 2, 3, 4, 5, 6, 7, 8].map(n => [n, String(n)])], 'Auto: as many as fit at the tile size — a number: that many, filling the row');
                 // (a tile's parts: tile view's tiles — and every page's, whichever the view; items per row picked, the tiles fill the row: no
                 // size of their own then)
@@ -28810,6 +28828,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     : `<div class="dti-lay-row"><span>Items per row</span>${seg('lcols', [[1, '1'], [2, '2'], [3, '3']])}</div>`}
                     <div class="dti-lay-row"><span>NC / NP labels</span>${seg('hideKind', [[0, 'Show'], [1, 'Hide']])}</div>
                     <div class="dti-lay-row"><span>Cap values</span>${seg('caps', [[1, 'Show'], [0, 'Hide']], 'An NC item’s value in caps, on its tile')}</div>
+                    <div class="dti-lay-row"><span>Picture border</span>${pbRow}</div>
                     ${!tile && csOn() ? `<div class="dti-lay-sub">Every page’s tiles</div><div class="dti-lay-row"><span>Items per row</span>${perRow}</div>${parts}` : ''}`;
                 _paintLayFit();
             }
@@ -28835,10 +28854,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     const b = ev.target.closest('.dti-lay-seg button');
                     if (b) _edLay[b.closest('.dti-lay-seg').dataset.k] = +b.dataset.v;
                     else if (ev.target.closest('.dti-lay-reset')) _edLay = { ...LAY_DEF };
+                    else if (ev.target.closest('.dti-lay-pbx')) _edLay.bdrC = '';
                     else return;
                     _applyEdLayout(); GM_setValue(LAY_KEY, _edLay); _renderLayPop();
                 });
                 _layPop.addEventListener('input', ev => {   // (a slider: shown as it moves, saved when let go)
+                    const cl = ev.target.closest('input[type="color"][data-k]');   // (a colour: shown as it's picked, saved once chosen)
+                    if (cl) { _edLay[cl.dataset.k] = cl.value; _applyEdLayout(); cl.nextElementSibling?.style.setProperty('--c', cl.value); return; }
                     const sl = ev.target.closest('input[type="range"][data-k]');
                     if (!sl) return;
                     _edLay[sl.dataset.k] = +sl.value;
@@ -28847,7 +28869,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     const b = sl.parentElement.querySelector('b');
                     if (b) b.textContent = layVal(sl.dataset.k, sl.value);
                 });
-                _layPop.addEventListener('change', ev => { if (ev.target.matches('input[type="range"][data-k]')) GM_setValue(LAY_KEY, _edLay); });
+                _layPop.addEventListener('change', ev => {
+                    if (ev.target.matches('input[type="range"][data-k], input[type="color"][data-k]')) GM_setValue(LAY_KEY, _edLay);
+                    if (ev.target.matches('input[type="color"][data-k]')) _renderLayPop();   // (↺ shows once a colour is picked)
+                });
             });
             document.addEventListener('mousedown', e => { if (_layPop && !_layPop.contains(e.target) && !layBtn.contains(e.target)) closeLay(); }, true);
             document.addEventListener('keydown', e => { if (e.key === 'Escape' && _layPop) closeLay(); });
@@ -31009,6 +31034,18 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-lay-row.off > span b { color: var(--text-muted); font-weight: 600; }
             .dti-lay-row input[type="range"]:disabled { opacity: .35; cursor: default; }
             .dti-lay-seg[data-k="items"] button { flex: 1 1 auto; padding: 4px 3px; }
+            .dti-lay-pb { display: flex; align-items: center; gap: 6px; }
+            .dti-lay-pb .dti-lay-seg { flex: 1 1 auto; }
+            .dti-lay-sw { position: relative; flex: none; width: 36px; height: 27px; box-sizing: border-box; padding: 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); cursor: pointer; }
+            .dti-lay-sw i { display: block; height: 100%; border-radius: 5px; background: var(--c); box-shadow: inset 0 0 0 1px rgba(0,0,0,.14); }
+            .dti-lay-sw input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; }
+            .dti-lay-sw.off { opacity: .35; }
+            .dti-lay-sw.off input { cursor: default; }
+            .dti-lay-pbx { flex: none; width: 27px; height: 27px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text-muted); font: inherit; font-size: 14px; font-weight: 700; line-height: 1; cursor: pointer; }
+            .dti-lay-pbx:hover { color: var(--text); background: var(--surface); }
+            /* The border round each item's picture (DTI's green, list and tile view): your own color, or none — layout menu */
+            #wardrobe-2020-root.dti-pbdr .item-container div:has(> img) { border-color: var(--dti-pbdr) !important; }
+            #wardrobe-2020-root.dti-pbdr-hide .item-container div:has(> img) { border-color: transparent !important; }
             /* ── Zones on the pet (beside list / tile) ── */
             #dti-wz { display: flex; flex-shrink: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
             .dti-wz-btn.open { background: var(--accent-glow) !important; color: var(--accent-text, var(--accent)) !important; }
