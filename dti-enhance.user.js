@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      2.8.1
+// @version      2.8.2
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -2722,6 +2722,41 @@
     function dtiCopyText(text, onDone) {
         navigator.clipboard.writeText(text).then(onDone).catch(() => dtiToast('Couldn\u2019t copy \u2014 the browser blocked it', { variant: 'error' }));
     }
+    // ── A JellyNeo wishlist link in a list's description (theirs on their Items page, a Neofriend's): a pill — a click copies the link
+    // (user asked: copied like item names, as the page's text can't be selected), ↗ opens it. Written as a link or as plain text. ──
+    const JNW_SPLIT = /(https?:\/\/(?:www\.)?items\.jellyneo\.net\/mywishes\/[^\s<>"']+)/i;
+    function jnwPillHtml(url, label) {
+        return `<span class="dti-jnw"><button type="button" class="dti-jnw-copy" data-jnw="${noteEsc(url)}" title="Copy this JellyNeo wishlist link">${COPY_ICO}<span>${noteEsc(label)}</span></button><a class="dti-jnw-open" href="${noteEsc(url)}" target="_blank" rel="noopener" title="Open it on JellyNeo" aria-label="Open it on JellyNeo">\u2197</a></span>`;
+    }
+    function jnwLabel(url) {   // (where it points: "JellyNeo · their name/123/the-list")
+        const m = url.match(/\/mywishes\/([^?#]+)/);
+        return 'JellyNeo \u00b7 ' + (m ? decodeURIComponent(m[1]).replace(/\/+$/, '') : 'wishlist');
+    }
+    function jnwDecorate(root) {
+        if (!root) return;
+        root.querySelectorAll('a[href*="jellyneo.net/mywishes"]').forEach(a => {
+            if (a.closest('.dti-jnw')) return;
+            const t = document.createElement('template');
+            const own = a.textContent.trim();
+            t.innerHTML = jnwPillHtml(a.href, own && !/^https?:/i.test(own) ? own : jnwLabel(a.href));
+            a.replaceWith(t.content);
+        });
+        const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: n => n.parentElement?.closest('.dti-jnw, a, button, textarea') ? NodeFilter.FILTER_REJECT : JNW_SPLIT.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP });
+        const hits = [];
+        while (walk.nextNode()) hits.push(walk.currentNode);
+        hits.forEach(n => {
+            const t = document.createElement('template');
+            t.innerHTML = jnwHtml(n.nodeValue);
+            n.replaceWith(t.content);
+        });
+    }
+    function jnwHtml(text) {   // (plain text → the same text, escaped, each wishlist link in it a pill)
+        return String(text).split(JNW_SPLIT).map((part, i) => {
+            if (!(i % 2)) return noteEsc(part);
+            const url = part.replace(/[.,;:!?)\]]+$/, '');   // (a full stop or bracket after it isn't part of it)
+            return jnwPillHtml(url, jnwLabel(url)) + noteEsc(part.slice(url.length));
+        }).join('');
+    }
     // One set of document listeners serves every pencil on every page (installed once per document)
     function installNoteHandlers() {
         if (window.__dtiNoteHandlers) return;
@@ -2764,6 +2799,15 @@
                     b.innerHTML = COPIED_ICO; b.classList.add('done'); b.title = 'Copied!';
                     clearTimeout(b._dtiCopyT);
                     b._dtiCopyT = setTimeout(() => { b.innerHTML = COPY_ICO; b.classList.remove('done'); b.title = 'Copy the name'; }, 1400);
+                });
+            }
+            const jw = e.target.closest?.('.dti-jnw-copy');
+            if (jw) {
+                e.preventDefault(); e.stopPropagation();
+                return dtiCopyText(jw.dataset.jnw, () => {
+                    jw.classList.add('done');
+                    dtiToast('JellyNeo wishlist link copied', { variant: 'success' });
+                    clearTimeout(jw._dtiCopyT); jw._dtiCopyT = setTimeout(() => jw.classList.remove('done'), 1400);
                 });
             }
             const h = e.target.closest?.(COPY_NAME_SEL);
@@ -8663,6 +8707,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 };
                 panel.innerHTML = `<label class="dti-nf-isearch">${NF_ICO.search}<input type="search" placeholder="Search everything ${name} shares…" autocomplete="off" spellcheck="false"></label>
                     <div class="dti-nf-sres" hidden><div class="dti-nf-grid"></div></div><div class="dti-nf-lgroups">${group(true)}${group(false)}</div>`;
+                jnwDecorate(panel.querySelector('.dti-nf-lgroups'));
                 panel.querySelector('.dti-nf-lgroups').addEventListener('click', e => {
                     const b = e.target.closest('[data-pop]');
                     if (!b) return;
@@ -10709,6 +10754,16 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-copy-btn:hover { background: var(--accent); color: var(--accent-fg, #fff); }
             :hover > .dti-copy-btn, .dti-copy-btn.done { opacity: 1; pointer-events: auto; }
             .dti-copy-btn.done { background: var(--success, #16a34a); color: #fff; }
+            /* A JellyNeo wishlist link in a list description: a pill (click: copied), ↗ opens it */
+            .dti-jnw { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; margin: 2px 2px; vertical-align: middle; font-style: normal; }
+            .dti-jnw-copy { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; margin: 0; padding: 4px 10px 4px 8px; border: 1.5px solid var(--border); border-radius: 99px; background: var(--surface-2); color: var(--text); font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1.2; cursor: pointer; box-shadow: none; transition: border-color .12s, background .12s, color .12s; }
+            .dti-jnw-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .dti-jnw-copy svg { width: 12px; height: 12px; flex: none; color: var(--accent-text, var(--accent)); }
+            .dti-jnw-copy:hover { border-color: var(--accent); }
+            .dti-jnw-copy.done { border-color: var(--success, #16a34a); background: color-mix(in srgb, var(--success, #16a34a) 14%, var(--surface-2)); }
+            .dti-jnw-copy.done svg { color: var(--success, #16a34a); }
+            .dti-jnw-open { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: var(--text-muted); font-size: 13px; font-weight: 700; text-decoration: none; }
+            .dti-jnw-open:hover { color: var(--accent-text, var(--accent)); background: var(--surface-2); }
             .dti-item-card .dti-copy-btn { left: 4px; bottom: 4px; border-radius: 6px; }   /* My Items: the free bottom-left corner (lists are bottom-right) */
             #dti-item-grid.dti-select-active .dti-copy-btn { display: none !important; }
             :is(#dti-newest-items-grid li.object, #dti-nm-grid li.dti-nm-tile) .dti-copy-btn { left: 4px; bottom: auto; top: 51px; width: 20px; height: 20px; border-radius: 6px; }
@@ -12715,6 +12770,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['2.8.2', [
+            'Color filter: an eyedropper — pick a color straight from your pet’s custom (or anything on the screen) to find items close to it (Chrome and Edge)',
+            'Lists: a JellyNeo wishlist link in someone’s list description is a button — click to copy the link, ↗ to open it',
+        ]],
         ['2.8.1', [
             'Security: item names, descriptions and pictures that come from other sites always show as plain text',
             'Customs editor: scrolling the item results with the mouse wheel works again',
@@ -13020,7 +13079,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     /* Remove top padding above search bar (css-5iqkck is the direct parent) */
                     div:has(> #dti-search-row) { padding-top:0 !important; }
                     /* Tinted editor panels */
-                    #wardrobe-2020-root > * > * > * > *:nth-child(2) { background: color-mix(in srgb, var(--surface,#161b22) 88%, var(--accent,#7c3aed) 12%) !important; }
+                    #wardrobe-2020-root > * > * > * > *:nth-child(2) { background: var(--theme-ed-panel, color-mix(in srgb, var(--surface,#161b22) 88%, var(--accent,#7c3aed) 12%)) !important; }
                     /* Left panel: replace DTI mint green with our theme surface throughout — wildcard clears any depth */
                     #wardrobe-2020-root > * > * > * > *:first-child { background: var(--surface, #ffffff) !important; }
                     #wardrobe-2020-root > * > * > * > *:first-child *:not(select):not(button):not(input):not(canvas):not(a.chakra-button):not([aria-label="HTML5 supported!"]) { background-color: transparent !important; }
@@ -22144,7 +22203,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const descEl = document.getElementById('dti-list-description');
             if (descEl) {
                 const singleDesc = activeLists.length === 1 && listDescHtml(activeLists[0].lst);
-                if (singleDesc) { descEl.innerHTML = singleDesc; descEl.hidden = false; }
+                if (singleDesc) { descEl.innerHTML = singleDesc; jnwDecorate(descEl); descEl.hidden = false; }
                 else { descEl.innerHTML = ''; descEl.hidden = true; }
             }
 
@@ -22207,7 +22266,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     fillCaps(hdr.querySelector('.dti-grid-group-caps'), items);
                     if (listDescHtml(al.lst) && !collapsed) {
                         const desc = document.createElement('div'); desc.className = 'dti-grid-group-desc';
-                        desc.innerHTML = listDescHtml(al.lst); gridFrag.appendChild(desc);
+                        desc.innerHTML = listDescHtml(al.lst); jnwDecorate(desc); gridFrag.appendChild(desc);
                     }
                 }
 
@@ -27612,6 +27671,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         };
         const lc = k => ItemColors.isCustom(k) ? `close to ${k.toUpperCase()}` : itemColorName(k).toLowerCase();
         const LV = ['Almost all this color', 'Mostly this color', 'Its main color', 'Normal', 'Some of it', 'A little of it', 'A touch of it'];
+        const DROP_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"/></svg>';   // (a pipette)
         const btn = document.createElement('button');
         btn.type = 'button'; btn.className = 'dti-cpk' + (cls ? ' ' + cls : '');
         btn.setAttribute('aria-label', 'Filter by color'); btn.setAttribute('aria-haspopup', 'dialog'); btn.setAttribute('aria-expanded', 'false');
@@ -27648,6 +27708,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 <div class="dti-cpk-sec"><span class="dti-cpk-sub">Your own color</span>
                     <div class="dti-cpk-crow">
                         <label class="dti-cpk-well" title="Pick any color"><input type="color" value="${customVal}" aria-label="Pick any color"><i class="dti-cpk-chip" style="--c:${customVal}"></i></label>
+                        ${typeof EyeDropper === 'function' ? `<button type="button" class="dti-cpk-drop" title="Pick a color from the screen \u2014 your pet\u2019s custom, an item, anything" aria-label="Pick a color from the screen">${DROP_ICO}</button>` : ''}
                         <input type="text" class="dti-cpk-hex" value="${customVal.toUpperCase()}" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Color code, like #F7A8C4">
                         <button type="button" class="dti-cpk-use" title="Show items close to this color">Add</button>
                     </div>
@@ -27669,6 +27730,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 const a = ev.target.closest('.dti-pk-seg button');
                 if (a && !a.disabled) { st.cur.all = a.dataset.all === '1'; return changed(); }
                 if (ev.target.closest('.dti-cpk-use')) useHex(hexIn.value);
+                if (ev.target.closest('.dti-cpk-drop')) drop();
             });
             // Your own color: the well (the full color grid, with a code box and eyedropper) or a typed code — shown, and kept with the
             // last few used
@@ -27690,6 +27752,18 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (h) { well.value = h; wellChip.style.setProperty('--c', h); }
             });
             hexIn.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); useHex(hexIn.value); } ev.stopPropagation(); });
+            // The eyedropper (user asked: pick colors from your pet's custom): the browser's own, anywhere on the screen. The palette steps
+            // aside while you pick; the color picked is added, like Add. (Esc: nothing.) Shown only where the browser has one (Chrome, Edge).
+            const drop = async () => {
+                let ed;
+                try { ed = new EyeDropper(); } catch (_) { return; }
+                pop.style.visibility = 'hidden';
+                try {
+                    const h = normHex((await ed.open())?.sRGBHex);
+                    if (h) { hexIn.value = h.toUpperCase(); hexIn.classList.remove('bad'); well.value = h; wellChip.style.setProperty('--c', h); useHex(h); }
+                } catch (_) { /* (cancelled) */ }
+                finally { if (pop.isConnected) pop.style.visibility = ''; }
+            };
             // How strict: shown at once (colors picked: filtered again as it moves)
             const rng = pop.querySelector('.dti-cpk-match input');
             let rngT = 0;
@@ -27803,6 +27877,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-cpk-well { position: relative; display: grid; place-items: center; width: 32px; height: 30px; flex: none; cursor: pointer; }
             .dti-cpk-well input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; }
             .dti-cpk-well .dti-cpk-chip { width: 26px; height: 26px; border-radius: 8px; pointer-events: none; }
+            .dti-cpk-drop { flex: none; display: grid; place-items: center; width: 30px; height: 30px; box-sizing: border-box; margin: 0; padding: 0; border: 1.5px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text-muted); cursor: pointer; box-shadow: none; transition: border-color .12s, color .12s; }
+            .dti-cpk-drop:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-cpk-drop svg { width: 15px; height: 15px; display: block; }
             .dti-cpk-hex { flex: 1; min-width: 0; height: 30px; box-sizing: border-box; margin: 0; padding: 0 8px; border: 1.5px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font: 600 12.5px/1 ui-monospace, Menlo, Consolas, monospace; text-transform: uppercase; outline: none; box-shadow: none; }
             .dti-cpk-hex:focus { border-color: var(--accent); }
             .dti-cpk-hex.bad { border-color: var(--danger, #e11d48); }
@@ -29676,7 +29753,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #wardrobe-2020-root { font-family: 'Poppins', system-ui, sans-serif !important; }
             /* ── Editor panels: tinted backgrounds ─────────────────────────── */
             #wardrobe-2020-root > * > * > * > *:nth-child(2) {
-                background: color-mix(in srgb, var(--surface) 88%, var(--accent) 12%) !important;
+                background: var(--theme-ed-panel, color-mix(in srgb, var(--surface) 88%, var(--accent) 12%)) !important;   /* (a theme may choose its own) */
             }
 
             /* ── Chakra UI color overrides ─────────────────────────────────── */
