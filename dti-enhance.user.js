@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      2.8.2
+// @version      2.8.3
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -52,6 +52,18 @@
     // On Neopets nothing DTI Enhance does needs a frame (ads and the like): a frame stops here — one setup per tab, and
     // no storage writes from frames. (On DTI the script runs inside its own popup frames on purpose.)
     if (window.top !== window && location.hostname.includes('neopets.com')) return;
+    // DTI's animated item layers are little pages of their own, in frames (/swf-assets/…, on item pages): all one needs is to fill
+    // its frame. Nothing else runs there (the whole start-up used to, in each one — ~1 MB of styles, and the frame's security rules
+    // refused the styles the page made itself).
+    if (location.hostname === 'impress.openneo.net' && /^\/swf-assets\//.test(location.pathname)) {
+        GM_addStyle(`
+            button { display: none !important }
+            html, body { margin: 0 !important; padding: 0 !important; width: 100% !important; height: 100% !important; overflow: hidden !important; background: transparent !important; }
+            #asset-canvas { display: block !important; width: 100% !important; height: 100% !important; }
+            #fallback { display: block !important; width: 100% !important; height: 100% !important; object-fit: contain !important; }
+        `);
+        return;
+    }
 
     // One copy per page. A second copy (installed twice, or in two userscript managers) would fight the first over the
     // theme and double every button: the first to run marks the page; a later one leaves its version for the first to
@@ -1242,6 +1254,10 @@
         + '<feColorMatrix in="l" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  1.6 0 0 0 -1.05" result="hi"/><feColorMatrix in="l" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -1.7 0 0 0 .78" result="lo"/>'
         + '<feMerge><feMergeNode in="lo"/><feMergeNode in="hi"/></feMerge></filter><rect width="260" height="260" filter="url(#h)" opacity=".5"/>'));
     const _THEMES_S4 = ['pewter'];
+    const _THEMES_S5 = ['neapolitan', 'menthol'];
+    const _THEMES_S6 = ['oat'];
+    const _THEMES_M1 = ['arcane', 'chartreuse', 'bloodmoon'];
+    const _THEMES_X2 = ['obsidian'];
     // In Settings: the light looks, then the dark ones, each in the order shown (desc: a line about it, on hover)
     const THEME_PRESETS = [
         { id: 'pastel',  label: 'R. Pastel', base: 'light', fav: '#9061f9', cover: '#fdf7ff', desc: 'Soft rainbow pastels on white',
@@ -1264,6 +1280,8 @@
           pv: ['linear-gradient(160deg,#fff1e6,#ffe4ea 55%,#f3e4ff)', 'linear-gradient(90deg,#ff9b54,#ff6a6a 45%,#c2549d 78%,#7b4ba8)', '#ffffff', 'linear-gradient(90deg,#ff8a4c,#ef4f6b,#b24f9f)'] },
         { id: 'sorbet', label: 'Sorbet', base: 'light', fav: '#d6336c', cover: '#fff6f2', desc: 'Mango, raspberry and pistachio',
           pv: ['linear-gradient(160deg,#fff1e6,#fff3f4 50%,#eef8ec)', 'linear-gradient(90deg,#ffcfa8,#ffb8c2 38%,#fbc6dc 68%,#cfeccb)', '#ffffff', 'linear-gradient(90deg,#e5486f,#d6336c,#c23a8a)'] },
+        { id: 'neapolitan', label: 'Neapolitan', base: 'light', fav: '#d4567b', cover: '#fbf4ec', desc: 'Strawberry, vanilla and chocolate, a flavour on every card',
+          pv: ['linear-gradient(180deg,#fcf6ef,#f8efe3)', 'linear-gradient(180deg,#6e4634 0 76%,#f2a5b8 76% 84%,#fbefd6 84% 92%,#7a4f39 92%)', '#fffdf9', 'linear-gradient(180deg,#d4567b,#bb3f63)'] },
         { id: 'honeycomb', label: 'Honeycomb', base: 'light', fav: '#d69213', cover: '#fdf6e3', accentAttr: 'yellow', desc: 'Golden honey over a faint comb',
           pv: [`${_HEXCOMB} 0 0/14px 24px,linear-gradient(180deg,#fff9ea,#fcf2da)`, 'linear-gradient(90deg,#f4c552,#d69213)', '#fffdf6', 'linear-gradient(90deg,#e8ad2c,#c27a0a)'] },
         { id: 'bauhaus', label: 'Bauhaus', base: 'light', fav: '#d4322c', cover: '#efe9dc', font: 'Jost:wght@500;600;700', desc: 'Red, yellow and blue, circles and squares',
@@ -1272,6 +1290,8 @@
           pv: [`${_DITHER} 0 0/4px 4px,#ffffff`, 'linear-gradient(180deg,#ffffff 0 78%,#000000 78%)', '#ffffff', '#000000'] },
         { id: 'retroos', label: 'Retro OS', base: 'light', fav: '#000080', cover: '#1b8f8f', font: 'Silkscreen', desc: 'A teal desktop and bevelled grey windows',
           pv: ['#1b8f8f', 'linear-gradient(90deg,#000080,#0f74bd)', '#c0c0c0', '#c0c0c0'] },
+        { id: 'oat', label: 'Oat', base: 'light', fav: '#8b5e3c', cover: '#f1ebe1', desc: 'Warm oatmeal neutrals, calm and quiet',
+          pv: ['#f1ebe1', '#e6dccb', '#faf6ef', '#8b5e3c'] },
         { id: 'matcha', label: 'Matcha', base: 'light', fav: '#557f29', cover: '#f2f1e6', desc: 'Oat milk and fresh matcha',
           pv: ['linear-gradient(180deg,#f5f4ea,#e9ead4)', 'linear-gradient(90deg,#dce8bd,#b2ca7e)', '#fcfbf5', '#557f29'] },
         { id: 'mist', label: 'Mist', base: 'light', fav: '#4a6a8a', cover: '#e9eef3', desc: 'Cool grey-blue, fog low on the ground',
@@ -1290,6 +1310,8 @@
           pv: ['radial-gradient(circle at 50% -20%,#5a3a22,#15100c 70%)', 'linear-gradient(90deg,#2e1c13,#5f3b26)', '#261d17', 'linear-gradient(90deg,#c8894a,#e6bb84)'] },
         { id: 'bordeaux', label: 'Bordeaux', base: 'dark', fav: '#a3325a', cover: '#150a0e', desc: 'Deep wine, with a champagne line',
           pv: ['radial-gradient(circle at 80% -10%,#6b1a30,#150a0e 70%)', 'linear-gradient(180deg,#5a1628 0 80%,#e9c27a 80%)', '#28141c', 'linear-gradient(90deg,#a3325a,#cf5574)'] },
+        { id: 'bloodmoon', label: 'Blood Moon', base: 'dark', fav: '#c0172a', cover: '#070304', font: 'UnifrakturMaguntia', desc: 'A red moon over a black night, thin silver lines and blackletter: vampire gothic',
+          pv: ['radial-gradient(1200px 800px at 85% 10%, rgba(120,10,20,.25), transparent 60%), linear-gradient(180deg, #090405, #040202)', 'linear-gradient(180deg, #1a0a0d, #100608)', '#100709', 'linear-gradient(180deg, #e0283c, #9c0e1e)'] },
         { id: 'cathedral', label: 'Cathedral', base: 'dark', fav: '#d9b44a', cover: '#0c0a10', accentAttr: 'yellow', font: 'Pirata+One', desc: 'Stained glass and stone, the light falling in colors',
           pv: [`${_ROSE} right -10px top -8px/36px 36px no-repeat,#0c0a10`, 'linear-gradient(90deg,#5a0f20,#3a1666 40%,#14306b 70%,#0e4a4a)', '#16121b', 'linear-gradient(90deg,#b8922f,#ecd07e,#b8922f)'] },
         { id: 'nightshade', label: 'Nightshade', base: 'dark', fav: '#e2620f', cover: '#0c0a10', desc: 'Purple night with an orange glow',
@@ -1306,10 +1328,14 @@
           pv: ['radial-gradient(circle at 15% -10%,#2e3a66,#0f1218 70%)', 'linear-gradient(90deg,#222838,#3a3550,#2b3a4c)', '#1c212b', 'linear-gradient(90deg,#8fa8ff,#b7a6ff,#f0c4b0)'] },
         { id: 'sapphire', label: 'Sapphire', base: 'dark', fav: '#7ea6ff', cover: '#070c1f', accentAttr: 'yellow', desc: 'Deep sapphire, faceted, with a silver glint',
           pv: ['radial-gradient(circle at 50% -10%,#1d3480,#070c1f 70%)', 'linear-gradient(90deg,#11235f,#1a3a9e 25%,#2a4cb5 50%,#1a3a9e 75%,#11235f)', '#121c3c', 'linear-gradient(90deg,#a3c0ff,#6a8ff0)'] },
+        { id: 'arcane', label: 'Arcane', base: 'dark', fav: '#bcd0ff', cover: '#060b22', font: 'Cinzel+Decorative:wght@700', desc: 'A summoning circle turning slowly in silver light on deep ultramarine',
+          pv: ['radial-gradient(900px 900px at 0% 52%, rgba(90,120,255,.22), transparent 60%), radial-gradient(800px 700px at 100% 0%, rgba(60,90,220,.16), transparent 60%), linear-gradient(180deg, #070c26, #04081a)', 'linear-gradient(180deg, #13205a, #0c1540)', '#0b1233', 'linear-gradient(180deg, #f2f5ff, #c8d6ff 60%, #9fb4f0)'] },
         { id: 'prism', label: 'Prism', base: 'dark', fav: '#e8ecff', cover: '#0d0e12', accentAttr: 'yellow', font: 'Space+Grotesk:wght@600;700', desc: 'A beam of light split into colors',
           pv: ['linear-gradient(160deg,transparent 40%,rgba(255,59,59,.25) 50%,rgba(255,225,77,.25) 56%,rgba(77,255,136,.22) 62%,rgba(46,230,255,.22) 68%,rgba(192,77,255,.2) 74%,transparent 80%),#0d0e12', 'linear-gradient(180deg,#08090c 0 80%,transparent 80%),linear-gradient(90deg,#ff3b3b,#ffe14d,#4dff88,#2ee6ff,#c04dff)', '#14161c', '#ffffff'] },
         { id: 'ocean',   label: 'Ocean Depths', base: 'dark', fav: '#0ea5a4', cover: '#041322', desc: 'Deep teal water',
           pv: ['radial-gradient(circle at 20% 0%,#0f4a5c,#05162a 70%)', 'linear-gradient(90deg,#0a3d62,#0b5f7a 45%,#0e8a8f)', '#0e263d', 'linear-gradient(90deg,#0e7490,#0ea5a4,#22c1a6)'] },
+        { id: 'menthol', label: 'Menthol', base: 'dark', fav: '#6ee0bd', cover: '#111416', accentAttr: 'yellow', desc: 'Cool charcoal and fresh mint',
+          pv: ['linear-gradient(180deg,#131719,#0f1113)', 'linear-gradient(180deg,#1d2226 0 88%,#6ee0bd 88%)', '#181c1f', 'linear-gradient(100deg,#8ef0d1,#5fd6b1)'] },
         { id: 'verdigris', label: 'Verdigris', base: 'dark', fav: '#d7895a', cover: '#0c1615', accentAttr: 'yellow', font: 'Cinzel:wght@600;700', desc: 'Copper gone green, with bright copper edges',
           pv: [`${_PATINA} 0 0/90px 90px,#0c1615`, 'linear-gradient(180deg,#173a34 0 66%,#c27a4c 66%)', '#112120', 'linear-gradient(180deg,#e4a173,#b0633a)'] },
         { id: 'pewter', label: 'Pewter', base: 'dark', fav: '#c9a65c', cover: '#262b30', accentAttr: 'yellow', desc: 'Hand-hammered pewter and brass',
@@ -1320,8 +1346,11 @@
           pv: ['radial-gradient(ellipse at 30% 60%,rgba(255,255,255,.1),transparent 60%),#1c2a24', 'repeating-linear-gradient(90deg,rgba(0,0,0,.12) 0 2px,transparent 2px 6px),linear-gradient(180deg,#6b4a2e,#533722)', '#22322b', '#f6f7f2'] },
         { id: 'phosphor', label: 'Phosphor', base: 'dark', fav: '#33f06f', cover: '#040905', accentAttr: 'yellow', font: '', desc: 'A green-screen terminal, scanlines and all',
           pv: ['repeating-linear-gradient(180deg,rgba(0,0,0,.45) 0 1px,transparent 1px 3px),radial-gradient(circle at 50% 40%,#0c2312,#040905 75%)', 'linear-gradient(180deg,#06100a 0 82%,#33f06f 82%)', '#07110a', '#33f06f'] },
+        { id: 'chartreuse', label: 'Chartreuse', base: 'dark', fav: '#d4ff3a', cover: '#0b0c0a', accentAttr: 'yellow', font: 'Unbounded:wght@500;700', desc: 'Acid lime on black: athletic, technical, a hazard stripe under the bar',
+          pv: ['linear-gradient(180deg, #0d0e0b, #090a08)', '#d4ff3a', '#141512', '#d4ff3a'] },
         { id: 'graphite', label: 'Graphite', base: 'dark', fav: '#3a6be6', cover: '#0e0f11', desc: 'A calm, focused dark',
           pv: ['radial-gradient(rgba(255,255,255,.12) 1px,transparent 1.3px) 0 0/6px 6px,#0e0f11', 'linear-gradient(180deg,#202227,#17181c)', '#1c1d21', '#3a6be6'] },
+        { id: 'obsidian', label: 'Obsidian', base: 'dark', fav: '#c7b8ff', cover: '#07070a', desc: 'Black volcanic glass with a faceted sheen; claw marks under the bar', pv: ['#07070a', 'linear-gradient(135deg,#1b1b25,#0e0e14)', '#0f0f14', 'linear-gradient(135deg,#e2d9ff,#a897f2)'] },
         { id: 'smoke', label: 'Smoke', base: 'dark', fav: '#e0b8a0', cover: '#121010', accentAttr: 'yellow', desc: 'Warm charcoal and wisps of smoke',
           pv: ['radial-gradient(ellipse at 50% 100%,#2a2522,#121010 70%)', 'linear-gradient(90deg,#2a2624,#34302d 50%,#2a2624)', '#211d1c', 'linear-gradient(90deg,#ecc9b4,#c99a80)'] },
         { id: 'noir', label: 'Noir', base: 'dark', fav: '#d92f32', cover: '#0b0b0b', desc: 'Black and white, and one red',
@@ -1661,7 +1690,17 @@
         .map(k => `<i class="dti-cpk-chip${p.exc.includes(k) ? ' out' : ''}" style="--c:${itemColorShade(k)}"></i>`).join('');
     // (the zone filter's icon; the pick pop-ups' tip — here, before any page's filters are made)
     const ZONE_ICO = '<svg class="dti-zpk-ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M8 2 14 5.2 8 8.4 2 5.2z"/><path d="m2 8 6 3.2L14 8"/><path d="m2 10.8 6 3.2 6-3.2"/></svg>';
-    const PICK_TIP = '<div class="dti-pk-tip">Once <i class="dti-pk-m in"></i> to show · twice <i class="dti-pk-m out"></i> to leave out</div>';
+    // (whether a second click leaves a color/zone out — the switch on the tip; off: clicks just turn one on and off, user asked)
+    const pickLeaveOut = () => GM_getValue('dti_pick_leaveout', true) !== false;
+    const pickTipText = () => pickLeaveOut() ? '<span>Once <i class="dti-pk-m in"></i> to show</span><span>Twice <i class="dti-pk-m out"></i> to leave out</span>'
+        : '<span>Click <i class="dti-pk-m in"></i> to show</span><span>Again to take it off</span>';
+    const pickTip = () => `<div class="dti-pk-tip"><span class="dti-pk-tiptx">${pickTipText()}</span><button type="button" class="dti-pk-xsw" role="switch" aria-checked="${pickLeaveOut()}" aria-label="A second click leaves it out" title="A second click leaves it out \u2014 switch off to just click colors on and off"></button></div>`;
+    function pickTipToggle(pop) {   // (the switch: flipped, and this pop-up's tip says so)
+        GM_setValue('dti_pick_leaveout', !pickLeaveOut());
+        const tx = pop.querySelector('.dti-pk-tiptx'), sw = pop.querySelector('.dti-pk-xsw');
+        if (tx) tx.innerHTML = pickTipText();
+        if (sw) sw.setAttribute('aria-checked', String(pickLeaveOut()));
+    }
     const ItemColors = (() => {
         const [RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, PINK, BROWN, WHITE, GREY, BLACK] = ITEM_COLORS.map(c => c[0]);
         const NEUTRAL = new Set([WHITE, GREY, BLACK]);
@@ -2128,7 +2167,7 @@
         badge.textContent = '…';
         container.appendChild(badge);
         lookupNcValue(itemName, (val, src) => {
-            if (val && !/^[\s?\-\u2013\u2014]*$/.test(val)) {   // ("-" on a list: no value — no badge)
+            if (val && !/^[\s?*\-\u2013\u2014]*$/.test(val)) {   // ("-" or "-*" on a list: no value — no badge)
                 badge.className = inSlot ? 'dti-nc-val-slot-badge' : 'dti-nc-val';
                 const display = val.length > NC_VAL_MAX_LEN ? val.slice(0, NC_VAL_MAX_LEN).trimEnd() + '…' : val;
                 badge.textContent = inSlot && capNums(val) ? display.replace(/\*$/, '') + ' caps' : display;   // (a note stays a note)
@@ -2371,11 +2410,12 @@
         const t = document.createElement('div');
         t.className = 'dti-toast' + (opts.variant === 'error' ? ' error' : opts.variant === 'success' ? ' success' : '');
         t.textContent = msg;
-        if (opts.undo) {   // (an Undo button)
+        const act = opts.undo ? { label: 'Undo', run: opts.undo } : opts.action;   // (one button: Undo, or { label, run })
+        if (act) {
             t.classList.add('has-action');
             const b = document.createElement('button');
-            b.type = 'button'; b.className = 'dti-toast-action'; b.textContent = 'Undo';
-            b.addEventListener('click', () => { opts.undo(); t.remove(); });
+            b.type = 'button'; b.className = 'dti-toast-action'; b.textContent = act.label;
+            b.addEventListener('click', () => { act.run(); t.remove(); });
             t.appendChild(b);
         }
         host.appendChild(t);
@@ -9212,10 +9252,11 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-tf-findin { position: relative; flex: 0 1 380px; min-width: 220px; }
             .dti-tf-findin .dti-tf-search { flex: none; }
             .dti-tf-drop {
-                position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; max-height: 300px; overflow-y: auto; padding: 4px; text-align: left;
+                position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; max-height: 300px; overflow-y: auto; overflow-x: hidden; padding: 4px; text-align: left;
                 border-radius: 12px; border: 1px solid var(--border); background: var(--surface); box-shadow: 0 14px 36px rgba(0,0,0,.2);
             }
             .dti-tf-drop[hidden] { display: none; }
+            .dti-tf-drop .dti-tf-opt { margin: 0; }   /* (not the intro buttons' margin — the suggestions sit inside the intro) */
             .dti-tf-opt { width: 100%; display: flex; align-items: center; gap: 9px; padding: 5px 7px; border: none; border-radius: 8px; background: none; cursor: pointer; font-family: inherit; font-size: 12.5px; color: var(--text); text-align: left; }
             .dti-tf-opt:hover, .dti-tf-opt.hl { background: var(--surface-2); }
             .dti-tf-opt img { width: 32px; height: 32px; flex: none; border-radius: 7px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px var(--border); }
@@ -10163,7 +10204,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             // what it's worth
             lookupNcValue(r.name, (val, src) => {
                 const v = capNums(val), el = drawer.querySelector('.dti-mg-dval');
-                if (!alive() || !el || !val || /^[\s?\-\u2013\u2014]*$/.test(val)) return;   // ("-" on a list: no value)
+                if (!alive() || !el || !val || /^[\s?*\-\u2013\u2014]*$/.test(val)) return;   // ("-" or "-*" on a list: no value)
                 el.hidden = false;
                 el.innerHTML = v ? `<span class="dti-mg-dvlabel">Trade value</span><b>≈ ${noteEsc(capShort(v))}</b><small>${noteEsc(src)}</small>`
                     : `<span class="dti-mg-dvlabel">Value</span><em>${noteEsc(val)}</em><small>${noteEsc(src)}</small>`;
@@ -10974,6 +11015,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-ne-open:hover { text-decoration: underline; }
             .dti-toast.has-action { pointer-events: auto; display: flex; align-items: center; gap: 12px; }
             .dti-toast-action {
+                flex: none; white-space: nowrap;   /* (a two-word button stays on one line) */
                 border: none; background: none; padding: 0; cursor: pointer;
                 font-family: inherit; font-size: 13px; font-weight: 700; color: var(--accent-text, var(--accent));
             }
@@ -11768,7 +11810,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
     // A value, for showing: "4-6 caps" (an amount), the list's note as it is, or '' (nothing — "-" on a list is no value)
     function capsLabel(val) {
         const v = String(val ?? '').trim();
-        if (/^[\s?\-\u2013\u2014]*$/.test(v)) return '';
+        if (/^[\s?*\-\u2013\u2014]*$/.test(v)) return '';
         return capNums(v) ? v.replace(/\*$/, '') + ' caps' : v;
     }
     // ── NC values by cap value: which step a value is on (1–2 caps / 3–5 / 6–8 / 9+; a dye note its own), and DTI's own
@@ -11873,7 +11915,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
 
     // ── Backup & restore: everything DTI Enhance keeps in this browser (Tampermonkey storage — notes, tokens,
     // Neofriends, theme, settings — plus Neofriends' saved lists and the token release dates) in one file ──
-    const BACKUP_SKIP = /^(dti_user_id|dti_user_slug|dti_user_name|dti_tok_capture|dti_nf_ping|dti_nf_autocheck_lock|dti_tf_ping|dti_tf_auto_lock|dti_cap_ping)$/;   // who's logged in, and passing signals
+    const BACKUP_SKIP = /^(dti_user_id|dti_user_slug|dti_user_name|dti_tok_capture|dti_nf_ping|dti_nf_autocheck_lock|dti_tf_ping|dti_tf_auto_lock|dti_cap_ping|dti_backup_nag_at)$/;   // who's logged in, and passing signals
     async function dtiBackupData() {
         const gm = {};
         (typeof GM_listValues === 'function' ? GM_listValues() : []).forEach(k => { if (!BACKUP_SKIP.test(k)) gm[k] = GM_getValue(k); });
@@ -11908,6 +11950,27 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         Object.entries(d.gm).forEach(([k, v]) => { if (!BACKUP_SKIP.test(k)) GM_setValue(k, v); });
         for (const [id, snap] of Object.entries(d.idb || {})) { try { await NFDB.put(id, snap); } catch (_) {} }
         Object.entries(d.ls || {}).forEach(([k, v]) => { try { localStorage.setItem(k, v); } catch (_) {} });
+    }
+    // Backup reminders (user asked, with a switch in ⚙ › Backup — on to start): at most once a day, on DTI, when the last backup
+    // is over two weeks old (or there's never been one) and there's something to lose — notes, tokens, Neofriends or Seeking
+    const BACKUP_REMIND_DAYS = 14;
+    const backupRemindOn = () => GM_getValue('dti_backup_remind', true) !== false;
+    function backupWorth() {   // (how many things only this browser has)
+        let n = Object.keys(GM_getValue('dti_tokens', null)?.mine || {}).length + Object.keys(DTISeek.raw().items).length;
+        try { n += DTINotes.all().length + NF.list().length; } catch (_) {}
+        return n;
+    }
+    function backupReminder() {
+        if (window.top !== window || !backupRemindOn() || document.getElementById('dti-page-modal')) return;   // (not over What's new: next page)
+        const last = GM_getValue('dti_last_backup', 0) || 0, now = Date.now(), day = 864e5;
+        if ((last && now - last < BACKUP_REMIND_DAYS * day) || now - (GM_getValue('dti_backup_nag_at', 0) || 0) < day || !backupWorth()) return;
+        GM_setValue('dti_backup_nag_at', now);
+        const days = Math.floor((now - last) / day), ago = days >= 14 ? `${Math.floor(days / 7)} weeks` : `${days} days`;
+        dtiToast(last ? `Your last backup was ${ago} ago \u2014 your notes, tokens and settings live only in this browser`
+            : 'Your notes, tokens and settings live only in this browser \u2014 no backup saved yet', {
+            duration: 12000,
+            action: { label: 'Save backup', run: () => dtiSaveBackup().then(() => dtiToast('Backup saved \u2713', { variant: 'success' }), () => dtiToast('Couldn\u2019t save the backup', { variant: 'error' })) },
+        });
     }
 
     // Your wanted lists (from your saved lists) for a "which wishlist" picker: [{ key, name }] — key is DTI's form key
@@ -12770,6 +12833,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['2.8.3', [
+            'Color and zone filters: a switch by the tip turns off \u201ctwice to leave out\u201d \u2014 then a click just turns a color or zone on and off',
+            'Color filter: your own colors have an \u00d7 (on hover) to remove them',
+            'Backup: a reminder when your last backup is over 2 weeks old (at most once a day) \u2014 switch it off in \u2699 \u203a Backup',
+            'Item pages: with an Advanced theme on, an animated item (falling snow, sparkles\u2026) no longer hides the pet in the preview \u2014 and the previews load lighter',
+            'Fixes: Home and item pages fit narrower windows, the 404 page gets the top bar and one \u201cGo back home\u201d, a \u201c-*\u201d value no longer shows on item tiles, and Trade Finder\u2019s item suggestions lost a stray scrollbar',
+        ]],
         ['2.8.2', [
             'Color filter: an eyedropper — pick a color straight from your pet’s custom (or anything on the screen) to find items close to it (Chrome and Edge)',
             'Lists: a JellyNeo wishlist link in someone’s list description is a button — click to copy the link, ↗ to open it',
@@ -13420,32 +13490,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
     function runPageInit() {
         const _path = location.pathname;
-        // swf-asset iframes run inside outfit-viewer layers
-        if (/^\/swf-assets\//.test(_path)) {
-            GM_addStyle(`
-                button { display: none !important }
-                html, body {
-                    margin: 0 !important;
-                    padding: 0 !important;
-                    width: 100% !important;
-                    height: 100% !important;
-                    overflow: hidden !important;
-                    background: transparent !important;
-                }
-                #asset-canvas {
-                    display: block !important;
-                    width: 100% !important;
-                    height: 100% !important;
-                }
-                #fallback {
-                    display: block !important;
-                    width: 100% !important;
-                    height: 100% !important;
-                    object-fit: contain !important;
-                }
-            `);
-            return;
-        }
         // Always disable DTI's link stylesheets — our GM_addStyle covers all pages (our font link stays).
         document.querySelectorAll('link[rel="stylesheet"]:not([data-dti-font])').forEach(_dtiKillSheet);
         // Re-stamp theme attributes (just in case Turbo touches <html>)
@@ -13562,6 +13606,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         tfAutoCheck();
         paintMallAlert();
         dtiCheckWhatsNew();
+        setTimeout(backupReminder, 4000);
         if (/^\/items\/\d+/.test(_path) && !isNotesPage) { mountItemNoteStrip(); setTimeout(mountItemNoteStrip, 800); mountItemExtras(); setTimeout(mountItemExtras, 800); }
 
         _buildContribLocaleRow();
@@ -13608,6 +13653,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         document.head.appendChild(gfLink);
 
         GM_addStyle(`
+            /* An item's animated layer (a little page in a frame, see the top of the script) keeps the default light/dark — and so
+               does its frame here: when a dark page and its frame differ, the browser paints the frame white, over the pet */
+            outfit-layer iframe { color-scheme: normal !important; }
             /* ── Light mode (default) ──────────────────────────────────────── */
             :root, html[data-mode="light"] {
                 --bg:         #f1effe;
@@ -14851,6 +14899,281 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
 
 
+
+            /* ── From the theme version (sets S5, S6, M1, X2): the bar's under-rule, scrollbars, selection ── */
+            html:is(${_thm(_THEMES_S5)}, ${_thm(_THEMES_S6)}, ${_thm(_THEMES_M1)}, ${_thm(_THEMES_X2)}) #main-nav::after {
+                content: ''; position: absolute; left: 0; right: 0; top: calc(100% + var(--theme-navdeco-gap, 0px)); height: var(--theme-navdeco-h, 3px);
+                background: var(--theme-navdeco, none); pointer-events: none;
+            }
+            html:is(${_thm(_THEMES_S5)}, ${_thm(_THEMES_S6)}, ${_thm(_THEMES_M1)}, ${_thm(_THEMES_X2)}) { scrollbar-color: var(--theme-scroll) var(--theme-scroll-track, transparent); }
+            html:is(${_thm(_THEMES_S5)}, ${_thm(_THEMES_S6)}, ${_thm(_THEMES_M1)}, ${_thm(_THEMES_X2)}) ::selection { background: var(--theme-sel); }
+            html:is(${_thm(['chartreuse'])}) ::selection { color: var(--theme-sel-fg); }
+            html:is(${_thm(_THEMES_M1)}) body::after { content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--theme-decor); }
+
+            /* Neapolitan: strawberry, vanilla and chocolate — a chocolate bar with the three flavours in a stripe under it, every card head one flavour */
+            :root[data-dti-theme="neapolitan"][data-mode][data-style] {
+                --bg: #fbf4ec; --surface: #fffdf9; --surface-2: #fdf8f1; --surface-3: #f5eadb; --border: #ecdcc8; --nav-bg: #fffdf9;
+                --text: #2e1d16; --text-muted: #6a5345; --text-sub: #a68f7f;
+                --accent: #bd4166; --accent-dim: #a63657; --accent-glow: rgba(189,65,102,.12); --accent-text: #b23f60; --accent-fg: #ffffff;
+                --nc: #a0600f; --np: #4a6b35;
+                --solid-bg: #f2a5b8; --solid-fill: linear-gradient(100deg, #f7bccb 0%, #f2a5b8 55%, #ec96ac 100%);
+                --solid-fg: #4a1a28; --solid-fg-2: rgba(74,26,40,.76); --solid-line: rgba(74,26,40,.16); --solid-hover: rgba(255,255,255,.3); --solid-active: rgba(255,255,255,.5);
+                --theme-btn: linear-gradient(180deg, #d4567b, #bb3f63); --theme-btn-fg: #ffffff;
+                --theme-page: radial-gradient(900px 520px at 0% 0%, rgba(247,188,203,.4), transparent 60%), radial-gradient(900px 520px at 100% 100%, rgba(201,160,130,.22), transparent 60%), linear-gradient(180deg, #fcf6ef, #f8efe3);
+                --shadow-sm: 0 1px 2px rgba(90,50,30,.06); --shadow-md: 0 8px 22px rgba(90,50,30,.1); --shadow-lg: 0 18px 44px rgba(90,50,30,.15);
+                --theme-navdeco: linear-gradient(180deg, #f2a5b8 0 3px, #fbefd6 3px 6px, #7a4f39 6px 9px); --theme-navdeco-h: 9px;
+                --theme-scroll: #e0b9a3; --theme-scroll-track: #f8efe3; --theme-sel: rgba(242,165,184,.4);
+            }
+            html[data-dti-theme="neapolitan"][data-style] #main-nav { --solid-bg: #5e3b2b; --solid-fill: linear-gradient(180deg, #6e4634, #573626); --solid-fg: #fff1e2; --solid-fg-2: rgba(255,241,226,.82); --solid-line: rgba(255,241,226,.2); --solid-hover: rgba(255,241,226,.1); --solid-active: rgba(255,241,226,.18); box-shadow: 0 4px 16px rgba(90,50,30,.22) !important; }
+            html[data-dti-theme="neapolitan"][data-style] :is(#dti-sections-top > :nth-child(2), #dti-sections-bot > :nth-child(1)) { --solid-bg: #f4e2bd; --solid-fill: linear-gradient(100deg, #fbf0d8 0%, #f7e7c6 55%, #f2dcb2 100%); --solid-fg: #4a3323; --solid-fg-2: rgba(74,51,35,.76); --solid-line: rgba(74,51,35,.16); --solid-hover: rgba(255,255,255,.4); --solid-active: rgba(255,255,255,.62); }
+            html[data-dti-theme="neapolitan"][data-style] :is(#dti-sections-top > :nth-child(3), #dti-below-grid > :nth-child(1)) { --solid-bg: #6b4430; --solid-fill: linear-gradient(100deg, #7d513b 0%, #6b4430 55%, #5c3a28 100%); --solid-fg: #fff1e2; --solid-fg-2: rgba(255,241,226,.82); --solid-line: rgba(255,241,226,.2); --solid-hover: rgba(255,241,226,.12); --solid-active: rgba(255,241,226,.2); }
+            html[data-dti-theme="neapolitan"][data-style] :is(${_CARDS}) { border-radius: 16px !important; }
+            html[data-dti-theme="neapolitan"][data-style] :is(.btn-primary, .dti-nx-new) { border-radius: 99px !important; }
+
+            /* Oat: warm oatmeal neutrals — soft ceramic cards lit from above, wheat heads, a flat oat bar, brown-sugar buttons; calm, low contrast, nothing shouting */
+            :root[data-dti-theme="oat"][data-mode][data-style] {
+                --bg: #f1ebe1; --surface: #faf6ef; --surface-2: #f6f0e6; --surface-3: #ebe2d4; --border: #e0d5c4; --nav-bg: #faf6ef;
+                --text: #3a2e25; --text-muted: #6a5b4e; --text-sub: #a39484;
+                --accent: #8b5e3c; --accent-dim: #754e31; --accent-glow: rgba(139,94,60,.12); --accent-text: #7f5536; --accent-fg: #ffffff;
+                --nc: #8f5a0c; --np: #4f6a4a;
+                --solid-bg: #e9dfcf; --solid-fill: linear-gradient(180deg, #efe6d9, #e6dac8);
+                --solid-fg: #3a2e25; --solid-fg-2: rgba(58,46,37,.74); --solid-line: rgba(58,46,37,.13); --solid-hover: rgba(139,94,60,.08); --solid-active: rgba(139,94,60,.14);
+                --theme-btn: linear-gradient(180deg, #96684a, #835939); --theme-btn-fg: #fff8ef;
+                --theme-page: radial-gradient(1200px 680px at 50% -16%, rgba(255,250,240,.75), transparent 62%), linear-gradient(180deg, #f3eee5, #ece4d7);
+                --shadow-sm: 0 1px 3px rgba(80,55,30,.06); --shadow-md: 0 12px 30px rgba(80,55,30,.08); --shadow-lg: 0 20px 46px rgba(80,55,30,.12);
+                --theme-scroll: #cdb9a0; --theme-scroll-track: #ede6da; --theme-sel: rgba(139,94,60,.16);
+            }
+            html[data-dti-theme="oat"][data-style] #main-nav { --solid-bg: #e6dccb; --solid-fill: #e6dccb; --solid-fg: #3a2e25; --solid-fg-2: rgba(58,46,37,.74); --solid-line: rgba(58,46,37,.14); --solid-hover: rgba(58,46,37,.06); --solid-active: rgba(58,46,37,.11); box-shadow: inset 0 -1px 0 rgba(58,46,37,.08) !important; }
+            html[data-dti-theme="oat"][data-style] #main-nav :is(.dti-nav-new, .dti-nav-new:hover) { background: linear-gradient(180deg, #96684a, #835939) !important; color: #fff8ef !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.2) !important; }
+            html[data-dti-theme="oat"][data-style] #main-nav .dti-brand-gem { background: #8b5e3c !important; }
+            html[data-dti-theme="oat"][data-style] #main-nav .dti-brand-gem svg :is(path, line) { stroke: #fff8ef !important; }
+            html[data-dti-theme="oat"][data-style] :is(${_CARDS}) { border-radius: 18px !important; border-color: transparent !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.85), 0 1px 2px rgba(80,55,30,.05), var(--shadow-md) !important; }
+            html[data-dti-theme="oat"][data-style] #dti-home-grid .dti-hc-head { box-shadow: inset 0 1px 0 rgba(255,255,255,.6) !important; }
+            html[data-dti-theme="oat"][data-style] .dti-hc-ico { background: #faf6ef !important; color: #8b5e3c !important; border-radius: 50% !important; box-shadow: inset 0 1px 0 #ffffff, 0 1px 2px rgba(80,55,30,.12) !important; }
+            html[data-dti-theme="oat"][data-style] :is(.btn-primary, .dti-nx-new) { border-radius: 12px !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 3px 10px rgba(110,70,40,.18) !important; }
+
+            /* Blood Moon: A red moon over a black night, thin silver lines and blackletter: vampire gothic */
+            :root[data-dti-theme="bloodmoon"][data-mode][data-style] {
+                --bg: #070304;
+                --surface: #100709;
+                --surface-2: #160a0c;
+                --surface-3: #1c0d10;
+                --border: #2d1418;
+                --nav-bg: #0a0405;
+                --text: #f4e4e4;
+                --text-muted: #c7a3a6;
+                --text-sub: #73565a;
+                --accent: #c0172a;
+                --accent-dim: #a51424;
+                --accent-glow: rgba(192,23,42,0.16);
+                --accent-text: #c0172a;
+                --accent-fg: #ffffff;
+                --nc: #ff6b7a;
+                --np: #c8c8d0;
+                --solid-bg: #14080a;
+                --solid-fill: linear-gradient(180deg, #1a0a0d, #100608);
+                --solid-fg: #f4e4e4;
+                --solid-fg-2: rgba(244,228,228,0.72);
+                --solid-line: rgba(244,228,228,0.2);
+                --solid-hover: rgba(244,228,228,0.1);
+                --solid-active: rgba(244,228,228,0.18);
+                --theme-btn: linear-gradient(180deg, #e0283c, #9c0e1e);
+                --theme-btn-fg: #ffffff;
+                --theme-page: radial-gradient(1200px 800px at 85% 10%, rgba(120,10,20,.25), transparent 60%), linear-gradient(180deg, #090405, #040202);
+                --theme-pattern: none;
+                --theme-decor: radial-gradient(circle 110px at calc(100% - 230px) 230px, rgba(0,0,0,0) 0 40%, rgba(60,0,0,.35) 100%), radial-gradient(circle 30px at calc(100% - 262px) 206px, rgba(90,10,10,.35), transparent 100%), radial-gradient(circle 22px at calc(100% - 200px) 262px, rgba(90,10,10,.3), transparent 100%), radial-gradient(circle 40px at calc(100% - 214px) 196px, rgba(110,15,10,.25), transparent 100%), radial-gradient(circle 110px at calc(100% - 230px) 230px, #d8402c 0 55%, #a8221a 88%, #7a120e 98%, transparent 100%), radial-gradient(circle 300px at calc(100% - 230px) 230px, rgba(200,40,30,.28), transparent 70%);
+                --shadow-sm: 0 2px 8px rgba(0,0,0,.6);
+                --shadow-md: 0 12px 32px rgba(0,0,0,.6);
+                --shadow-lg: 0 22px 50px rgba(0,0,0,.6);
+                --theme-font: 'UnifrakturMaguntia', serif;
+                --theme-font-wt: 400;
+                --theme-hc-size: 19px;
+                --theme-hc-track: 0;
+                --theme-hc-case: none;
+                --theme-brand-track: 0;
+                --theme-navdeco: linear-gradient(90deg, transparent, #c8c8d0 30%, #c8c8d0 70%, transparent);
+                --theme-navdeco-h: 1px;
+                --theme-scroll: #54494b;
+                --theme-scroll-track: #070304;
+                --theme-sel: rgba(192,23,42,0.3);
+                --theme-ed-panel: #160a0c;
+            }
+            html[data-dti-theme="bloodmoon"][data-style] :is(.dti-section-card, #dti-hero) { border: 1px solid rgba(200,200,208,.18) !important; border-radius: 2px !important; box-shadow: inset 0 0 0 3px var(--surface), inset 0 0 0 4px rgba(200,200,208,.08), 0 18px 40px rgba(0,0,0,.6) !important; }
+            html[data-dti-theme="bloodmoon"][data-style] #dti-home-grid .dti-hc-head { border-bottom: 1px solid rgba(192,23,42,.5) !important; }
+            html[data-dti-theme="bloodmoon"][data-style] #dti-home-grid .dti-hc-head .dti-hc-ico { background: transparent !important; color: #c8c8d0 !important; box-shadow: inset 0 0 0 1px rgba(200,200,208,.4); border-radius: 0 !important; transform: rotate(45deg) scale(.82); }
+            html[data-dti-theme="bloodmoon"][data-style] #dti-home-grid .dti-hc-head .dti-hc-ico svg { transform: rotate(-45deg); }
+            html[data-dti-theme="bloodmoon"][data-style] #dti-hero-right h1 { font-size: 38px !important; letter-spacing: 0 !important; }
+            html[data-dti-theme="bloodmoon"][data-style] #dti-hero-right h1 span { background: none; -webkit-text-fill-color: #d8283c; color: #d8283c; text-shadow: 0 0 20px rgba(200,30,40,.4); }
+            html[data-dti-theme="bloodmoon"][data-style] :is(.btn-primary, .dti-nx-new) { border-radius: 1px !important; letter-spacing: .06em; }
+            html[data-dti-theme="bloodmoon"][data-style] #dti-pet-display { border-radius: 1px !important; box-shadow: 0 0 0 1px rgba(200,200,208,.45), 0 0 0 6px #100709, 0 0 0 7px rgba(192,23,42,.5), 0 18px 40px rgba(0,0,0,.6) !important; }
+
+            /* Arcane: A summoning circle turning slowly in silver light on deep ultramarine */
+            :root[data-dti-theme="arcane"][data-mode][data-style] {
+                --bg: #060b22;
+                --surface: #0b1233;
+                --surface-2: #0f1840;
+                --surface-3: #14204f;
+                --border: #22306a;
+                --nav-bg: #081030;
+                --text: #eef1ff;
+                --text-muted: #a3aed6;
+                --text-sub: #64709e;
+                --accent: #bcd0ff;
+                --accent-dim: #a2b3db;
+                --accent-glow: rgba(188,208,255,0.16);
+                --accent-text: #bcd0ff;
+                --accent-fg: #0a1030;
+                --nc: #ffd98a;
+                --np: #9fe0ff;
+                --solid-bg: #0f1a4a;
+                --solid-fill: linear-gradient(180deg, #13205a, #0c1540);
+                --solid-fg: #eef1ff;
+                --solid-fg-2: rgba(238,241,255,0.72);
+                --solid-line: rgba(238,241,255,0.2);
+                --solid-hover: rgba(238,241,255,0.1);
+                --solid-active: rgba(238,241,255,0.18);
+                --theme-btn: linear-gradient(180deg, #f2f5ff, #c8d6ff 60%, #9fb4f0);
+                --theme-btn-fg: #0a1030;
+                --theme-page: radial-gradient(900px 900px at 0% 52%, rgba(90,120,255,.22), transparent 60%), radial-gradient(800px 700px at 100% 0%, rgba(60,90,220,.16), transparent 60%), linear-gradient(180deg, #070c26, #04081a);
+                --theme-pattern: none;
+                --theme-decor: none;
+                --shadow-sm: 0 2px 8px rgba(0,0,10,.6);
+                --shadow-md: 0 12px 32px rgba(0,0,10,.6);
+                --shadow-lg: 0 22px 50px rgba(0,0,10,.6);
+                --theme-font: 'Cinzel Decorative', 'Trajan Pro', serif;
+                --theme-font-wt: 700;
+                --theme-hc-size: 13px;
+                --theme-hc-track: .06em;
+                --theme-hc-case: none;
+                --theme-brand-track: .04em;
+                --theme-navdeco: linear-gradient(90deg, transparent, rgba(220,232,255,.6), transparent);
+                --theme-navdeco-h: 1px;
+                --theme-scroll: #4f5570;
+                --theme-scroll-track: #060b22;
+                --theme-sel: rgba(188,208,255,.3);
+                --theme-ed-panel: #0f1840;
+            }
+            html[data-dti-theme="arcane"][data-style]::before { content: ''; position: fixed; width: 860px; height: 860px; left: -430px; top: calc(50vh - 400px); z-index: -1; pointer-events: none;
+                background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 800'%3E%3Cg fill='none' stroke='%23dfe8ff' stroke-linecap='round' opacity='1'%3E%3Ccircle cx='400' cy='400' r='390' stroke-width='2.2'/%3E%3Ccircle cx='400' cy='400' r='372' stroke-width='1'/%3E%3Ccircle cx='400' cy='400' r='300' stroke-width='2'/%3E%3Ccircle cx='400' cy='400' r='286' stroke-width='1'/%3E%3Ccircle cx='400' cy='400' r='180' stroke-width='1.4'/%3E%3Ccircle cx='400' cy='400' r='168' stroke-width='0.8'/%3E%3Ccircle cx='400' cy='400' r='120' stroke-width='1.2'/%3E%3Ccircle cx='400' cy='400' r='40' stroke-width='1'/%3E%3Cline x1='774.0' y1='400.0' x2='790.0' y2='400.0' stroke-width='1'/%3E%3Cline x1='773.2' y1='424.5' x2='781.2' y2='425.0' stroke-width='1'/%3E%3Cline x1='770.8' y1='448.8' x2='778.7' y2='449.9' stroke-width='1'/%3E%3Cline x1='766.8' y1='473.0' x2='774.7' y2='474.5' stroke-width='1'/%3E%3Cline x1='761.3' y1='496.8' x2='776.7' y2='500.9' stroke-width='1'/%3E%3Cline x1='754.2' y1='520.2' x2='761.7' y2='522.8' stroke-width='1'/%3E%3Cline x1='745.5' y1='543.1' x2='752.9' y2='546.2' stroke-width='1'/%3E%3Cline x1='735.4' y1='565.4' x2='742.6' y2='569.0' stroke-width='1'/%3E%3Cline x1='723.9' y1='587.0' x2='737.7' y2='595.0' stroke-width='1'/%3E%3Cline x1='711.0' y1='607.8' x2='717.6' y2='612.2' stroke-width='1'/%3E%3Cline x1='696.7' y1='627.7' x2='703.1' y2='632.5' stroke-width='1'/%3E%3Cline x1='681.2' y1='646.6' x2='687.2' y2='651.9' stroke-width='1'/%3E%3Cline x1='664.5' y1='664.5' x2='675.8' y2='675.8' stroke-width='1'/%3E%3Cline x1='646.6' y1='681.2' x2='651.9' y2='687.2' stroke-width='1'/%3E%3Cline x1='627.7' y1='696.7' x2='632.5' y2='703.1' stroke-width='1'/%3E%3Cline x1='607.8' y1='711.0' x2='612.2' y2='717.6' stroke-width='1'/%3E%3Cline x1='587.0' y1='723.9' x2='595.0' y2='737.7' stroke-width='1'/%3E%3Cline x1='565.4' y1='735.4' x2='569.0' y2='742.6' stroke-width='1'/%3E%3Cline x1='543.1' y1='745.5' x2='546.2' y2='752.9' stroke-width='1'/%3E%3Cline x1='520.2' y1='754.2' x2='522.8' y2='761.7' stroke-width='1'/%3E%3Cline x1='496.8' y1='761.3' x2='500.9' y2='776.7' stroke-width='1'/%3E%3Cline x1='473.0' y1='766.8' x2='474.5' y2='774.7' stroke-width='1'/%3E%3Cline x1='448.8' y1='770.8' x2='449.9' y2='778.7' stroke-width='1'/%3E%3Cline x1='424.5' y1='773.2' x2='425.0' y2='781.2' stroke-width='1'/%3E%3Cline x1='400.0' y1='774.0' x2='400.0' y2='790.0' stroke-width='1'/%3E%3Cline x1='375.5' y1='773.2' x2='375.0' y2='781.2' stroke-width='1'/%3E%3Cline x1='351.2' y1='770.8' x2='350.1' y2='778.7' stroke-width='1'/%3E%3Cline x1='327.0' y1='766.8' x2='325.5' y2='774.7' stroke-width='1'/%3E%3Cline x1='303.2' y1='761.3' x2='299.1' y2='776.7' stroke-width='1'/%3E%3Cline x1='279.8' y1='754.2' x2='277.2' y2='761.7' stroke-width='1'/%3E%3Cline x1='256.9' y1='745.5' x2='253.8' y2='752.9' stroke-width='1'/%3E%3Cline x1='234.6' y1='735.4' x2='231.0' y2='742.6' stroke-width='1'/%3E%3Cline x1='213.0' y1='723.9' x2='205.0' y2='737.7' stroke-width='1'/%3E%3Cline x1='192.2' y1='711.0' x2='187.8' y2='717.6' stroke-width='1'/%3E%3Cline x1='172.3' y1='696.7' x2='167.5' y2='703.1' stroke-width='1'/%3E%3Cline x1='153.4' y1='681.2' x2='148.1' y2='687.2' stroke-width='1'/%3E%3Cline x1='135.5' y1='664.5' x2='124.2' y2='675.8' stroke-width='1'/%3E%3Cline x1='118.8' y1='646.6' x2='112.8' y2='651.9' stroke-width='1'/%3E%3Cline x1='103.3' y1='627.7' x2='96.9' y2='632.5' stroke-width='1'/%3E%3Cline x1='89.0' y1='607.8' x2='82.4' y2='612.2' stroke-width='1'/%3E%3Cline x1='76.1' y1='587.0' x2='62.3' y2='595.0' stroke-width='1'/%3E%3Cline x1='64.6' y1='565.4' x2='57.4' y2='569.0' stroke-width='1'/%3E%3Cline x1='54.5' y1='543.1' x2='47.1' y2='546.2' stroke-width='1'/%3E%3Cline x1='45.8' y1='520.2' x2='38.3' y2='522.8' stroke-width='1'/%3E%3Cline x1='38.7' y1='496.8' x2='23.3' y2='500.9' stroke-width='1'/%3E%3Cline x1='33.2' y1='473.0' x2='25.3' y2='474.5' stroke-width='1'/%3E%3Cline x1='29.2' y1='448.8' x2='21.3' y2='449.9' stroke-width='1'/%3E%3Cline x1='26.8' y1='424.5' x2='18.8' y2='425.0' stroke-width='1'/%3E%3Cline x1='26.0' y1='400.0' x2='10.0' y2='400.0' stroke-width='1'/%3E%3Cline x1='26.8' y1='375.5' x2='18.8' y2='375.0' stroke-width='1'/%3E%3Cline x1='29.2' y1='351.2' x2='21.3' y2='350.1' stroke-width='1'/%3E%3Cline x1='33.2' y1='327.0' x2='25.3' y2='325.5' stroke-width='1'/%3E%3Cline x1='38.7' y1='303.2' x2='23.3' y2='299.1' stroke-width='1'/%3E%3Cline x1='45.8' y1='279.8' x2='38.3' y2='277.2' stroke-width='1'/%3E%3Cline x1='54.5' y1='256.9' x2='47.1' y2='253.8' stroke-width='1'/%3E%3Cline x1='64.6' y1='234.6' x2='57.4' y2='231.0' stroke-width='1'/%3E%3Cline x1='76.1' y1='213.0' x2='62.3' y2='205.0' stroke-width='1'/%3E%3Cline x1='89.0' y1='192.2' x2='82.4' y2='187.8' stroke-width='1'/%3E%3Cline x1='103.3' y1='172.3' x2='96.9' y2='167.5' stroke-width='1'/%3E%3Cline x1='118.8' y1='153.4' x2='112.8' y2='148.1' stroke-width='1'/%3E%3Cline x1='135.5' y1='135.5' x2='124.2' y2='124.2' stroke-width='1'/%3E%3Cline x1='153.4' y1='118.8' x2='148.1' y2='112.8' stroke-width='1'/%3E%3Cline x1='172.3' y1='103.3' x2='167.5' y2='96.9' stroke-width='1'/%3E%3Cline x1='192.2' y1='89.0' x2='187.8' y2='82.4' stroke-width='1'/%3E%3Cline x1='213.0' y1='76.1' x2='205.0' y2='62.3' stroke-width='1'/%3E%3Cline x1='234.6' y1='64.6' x2='231.0' y2='57.4' stroke-width='1'/%3E%3Cline x1='256.9' y1='54.5' x2='253.8' y2='47.1' stroke-width='1'/%3E%3Cline x1='279.8' y1='45.8' x2='277.2' y2='38.3' stroke-width='1'/%3E%3Cline x1='303.2' y1='38.7' x2='299.1' y2='23.3' stroke-width='1'/%3E%3Cline x1='327.0' y1='33.2' x2='325.5' y2='25.3' stroke-width='1'/%3E%3Cline x1='351.2' y1='29.2' x2='350.1' y2='21.3' stroke-width='1'/%3E%3Cline x1='375.5' y1='26.8' x2='375.0' y2='18.8' stroke-width='1'/%3E%3Cline x1='400.0' y1='26.0' x2='400.0' y2='10.0' stroke-width='1'/%3E%3Cline x1='424.5' y1='26.8' x2='425.0' y2='18.8' stroke-width='1'/%3E%3Cline x1='448.8' y1='29.2' x2='449.9' y2='21.3' stroke-width='1'/%3E%3Cline x1='473.0' y1='33.2' x2='474.5' y2='25.3' stroke-width='1'/%3E%3Cline x1='496.8' y1='38.7' x2='500.9' y2='23.3' stroke-width='1'/%3E%3Cline x1='520.2' y1='45.8' x2='522.8' y2='38.3' stroke-width='1'/%3E%3Cline x1='543.1' y1='54.5' x2='546.2' y2='47.1' stroke-width='1'/%3E%3Cline x1='565.4' y1='64.6' x2='569.0' y2='57.4' stroke-width='1'/%3E%3Cline x1='587.0' y1='76.1' x2='595.0' y2='62.3' stroke-width='1'/%3E%3Cline x1='607.8' y1='89.0' x2='612.2' y2='82.4' stroke-width='1'/%3E%3Cline x1='627.7' y1='103.3' x2='632.5' y2='96.9' stroke-width='1'/%3E%3Cline x1='646.6' y1='118.8' x2='651.9' y2='112.8' stroke-width='1'/%3E%3Cline x1='664.5' y1='135.5' x2='675.8' y2='124.2' stroke-width='1'/%3E%3Cline x1='681.2' y1='153.4' x2='687.2' y2='148.1' stroke-width='1'/%3E%3Cline x1='696.7' y1='172.3' x2='703.1' y2='167.5' stroke-width='1'/%3E%3Cline x1='711.0' y1='192.2' x2='717.6' y2='187.8' stroke-width='1'/%3E%3Cline x1='723.9' y1='213.0' x2='737.7' y2='205.0' stroke-width='1'/%3E%3Cline x1='735.4' y1='234.6' x2='742.6' y2='231.0' stroke-width='1'/%3E%3Cline x1='745.5' y1='256.9' x2='752.9' y2='253.8' stroke-width='1'/%3E%3Cline x1='754.2' y1='279.8' x2='761.7' y2='277.2' stroke-width='1'/%3E%3Cline x1='761.3' y1='303.2' x2='776.7' y2='299.1' stroke-width='1'/%3E%3Cline x1='766.8' y1='327.0' x2='774.7' y2='325.5' stroke-width='1'/%3E%3Cline x1='770.8' y1='351.2' x2='778.7' y2='350.1' stroke-width='1'/%3E%3Cline x1='773.2' y1='375.5' x2='781.2' y2='375.0' stroke-width='1'/%3E%3Ccircle cx='400.0' cy='64.0' r='9' stroke-width='1.2'/%3E%3Ccircle cx='400.0' cy='64.0' r='2' fill='%23dfe8ff'/%3E%3Cpath d='M487.0 66.4 l9 15 h-18 z' stroke-width='1.2'/%3E%3Cpath d='M568.0 99.0 v20 M560.0 106.0 h16' stroke-width='1.2'/%3E%3Cpath d='M637.6 153.4 l8 9 l-8 9 l-8 -9 z' stroke-width='1.2'/%3E%3Ccircle cx='691.0' cy='232.0' r='9' stroke-width='1.2'/%3E%3Ccircle cx='691.0' cy='232.0' r='2' fill='%23dfe8ff'/%3E%3Cpath d='M724.6 304.0 l9 15 h-18 z' stroke-width='1.2'/%3E%3Cpath d='M736.0 390.0 v20 M728.0 397.0 h16' stroke-width='1.2'/%3E%3Cpath d='M724.6 478.0 l8 9 l-8 9 l-8 -9 z' stroke-width='1.2'/%3E%3Ccircle cx='691.0' cy='568.0' r='9' stroke-width='1.2'/%3E%3Ccircle cx='691.0' cy='568.0' r='2' fill='%23dfe8ff'/%3E%3Cpath d='M637.6 628.6 l9 15 h-18 z' stroke-width='1.2'/%3E%3Cpath d='M568.0 681.0 v20 M560.0 688.0 h16' stroke-width='1.2'/%3E%3Cpath d='M487.0 715.6 l8 9 l-8 9 l-8 -9 z' stroke-width='1.2'/%3E%3Ccircle cx='400.0' cy='736.0' r='9' stroke-width='1.2'/%3E%3Ccircle cx='400.0' cy='736.0' r='2' fill='%23dfe8ff'/%3E%3Cpath d='M313.0 715.6 l9 15 h-18 z' stroke-width='1.2'/%3E%3Cpath d='M232.0 681.0 v20 M224.0 688.0 h16' stroke-width='1.2'/%3E%3Cpath d='M162.4 628.6 l8 9 l-8 9 l-8 -9 z' stroke-width='1.2'/%3E%3Ccircle cx='109.0' cy='568.0' r='9' stroke-width='1.2'/%3E%3Ccircle cx='109.0' cy='568.0' r='2' fill='%23dfe8ff'/%3E%3Cpath d='M75.4 478.0 l9 15 h-18 z' stroke-width='1.2'/%3E%3Cpath d='M64.0 390.0 v20 M56.0 397.0 h16' stroke-width='1.2'/%3E%3Cpath d='M75.4 304.0 l8 9 l-8 9 l-8 -9 z' stroke-width='1.2'/%3E%3Ccircle cx='109.0' cy='232.0' r='9' stroke-width='1.2'/%3E%3Ccircle cx='109.0' cy='232.0' r='2' fill='%23dfe8ff'/%3E%3Cpath d='M162.4 153.4 l9 15 h-18 z' stroke-width='1.2'/%3E%3Cpath d='M232.0 99.0 v20 M224.0 106.0 h16' stroke-width='1.2'/%3E%3Cpath d='M313.0 66.4 l8 9 l-8 9 l-8 -9 z' stroke-width='1.2'/%3E%3Cpath d='M400.0 114.0 L524.1 657.7 L176.4 221.7 L678.8 463.6 L121.2 463.6 L623.6 221.7 L275.9 657.7 L400.0 114.0' stroke-width='1.4'/%3E%3Ccircle cx='400.0' cy='114.0' r='13' stroke-width='1.2'/%3E%3Ccircle cx='400.0' cy='114.0' r='4' stroke-width='1'/%3E%3Ccircle cx='623.6' cy='221.7' r='13' stroke-width='1.2'/%3E%3Ccircle cx='623.6' cy='221.7' r='4' stroke-width='1'/%3E%3Ccircle cx='678.8' cy='463.6' r='13' stroke-width='1.2'/%3E%3Ccircle cx='678.8' cy='463.6' r='4' stroke-width='1'/%3E%3Ccircle cx='524.1' cy='657.7' r='13' stroke-width='1.2'/%3E%3Ccircle cx='524.1' cy='657.7' r='4' stroke-width='1'/%3E%3Ccircle cx='275.9' cy='657.7' r='13' stroke-width='1.2'/%3E%3Ccircle cx='275.9' cy='657.7' r='4' stroke-width='1'/%3E%3Ccircle cx='121.2' cy='463.6' r='13' stroke-width='1.2'/%3E%3Ccircle cx='121.2' cy='463.6' r='4' stroke-width='1'/%3E%3Ccircle cx='176.4' cy='221.7' r='13' stroke-width='1.2'/%3E%3Ccircle cx='176.4' cy='221.7' r='4' stroke-width='1'/%3E%3Cpath d='M484.9 484.9 L315.1 484.9 L315.1 315.1 L484.9 315.1 Z' stroke-width='1'/%3E%3Cpath d='M404 374 a26 26 0 1 0 0 52 a20 20 0 1 1 0 -52' stroke-width='1.4'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat; filter: drop-shadow(0 0 6px rgba(180,200,255,.55)); opacity: .55; animation: dti-arcane-arcane 320s linear infinite; }
+            html[data-dti-theme="arcane"][data-style] #container::before { content: ''; position: fixed; width: 420px; height: 420px; right: -150px; top: 70px; z-index: -1; pointer-events: none;
+                background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 800'%3E%3Cg fill='none' stroke='%23dfe8ff' stroke-linecap='round' opacity='0.85'%3E%3Ccircle cx='400' cy='400' r='390' stroke-width='2.2'/%3E%3Ccircle cx='400' cy='400' r='372' stroke-width='1'/%3E%3Ccircle cx='400' cy='400' r='300' stroke-width='2'/%3E%3Ccircle cx='400' cy='400' r='286' stroke-width='1'/%3E%3Ccircle cx='400' cy='400' r='180' stroke-width='1.4'/%3E%3Ccircle cx='400' cy='400' r='168' stroke-width='0.8'/%3E%3Ccircle cx='400' cy='400' r='120' stroke-width='1.2'/%3E%3Ccircle cx='400' cy='400' r='40' stroke-width='1'/%3E%3Cline x1='774.0' y1='400.0' x2='790.0' y2='400.0' stroke-width='1'/%3E%3Cline x1='773.2' y1='424.5' x2='781.2' y2='425.0' stroke-width='1'/%3E%3Cline x1='770.8' y1='448.8' x2='778.7' y2='449.9' stroke-width='1'/%3E%3Cline x1='766.8' y1='473.0' x2='774.7' y2='474.5' stroke-width='1'/%3E%3Cline x1='761.3' y1='496.8' x2='776.7' y2='500.9' stroke-width='1'/%3E%3Cline x1='754.2' y1='520.2' x2='761.7' y2='522.8' stroke-width='1'/%3E%3Cline x1='745.5' y1='543.1' x2='752.9' y2='546.2' stroke-width='1'/%3E%3Cline x1='735.4' y1='565.4' x2='742.6' y2='569.0' stroke-width='1'/%3E%3Cline x1='723.9' y1='587.0' x2='737.7' y2='595.0' stroke-width='1'/%3E%3Cline x1='711.0' y1='607.8' x2='717.6' y2='612.2' stroke-width='1'/%3E%3Cline x1='696.7' y1='627.7' x2='703.1' y2='632.5' stroke-width='1'/%3E%3Cline x1='681.2' y1='646.6' x2='687.2' y2='651.9' stroke-width='1'/%3E%3Cline x1='664.5' y1='664.5' x2='675.8' y2='675.8' stroke-width='1'/%3E%3Cline x1='646.6' y1='681.2' x2='651.9' y2='687.2' stroke-width='1'/%3E%3Cline x1='627.7' y1='696.7' x2='632.5' y2='703.1' stroke-width='1'/%3E%3Cline x1='607.8' y1='711.0' x2='612.2' y2='717.6' stroke-width='1'/%3E%3Cline x1='587.0' y1='723.9' x2='595.0' y2='737.7' stroke-width='1'/%3E%3Cline x1='565.4' y1='735.4' x2='569.0' y2='742.6' stroke-width='1'/%3E%3Cline x1='543.1' y1='745.5' x2='546.2' y2='752.9' stroke-width='1'/%3E%3Cline x1='520.2' y1='754.2' x2='522.8' y2='761.7' stroke-width='1'/%3E%3Cline x1='496.8' y1='761.3' x2='500.9' y2='776.7' stroke-width='1'/%3E%3Cline x1='473.0' y1='766.8' x2='474.5' y2='774.7' stroke-width='1'/%3E%3Cline x1='448.8' y1='770.8' x2='449.9' y2='778.7' stroke-width='1'/%3E%3Cline x1='424.5' y1='773.2' x2='425.0' y2='781.2' stroke-width='1'/%3E%3Cline x1='400.0' y1='774.0' x2='400.0' y2='790.0' stroke-width='1'/%3E%3Cline x1='375.5' y1='773.2' x2='375.0' y2='781.2' stroke-width='1'/%3E%3Cline x1='351.2' y1='770.8' x2='350.1' y2='778.7' stroke-width='1'/%3E%3Cline x1='327.0' y1='766.8' x2='325.5' y2='774.7' stroke-width='1'/%3E%3Cline x1='303.2' y1='761.3' x2='299.1' y2='776.7' stroke-width='1'/%3E%3Cline x1='279.8' y1='754.2' x2='277.2' y2='761.7' stroke-width='1'/%3E%3Cline x1='256.9' y1='745.5' x2='253.8' y2='752.9' stroke-width='1'/%3E%3Cline x1='234.6' y1='735.4' x2='231.0' y2='742.6' stroke-width='1'/%3E%3Cline x1='213.0' y1='723.9' x2='205.0' y2='737.7' stroke-width='1'/%3E%3Cline x1='192.2' y1='711.0' x2='187.8' y2='717.6' stroke-width='1'/%3E%3Cline x1='172.3' y1='696.7' x2='167.5' y2='703.1' stroke-width='1'/%3E%3Cline x1='153.4' y1='681.2' x2='148.1' y2='687.2' stroke-width='1'/%3E%3Cline x1='135.5' y1='664.5' x2='124.2' y2='675.8' stroke-width='1'/%3E%3Cline x1='118.8' y1='646.6' x2='112.8' y2='651.9' stroke-width='1'/%3E%3Cline x1='103.3' y1='627.7' x2='96.9' y2='632.5' stroke-width='1'/%3E%3Cline x1='89.0' y1='607.8' x2='82.4' y2='612.2' stroke-width='1'/%3E%3Cline x1='76.1' y1='587.0' x2='62.3' y2='595.0' stroke-width='1'/%3E%3Cline x1='64.6' y1='565.4' x2='57.4' y2='569.0' stroke-width='1'/%3E%3Cline x1='54.5' y1='543.1' x2='47.1' y2='546.2' stroke-width='1'/%3E%3Cline x1='45.8' y1='520.2' x2='38.3' y2='522.8' stroke-width='1'/%3E%3Cline x1='38.7' y1='496.8' x2='23.3' y2='500.9' stroke-width='1'/%3E%3Cline x1='33.2' y1='473.0' x2='25.3' y2='474.5' stroke-width='1'/%3E%3Cline x1='29.2' y1='448.8' x2='21.3' y2='449.9' stroke-width='1'/%3E%3Cline x1='26.8' y1='424.5' x2='18.8' y2='425.0' stroke-width='1'/%3E%3Cline x1='26.0' y1='400.0' x2='10.0' y2='400.0' stroke-width='1'/%3E%3Cline x1='26.8' y1='375.5' x2='18.8' y2='375.0' stroke-width='1'/%3E%3Cline x1='29.2' y1='351.2' x2='21.3' y2='350.1' stroke-width='1'/%3E%3Cline x1='33.2' y1='327.0' x2='25.3' y2='325.5' stroke-width='1'/%3E%3Cline x1='38.7' y1='303.2' x2='23.3' y2='299.1' stroke-width='1'/%3E%3Cline x1='45.8' y1='279.8' x2='38.3' y2='277.2' stroke-width='1'/%3E%3Cline x1='54.5' y1='256.9' x2='47.1' y2='253.8' stroke-width='1'/%3E%3Cline x1='64.6' y1='234.6' x2='57.4' y2='231.0' stroke-width='1'/%3E%3Cline x1='76.1' y1='213.0' x2='62.3' y2='205.0' stroke-width='1'/%3E%3Cline x1='89.0' y1='192.2' x2='82.4' y2='187.8' stroke-width='1'/%3E%3Cline x1='103.3' y1='172.3' x2='96.9' y2='167.5' stroke-width='1'/%3E%3Cline x1='118.8' y1='153.4' x2='112.8' y2='148.1' stroke-width='1'/%3E%3Cline x1='135.5' y1='135.5' x2='124.2' y2='124.2' stroke-width='1'/%3E%3Cline x1='153.4' y1='118.8' x2='148.1' y2='112.8' stroke-width='1'/%3E%3Cline x1='172.3' y1='103.3' x2='167.5' y2='96.9' stroke-width='1'/%3E%3Cline x1='192.2' y1='89.0' x2='187.8' y2='82.4' stroke-width='1'/%3E%3Cline x1='213.0' y1='76.1' x2='205.0' y2='62.3' stroke-width='1'/%3E%3Cline x1='234.6' y1='64.6' x2='231.0' y2='57.4' stroke-width='1'/%3E%3Cline x1='256.9' y1='54.5' x2='253.8' y2='47.1' stroke-width='1'/%3E%3Cline x1='279.8' y1='45.8' x2='277.2' y2='38.3' stroke-width='1'/%3E%3Cline x1='303.2' y1='38.7' x2='299.1' y2='23.3' stroke-width='1'/%3E%3Cline x1='327.0' y1='33.2' x2='325.5' y2='25.3' stroke-width='1'/%3E%3Cline x1='351.2' y1='29.2' x2='350.1' y2='21.3' stroke-width='1'/%3E%3Cline x1='375.5' y1='26.8' x2='375.0' y2='18.8' stroke-width='1'/%3E%3Cline x1='400.0' y1='26.0' x2='400.0' y2='10.0' stroke-width='1'/%3E%3Cline x1='424.5' y1='26.8' x2='425.0' y2='18.8' stroke-width='1'/%3E%3Cline x1='448.8' y1='29.2' x2='449.9' y2='21.3' stroke-width='1'/%3E%3Cline x1='473.0' y1='33.2' x2='474.5' y2='25.3' stroke-width='1'/%3E%3Cline x1='496.8' y1='38.7' x2='500.9' y2='23.3' stroke-width='1'/%3E%3Cline x1='520.2' y1='45.8' x2='522.8' y2='38.3' stroke-width='1'/%3E%3Cline x1='543.1' y1='54.5' x2='546.2' y2='47.1' stroke-width='1'/%3E%3Cline x1='565.4' y1='64.6' x2='569.0' y2='57.4' stroke-width='1'/%3E%3Cline x1='587.0' y1='76.1' x2='595.0' y2='62.3' stroke-width='1'/%3E%3Cline x1='607.8' y1='89.0' x2='612.2' y2='82.4' stroke-width='1'/%3E%3Cline x1='627.7' y1='103.3' x2='632.5' y2='96.9' stroke-width='1'/%3E%3Cline x1='646.6' y1='118.8' x2='651.9' y2='112.8' stroke-width='1'/%3E%3Cline x1='664.5' y1='135.5' x2='675.8' y2='124.2' stroke-width='1'/%3E%3Cline x1='681.2' y1='153.4' x2='687.2' y2='148.1' stroke-width='1'/%3E%3Cline x1='696.7' y1='172.3' x2='703.1' y2='167.5' stroke-width='1'/%3E%3Cline x1='711.0' y1='192.2' x2='717.6' y2='187.8' stroke-width='1'/%3E%3Cline x1='723.9' y1='213.0' x2='737.7' y2='205.0' stroke-width='1'/%3E%3Cline x1='735.4' y1='234.6' x2='742.6' y2='231.0' stroke-width='1'/%3E%3Cline x1='745.5' y1='256.9' x2='752.9' y2='253.8' stroke-width='1'/%3E%3Cline x1='754.2' y1='279.8' x2='761.7' y2='277.2' stroke-width='1'/%3E%3Cline x1='761.3' y1='303.2' x2='776.7' y2='299.1' stroke-width='1'/%3E%3Cline x1='766.8' y1='327.0' x2='774.7' y2='325.5' stroke-width='1'/%3E%3Cline x1='770.8' y1='351.2' x2='778.7' y2='350.1' stroke-width='1'/%3E%3Cline x1='773.2' y1='375.5' x2='781.2' y2='375.0' stroke-width='1'/%3E%3Ccircle cx='400.0' cy='64.0' r='9' stroke-width='1.2'/%3E%3Ccircle cx='400.0' cy='64.0' r='2' fill='%23dfe8ff'/%3E%3Cpath d='M487.0 66.4 l9 15 h-18 z' stroke-width='1.2'/%3E%3Cpath d='M568.0 99.0 v20 M560.0 106.0 h16' stroke-width='1.2'/%3E%3Cpath d='M637.6 153.4 l8 9 l-8 9 l-8 -9 z' stroke-width='1.2'/%3E%3Ccircle cx='691.0' cy='232.0' r='9' stroke-width='1.2'/%3E%3Ccircle cx='691.0' cy='232.0' r='2' fill='%23dfe8ff'/%3E%3Cpath d='M724.6 304.0 l9 15 h-18 z' stroke-width='1.2'/%3E%3Cpath d='M736.0 390.0 v20 M728.0 397.0 h16' stroke-width='1.2'/%3E%3Cpath d='M724.6 478.0 l8 9 l-8 9 l-8 -9 z' stroke-width='1.2'/%3E%3Ccircle cx='691.0' cy='568.0' r='9' stroke-width='1.2'/%3E%3Ccircle cx='691.0' cy='568.0' r='2' fill='%23dfe8ff'/%3E%3Cpath d='M637.6 628.6 l9 15 h-18 z' stroke-width='1.2'/%3E%3Cpath d='M568.0 681.0 v20 M560.0 688.0 h16' stroke-width='1.2'/%3E%3Cpath d='M487.0 715.6 l8 9 l-8 9 l-8 -9 z' stroke-width='1.2'/%3E%3Ccircle cx='400.0' cy='736.0' r='9' stroke-width='1.2'/%3E%3Ccircle cx='400.0' cy='736.0' r='2' fill='%23dfe8ff'/%3E%3Cpath d='M313.0 715.6 l9 15 h-18 z' stroke-width='1.2'/%3E%3Cpath d='M232.0 681.0 v20 M224.0 688.0 h16' stroke-width='1.2'/%3E%3Cpath d='M162.4 628.6 l8 9 l-8 9 l-8 -9 z' stroke-width='1.2'/%3E%3Ccircle cx='109.0' cy='568.0' r='9' stroke-width='1.2'/%3E%3Ccircle cx='109.0' cy='568.0' r='2' fill='%23dfe8ff'/%3E%3Cpath d='M75.4 478.0 l9 15 h-18 z' stroke-width='1.2'/%3E%3Cpath d='M64.0 390.0 v20 M56.0 397.0 h16' stroke-width='1.2'/%3E%3Cpath d='M75.4 304.0 l8 9 l-8 9 l-8 -9 z' stroke-width='1.2'/%3E%3Ccircle cx='109.0' cy='232.0' r='9' stroke-width='1.2'/%3E%3Ccircle cx='109.0' cy='232.0' r='2' fill='%23dfe8ff'/%3E%3Cpath d='M162.4 153.4 l9 15 h-18 z' stroke-width='1.2'/%3E%3Cpath d='M232.0 99.0 v20 M224.0 106.0 h16' stroke-width='1.2'/%3E%3Cpath d='M313.0 66.4 l8 9 l-8 9 l-8 -9 z' stroke-width='1.2'/%3E%3Cpath d='M400.0 114.0 L524.1 657.7 L176.4 221.7 L678.8 463.6 L121.2 463.6 L623.6 221.7 L275.9 657.7 L400.0 114.0' stroke-width='1.4'/%3E%3Ccircle cx='400.0' cy='114.0' r='13' stroke-width='1.2'/%3E%3Ccircle cx='400.0' cy='114.0' r='4' stroke-width='1'/%3E%3Ccircle cx='623.6' cy='221.7' r='13' stroke-width='1.2'/%3E%3Ccircle cx='623.6' cy='221.7' r='4' stroke-width='1'/%3E%3Ccircle cx='678.8' cy='463.6' r='13' stroke-width='1.2'/%3E%3Ccircle cx='678.8' cy='463.6' r='4' stroke-width='1'/%3E%3Ccircle cx='524.1' cy='657.7' r='13' stroke-width='1.2'/%3E%3Ccircle cx='524.1' cy='657.7' r='4' stroke-width='1'/%3E%3Ccircle cx='275.9' cy='657.7' r='13' stroke-width='1.2'/%3E%3Ccircle cx='275.9' cy='657.7' r='4' stroke-width='1'/%3E%3Ccircle cx='121.2' cy='463.6' r='13' stroke-width='1.2'/%3E%3Ccircle cx='121.2' cy='463.6' r='4' stroke-width='1'/%3E%3Ccircle cx='176.4' cy='221.7' r='13' stroke-width='1.2'/%3E%3Ccircle cx='176.4' cy='221.7' r='4' stroke-width='1'/%3E%3Cpath d='M484.9 484.9 L315.1 484.9 L315.1 315.1 L484.9 315.1 Z' stroke-width='1'/%3E%3Cpath d='M404 374 a26 26 0 1 0 0 52 a20 20 0 1 1 0 -52' stroke-width='1.4'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat; filter: drop-shadow(0 0 5px rgba(180,200,255,.5)); opacity: .4; animation: dti-arcane-arcane 240s linear infinite reverse; }
+            @keyframes dti-arcane-arcane { to { transform: rotate(360deg); } }
+            @media (prefers-reduced-motion: reduce) { html[data-dti-theme="arcane"][data-style]::before, html[data-dti-theme="arcane"][data-style] #container::before { animation: none; } }
+            html[data-dti-theme="arcane"][data-style] :is(.dti-section-card, #dti-hero) { border: 1px solid rgba(200,215,255,.22) !important; border-radius: 6px !important;
+                box-shadow: inset 0 0 0 4px var(--surface), inset 0 0 0 5px rgba(200,215,255,.1), 0 18px 40px rgba(0,0,10,.6) !important; }
+            html[data-dti-theme="arcane"][data-style] .dti-hc-title { text-shadow: 0 0 12px rgba(190,210,255,.5); }
+            html[data-dti-theme="arcane"][data-style] #dti-home-grid .dti-hc-head .dti-hc-ico { border-radius: 50% !important; background: transparent !important; color: #dfe8ff !important; box-shadow: inset 0 0 0 1px rgba(223,232,255,.45); }
+            html[data-dti-theme="arcane"][data-style] #dti-hero-right h1 { font-size: 27px !important; letter-spacing: .02em !important; text-shadow: 0 0 18px rgba(170,195,255,.35); }
+            html[data-dti-theme="arcane"][data-style] #dti-hero-right h1 span { background: linear-gradient(180deg, #ffffff, #bcd0ff 60%, #8ea6ee); -webkit-background-clip: text; background-clip: text; }
+            html[data-dti-theme="arcane"][data-style] :is(.btn-primary, .dti-nx-new) { border-radius: 3px !important; box-shadow: 0 0 22px rgba(170,195,255,.35) !important; letter-spacing: .04em; }
+            html[data-dti-theme="arcane"][data-style] #dti-pet-display { border-radius: 50% 50% 8px 8px / 30% 30% 8px 8px !important; box-shadow: 0 0 0 1px rgba(223,232,255,.5), 0 0 0 6px #0b1233, 0 0 0 7px rgba(223,232,255,.18), 0 0 40px rgba(140,170,255,.25) !important; }
+            html[data-dti-theme="arcane"][data-style] #dti-right-large-card .dti-hc-title { font-size: 11px !important; letter-spacing: 0 !important; }
+
+            /* Menthol: cool charcoal and fresh mint — a charcoal bar with a mint line glowing under it, mint buttons and icons */
+            :root[data-dti-theme="menthol"][data-mode][data-style] {
+                --bg: #111416; --surface: #181c1f; --surface-2: #1d2226; --surface-3: #23292d; --border: #30383d; --nav-bg: #15191b;
+                --text: #eef3f2; --text-muted: #aab7b5; --text-sub: #6c7a78;
+                --accent: #6ee0bd; --accent-dim: #4ccaa3; --accent-glow: rgba(110,224,189,.15); --accent-text: #8ef0d1; --accent-fg: #062a20;
+                --nc: #f2c879; --np: #8ad4ff;
+                --solid-bg: #1d2226; --solid-fill: linear-gradient(180deg, #20262a, #1a1f22);
+                --solid-fg: #eef3f2; --solid-fg-2: rgba(238,243,242,.74); --solid-line: rgba(238,243,242,.14); --solid-hover: rgba(110,224,189,.1); --solid-active: rgba(110,224,189,.17);
+                --theme-btn: linear-gradient(100deg, #8ef0d1, #5fd6b1); --theme-btn-fg: #062a20;
+                --theme-page: radial-gradient(1000px 560px at 100% -10%, rgba(110,224,189,.08), transparent 60%), linear-gradient(180deg, #131719, #0f1113);
+                --shadow-sm: 0 2px 6px rgba(0,0,0,.35); --shadow-md: 0 10px 28px rgba(0,0,0,.45); --shadow-lg: 0 18px 46px rgba(0,0,0,.6);
+                --theme-navdeco: #6ee0bd; --theme-navdeco-h: 2px;
+                --theme-scroll: #3a4448; --theme-scroll-track: #111416; --theme-sel: rgba(110,224,189,.28);
+            }
+            html[data-dti-theme="menthol"][data-style] #main-nav { box-shadow: 0 6px 22px rgba(0,0,0,.45) !important; }
+            html[data-dti-theme="menthol"][data-style] #main-nav::after { box-shadow: 0 0 12px rgba(110,224,189,.55); }
+            html[data-dti-theme="menthol"][data-style] #dti-home-grid .dti-hc-head { box-shadow: inset 0 2px 0 rgba(110,224,189,.55); }
+            html[data-dti-theme="menthol"][data-style] .dti-hc-ico { background: rgba(110,224,189,.14) !important; color: #8ef0d1 !important; }
+
+            /* Chartreuse: Acid lime on black: athletic, technical, a hazard stripe under the bar */
+            :root[data-dti-theme="chartreuse"][data-mode][data-style] {
+                --bg: #0b0c0a;
+                --surface: #141512;
+                --surface-2: #1a1c17;
+                --surface-3: #22241e;
+                --border: #2d3027;
+                --nav-bg: #0b0c0a;
+                --text: #f1f5e8;
+                --text-muted: #a9b29a;
+                --text-sub: #6a7160;
+                --accent: #d4ff3a;
+                --accent-dim: #b6db32;
+                --accent-glow: rgba(212,255,58,0.16);
+                --accent-text: #d4ff3a;
+                --accent-fg: #121400;
+                --nc: #d4ff3a;
+                --np: #7fe7ff;
+                --solid-bg: #d4ff3a;
+                --solid-fill: #d4ff3a;
+                --solid-fg: #121400;
+                --solid-fg-2: rgba(18,20,0,0.72);
+                --solid-line: rgba(18,20,0,0.2);
+                --solid-hover: rgba(18,20,0,0.1);
+                --solid-active: rgba(18,20,0,0.18);
+                --theme-btn: #d4ff3a;
+                --theme-btn-fg: #121400;
+                --theme-page: linear-gradient(180deg, #0d0e0b, #090a08);
+                --theme-pattern: linear-gradient(rgba(212,255,58,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(212,255,58,.035) 1px, transparent 1px);
+                --theme-pattern-size: 32px 32px;
+                --theme-decor: none;
+                --shadow-sm: 0 2px 8px rgba(0,0,0,.6);
+                --shadow-md: 0 12px 32px rgba(0,0,0,.6);
+                --shadow-lg: 0 22px 50px rgba(0,0,0,.6);
+                --theme-font: 'Unbounded', sans-serif;
+                --theme-font-wt: 700;
+                --theme-hc-size: 11.5px;
+                --theme-hc-track: .02em;
+                --theme-hc-case: uppercase;
+                --theme-brand-track: -.02em;
+                --theme-navdeco: repeating-linear-gradient(135deg, #d4ff3a 0 10px, #0b0c0a 10px 20px);
+                --theme-navdeco-h: 6px;
+                --theme-scroll: #565852;
+                --theme-scroll-track: #0b0c0a;
+                --theme-sel: #d4ff3a;
+                --theme-sel-fg: #000000;
+                --theme-ed-panel: #1a1c17;
+            }
+            html[data-dti-theme="chartreuse"][data-style] #main-nav { background: #0b0c0a !important; }
+            html[data-dti-theme="chartreuse"][data-style] #main-nav :is(.dti-brand, .dti-nav-center > .dti-nav-link, .dti-nav-more-btn, .dti-greeting-hey, .dti-greeting-hey strong) { color: #f1f5e8 !important; }
+            html[data-dti-theme="chartreuse"][data-style] #main-nav .dti-greeting-label { color: #a9b29a !important; } html[data-dti-theme="chartreuse"][data-style] #main-nav .dti-pts-pill { color: #d4ff3a !important; background: rgba(212,255,58,.1) !important; }
+            html[data-dti-theme="chartreuse"][data-style] #main-nav .dti-nav-center > .dti-nav-link.active { background: #d4ff3a !important; color: #121400 !important; }
+            html[data-dti-theme="chartreuse"][data-style] #main-nav .dti-brand-gem { background: #d4ff3a !important; } html[data-dti-theme="chartreuse"][data-style] #main-nav .dti-brand-gem svg :is(path, line) { stroke: #121400 !important; }
+            html[data-dti-theme="chartreuse"][data-style] #main-nav #dti-nst-clock :is(.nst-label, .nst-time) { color: #f1f5e8 !important; }
+            html[data-dti-theme="chartreuse"][data-style] #main-nav :is(.dti-nav-gear, .dti-logout-btn, #dti-nst-clock) { color: #f1f5e8 !important; border-color: #2d3027 !important; background: #141512 !important; }
+            html[data-dti-theme="chartreuse"][data-style] #main-nav .dti-nav-divider { background: #2d3027 !important; }
+            html[data-dti-theme="chartreuse"][data-style] :is(.dti-section-card, #dti-hero) { border: 1px solid #2d3027 !important; border-radius: 0 !important; }
+            html[data-dti-theme="chartreuse"][data-style] :is(.btn-primary, .dti-nx-new, .dti-seg, .dti-seg > button, input, select, #dti-pet-display, .dti-nav-link, .dti-nav-new, .dti-nav-gear, .dti-logout-btn, #dti-nst-clock) { border-radius: 0 !important; }
+            html[data-dti-theme="chartreuse"][data-style] #dti-home-grid .dti-hc-head .dti-hc-ico { background: #121400 !important; color: #d4ff3a !important; border-radius: 0 !important; }
+            html[data-dti-theme="chartreuse"][data-style] #dti-hero-right h1 { font-size: 27px !important; letter-spacing: -.03em !important; text-transform: uppercase; }
+            html[data-dti-theme="chartreuse"][data-style] #dti-hero-right h1 span { background: none; -webkit-text-fill-color: #d4ff3a; color: #d4ff3a; }
+            html[data-dti-theme="chartreuse"][data-style] :is(.btn-primary, .dti-nx-new) { font-family: 'Unbounded', sans-serif !important; font-weight: 700 !important; font-size: 11px !important; text-transform: uppercase; letter-spacing: .04em; }
+            html[data-dti-theme="chartreuse"][data-style] #dti-pet-display { box-shadow: 0 0 0 1px #2d3027, 8px 8px 0 #d4ff3a !important; }
+            html[data-dti-theme="chartreuse"][data-style] #main-nav .dti-nav-new { background: #d4ff3a !important; color: #121400 !important; }
+            html[data-dti-theme="chartreuse"][data-style] #dti-newest-card .dti-hc-title { font-size: 10px !important; letter-spacing: 0 !important; }
+            html[data-dti-theme="chartreuse"][data-style] #dti-right-large-card .dti-hc-title { font-size: 9.5px !important; letter-spacing: 0 !important; }
+
+            /* Obsidian: Black volcanic glass with a faceted sheen; claw marks under the bar */
+            :root[data-dti-theme="obsidian"][data-mode][data-style] {
+                --bg: #07070a; --surface: #0f0f14; --surface-2: #14141b; --surface-3: #1a1a23; --border: #2a2a38; --nav-bg: #0b0b10;
+                --text: #f1f0fa; --text-muted: #aaa8c4; --text-sub: #64627c;
+                --accent: #c7b8ff; --accent-dim: #a897f2; --accent-glow: rgba(199,184,255,.13); --accent-text: #d8ccff; --accent-fg: #120d2a;
+                --nc: #ffd27a; --np: #9ee6c8;
+                --solid-bg: #15151d; --solid-fill: linear-gradient(135deg, #1b1b25, #0e0e14);
+                --solid-fg: #f1f0fa; --solid-fg-2: rgba(241,240,250,.76); --solid-line: rgba(241,240,250,.18); --solid-hover: rgba(255,255,255,.08); --solid-active: rgba(255,255,255,.14);
+                --theme-btn: linear-gradient(135deg, #e2d9ff, #a897f2); --theme-btn-fg: #120d2a;
+                --theme-page: conic-gradient(from 210deg at 70% 20%, #0b0b11, #111119 25%, #07070a 50%, #0e0e15 75%, #0b0b11);
+                --shadow-sm: 0 2px 6px rgba(0,0,0,.35); --shadow-md: 0 10px 26px rgba(0,0,0,.7); --shadow-lg: 0 18px 44px rgba(0,0,0,.9);
+                --theme-navdeco: linear-gradient(90deg, transparent 0 20%, rgba(199,184,255,.9) 20% 20.4%, transparent 20.4% 24%, rgba(199,184,255,.9) 24% 24.4%, transparent 24.4% 28%, rgba(199,184,255,.9) 28% 28.4%, transparent 28.4%); --theme-navdeco-h: 2px;
+                --theme-ed-panel: #0d0d12;
+                --theme-scroll: #2a2a38; --theme-scroll-track: #07070a; --theme-sel: rgba(199,184,255,.3);
+            }
+            /* Obsidian: sharp corners, a glassy sheen across each card, thin bright rims */
+            html[data-dti-theme="obsidian"] :is(${_CARDS}) { border-radius: 3px !important; border-color: #2a2a38 !important; background: linear-gradient(160deg, rgba(255,255,255,.04), transparent 40%), var(--surface) !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.07), var(--shadow-md) !important; }
+            html[data-dti-theme="obsidian"] :is(.btn-primary, .dti-nx-new, .dti-hc-ico) { border-radius: 3px !important; }
+            html[data-dti-theme="obsidian"] #main-nav { box-shadow: inset 0 -1px 0 rgba(255,255,255,.06), 0 8px 26px rgba(0,0,0,.7) !important; }
 
             /* ── Badge visibility toggles ──────────────────────────────────── */
             /* Newest Items' NC / NP switch: both badges, whatever the settings above say */
@@ -16739,6 +17062,17 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 <input type="file" accept=".json,application/json" hidden></div>
             <div class="dti-bk-status"></div>`;
         const bkStatus = backupBody.querySelector('.dti-bk-status'), bkFile = backupBody.querySelector('input[type=file]');
+        const bkRemindList = document.createElement('div'); bkRemindList.className = 'dti-toggle-list dti-bk-remind';
+        const bkRemind = document.createElement('button');
+        bkRemind.type = 'button'; bkRemind.className = 'dti-toggle-row' + (backupRemindOn() ? ' active' : '');
+        bkRemind.innerHTML = `<span class="dti-toggle-txt"><b>Backup reminders</b><small>A reminder (at most once a day) when your last backup is over ${BACKUP_REMIND_DAYS / 7} weeks old</small></span><span class="dti-ts"></span>`;
+        bkRemind.addEventListener('click', () => {
+            const next = !backupRemindOn();
+            GM_setValue('dti_backup_remind', next);
+            bkRemind.classList.toggle('active', next);
+        });
+        bkRemindList.appendChild(bkRemind);
+        backupBody.appendChild(bkRemindList);
         const bkLast = () => { const t = GM_getValue('dti_last_backup', 0); bkStatus.className = 'dti-bk-status'; bkStatus.textContent = t ? `Last backup: ${noteDate(t)}` : 'No backup saved yet.'; };
         bkLast();
         backupBody.querySelector('.dti-bk-save').addEventListener('click', async e => {
@@ -17404,6 +17738,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 #dti-sections-top { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
                 #dti-below-grid { height: 500px; }
                 #dti-sections-bot { height: 440px; }
+            }
+            @media (max-width: 900px) {   /* (three small cards or two lists side by side cut their titles short) */
+                #dti-sections-top { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+                #dti-sections-top > #dti-right-small-card { grid-column: 1 / -1; }
+                #dti-below-grid { flex-direction: column; height: auto; }
+                #dti-newest-card, #dti-nc-mall-card { flex: none; height: 460px; }
             }
             @media (max-width: 720px) {
                 #dti-hero { flex-direction: column; height: auto; }
@@ -24243,6 +24583,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 display: flex !important; flex-direction: column !important;
                 justify-content: flex-start !important; align-items: stretch !important;
             }
+            /* (a narrower window: the lists form goes under the info and trades, across the card — side by side it ran off the edge) */
+            @media (max-width: 1180px) {
+                .dti-header-cols { flex-wrap: wrap !important; row-gap: 14px !important; }
+                .dti-col-trades { border-right: 0 !important; }
+                .dti-col-form { flex: 1 1 100% !important; padding: 14px 0 0 !important; border-top: 1.5px solid var(--border) !important; }
+            }
             .item-description, p.description, p.item-description {
                 font-size: 12.5px !important; color: var(--text-muted) !important;
                 line-height: 1.55 !important; margin: 0 !important;
@@ -26485,20 +26831,23 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 font-size: 13px !important; color: var(--text-muted) !important;
                 margin: 0 0 18px !important; line-height: 1.6 !important;
             }
-            body > div.dialog::after {
-                content: '← Go back home'; display: inline-block !important;
-                background: var(--accent) !important; color: #fff !important;
-                border-radius: 9px !important; padding: 8px 20px !important;
-                font-size: 13px !important; font-weight: 700 !important;
-                cursor: pointer !important; text-decoration: none !important;
-            }
+            body > #main-nav { position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; z-index: 1000 !important; }
             body > img[src*="404"] {
                 width: 180px !important; height: 180px !important;
                 object-fit: contain !important; opacity: .9 !important;
                 order: -1 !important;
             }
         `);
-        // Make the "Go back home" text a real link
+        // The top bar too: DTI's 404 is a static page without one (the nav shows the name seen on the last page that had it)
+        if (!document.getElementById('main-nav')) {
+            const navEl = document.createElement('nav');
+            navEl.id = 'main-nav';
+            document.body.prepend(navEl);
+            rebuildNav();
+            if (_nstInterval) clearInterval(_nstInterval);
+            _nstInterval = injectNSTClock();
+        }
+        // The way home: a real link
         const dialog = document.querySelector('body > div.dialog');
         if (dialog) {
             const link = document.createElement('a');
@@ -27621,8 +27970,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         });
         return { close, place, pop: () => pop };
     }
-    // A filter's picks as they're clicked — each one off → shown → left out → off — told onChange(picks) a moment after the last
-    // click (at once when the pop-up closes)
+    // A filter's picks as they're clicked — each one off → shown → left out → off (or, with the tip's switch off, shown ↔ off) — told
+    // onChange(picks) a moment after the last click (at once when the pop-up closes)
     function pickState(value, onChange) {
         const st = { cur: Picks.of(value), sent: '', t: 0 };
         const key = () => JSON.stringify(st.cur);
@@ -27632,7 +27981,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const was = st.of(k);
             st.cur.inc = st.cur.inc.filter(x => x !== k);
             st.cur.exc = st.cur.exc.filter(x => x !== k);
-            if (!was) st.cur.inc.push(k); else if (was === 'in') st.cur.exc.push(k);
+            if (!was) st.cur.inc.push(k); else if (was === 'in' && pickLeaveOut()) st.cur.exc.push(k);
         };
         st.clear = () => { st.cur.inc = []; st.cur.exc = []; };
         st.send = now => {
@@ -27683,7 +28032,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             btn.title = on ? `${p.inc.length ? `Showing items that are ${p.inc.map(lc).join(p.all ? ' and ' : ' or ')}` : 'Showing items of any color'}${p.exc.length ? `, not ${p.exc.map(lc).join(' or ')}` : ''} — click to change`
                 : 'Show items of some colors — or leave some out';
         };
-        const tip = (k, s) => !k ? 'Items of any color' : `${itemColorName(k)}: ${s === 'in' ? 'shown — click to leave it out' : s === 'out' ? 'left out — click to clear' : 'click to show it, twice to leave it out'}`;
+        const tip = (k, s) => !k ? 'Items of any color' : `${itemColorName(k)}: ${s === 'in' ? (pickLeaveOut() ? 'shown — click to leave it out' : 'shown — click to take it off') : s === 'out' ? 'left out — click to clear' : pickLeaveOut() ? 'click to show it, twice to leave it out' : 'click to show it'}`;
         const sync = () => {
             const pop = ui.pop();
             if (!pop) return;
@@ -27696,12 +28045,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const changed = () => { sync(); paint(); st.send(); };
         const recents = () => (GM_getValue('dti_color_recent', []) || []).filter(h => /^#[0-9a-f]{6}$/.test(h));
         const ownRow = () => [...new Set([...st.cur.inc, ...st.cur.exc].filter(ItemColors.isCustom).concat(recents()))].slice(0, 8)   // (the ones picked, then the last few used)
-            .map(h => `<button type="button" class="dti-cpk-rc" data-k="${h}" aria-label="${h.toUpperCase()}">${chip(h)}</button>`).join('');
+            .map(h => `<span class="dti-cpk-rcw"><button type="button" class="dti-cpk-rc" data-k="${h}" aria-label="${h.toUpperCase()}">${chip(h)}</button><button type="button" class="dti-cpk-rcx" data-del="${h}" title="Remove this color" aria-label="Remove ${h.toUpperCase()}">\u00d7</button></span>`).join('');
         const ui = pickPopup(btn, pop => {
             pop.className = 'dti-cpk-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Item colors');
             const customVal = [...st.cur.inc, ...st.cur.exc].find(ItemColors.isCustom) || recents()[0] || '#f7a8c4';
             pop.innerHTML = `<div class="dti-cpk-head">Item color<button type="button" class="dti-pk-reset" title="No colors picked, any of them, and the usual match">Reset</button></div><div class="dti-cpk-grid">${[['', 'Any'], ...ITEM_COLORS].map(([k, label]) =>
-                `<button type="button" class="dti-cpk-opt" data-k="${k}">${chip(k)}<span>${label}</span></button>`).join('')}</div>${PICK_TIP}
+                `<button type="button" class="dti-cpk-opt" data-k="${k}">${chip(k)}<span>${label}</span></button>`).join('')}</div>${pickTip()}
                 <div class="dti-cpk-sec dti-cpk-both"><span class="dti-cpk-sub">With two or more colors</span>
                     <div class="dti-pk-seg" role="group" aria-label="With two or more colors"><button type="button" data-all="0" title="Items with any one of the colors shown">Any of them</button><button type="button" data-all="1" title="Items with every color shown — two-tone and more">All of them</button></div>
                 </div>
@@ -27720,6 +28069,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 </div>`;
             pop.addEventListener('click', ev => {
                 ev.stopPropagation();
+                if (ev.target.closest('.dti-pk-xsw')) { pickTipToggle(pop); return sync(); }
+                const del = ev.target.closest('[data-del]');
+                if (del) return dropOwn(del.dataset.del);
                 if (ev.target.closest('.dti-pk-reset')) {   // (back to: no colors, any of them, the usual match)
                     st.clear(); st.cur.all = false;
                     ItemColors.setLevel(4); rng.value = '4'; pop.querySelector('.dti-cpk-match b').textContent = LV[3];
@@ -27740,6 +28092,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (!h) { hexIn.classList.add('bad'); hexIn.focus(); return; }
                 GM_setValue('dti_color_recent', [h, ...recents().filter(x => x !== h)].slice(0, 6));
                 if (st.of(h) !== 'in') { st.cur.exc = st.cur.exc.filter(x => x !== h); st.cur.inc.push(h); }
+                pop.querySelector('.dti-cpk-recent').innerHTML = ownRow();
+                changed();
+                ui.place();
+            };
+            // One of your own colors, removed (user asked): out of the last few used, and out of the filter if it's picked
+            const dropOwn = h => {
+                GM_setValue('dti_color_recent', recents().filter(x => x !== h));
+                st.cur.inc = st.cur.inc.filter(x => x !== h); st.cur.exc = st.cur.exc.filter(x => x !== h);
                 pop.querySelector('.dti-cpk-recent').innerHTML = ownRow();
                 changed();
                 ui.place();
@@ -27803,19 +28163,20 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const wide = () => st.of('*') === 'in' || st.of('~') === 'in';   // (every item, or every one for the open zones: zones clicked are left out)
         const tip = (z, s) => !z ? 'Items in every zone' : z === '*' ? `${every}: every item this pet can wear — the first time takes a few minutes, then it’s kept (zones clicked then are left out)`
             : z === '~' ? `${open}: only items for the zones still open on your pet — none in a zone something’s worn in, or kept free by it (zones clicked then are left out too)`
-            : `${z}: ${s === 'in' ? 'shown — click to leave it out' : s === 'out' ? 'left out — click to clear' : wide() ? 'click to leave it out' : 'click to show it, twice to leave it out'}`;
+            : `${z}: ${s === 'in' ? (pickLeaveOut() ? 'shown — click to leave it out' : 'shown — click to take it off') : s === 'out' ? 'left out — click to clear' : wide() ? 'click to leave it out' : pickLeaveOut() ? 'click to show it, twice to leave it out' : 'click to show it'}`;
         const ui = pickPopup(btn, pop => {
             pop.className = 'dti-cpk-pop dti-zpk-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Item zones');
             const list = [...new Set([...(typeof zones === 'function' ? zones() : zones), ...st.cur.inc, ...st.cur.exc])].filter(z => z !== '*' && z !== '~');
             pop.innerHTML = `<div class="dti-cpk-head">Zones<button type="button" class="dti-pk-reset" title="No zones picked">Reset</button></div><div class="dti-zpk-list"><button type="button" class="dti-zpk-opt" data-k="">All zones</button>${
                 every ? `<button type="button" class="dti-zpk-opt dti-zpk-every" data-k="*">${noteEsc(every)}</button>` : ''}${
                 open ? `<button type="button" class="dti-zpk-opt dti-zpk-every" data-k="~">${noteEsc(open)}</button>` : ''}${
-                list.map(z => `<button type="button" class="dti-zpk-opt" data-k="${noteEsc(z)}">${noteEsc(z)}</button>`).join('')}</div>${PICK_TIP}`;
+                list.map(z => `<button type="button" class="dti-zpk-opt" data-k="${noteEsc(z)}">${noteEsc(z)}</button>`).join('')}</div>${pickTip()}`;
             const marks = () => { pickMarks(pop, st, tip); pop.querySelector('.dti-pk-reset').hidden = !Picks.on(st.cur); };
             pop.addEventListener('click', ev => {
                 ev.stopPropagation();
                 const o = ev.target.closest('[data-k]');
                 const k = o?.dataset.k;
+                if (ev.target.closest('.dti-pk-xsw')) { pickTipToggle(pop); return marks(); }
                 if (ev.target.closest('.dti-pk-reset')) st.clear();
                 else if (!o) return;
                 else if (k === '*' || k === '~') st.cur.inc = st.of(k) === 'in' ? [] : [k];   // (every item / open zones: on or off, one of them — the zones left out stay)
@@ -27926,6 +28287,19 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-pk-reset:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
             .dti-pk-reset[hidden] { display: none; }
             .dti-pk-tip { padding: 8px 4px 0; font-size: 10.5px; font-weight: 600; line-height: 1.5; color: var(--text-muted); text-align: center; }
+            .dti-pk-tip:has(.dti-pk-xsw) { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 8px 0; text-align: left; }
+            .dti-pk-tiptx span { display: block; }
+            /* the switch: a second click leaves it out (on: the left-out red) */
+            .dti-pk-xsw { position: relative; flex: none; width: 26px; height: 15px; margin: 0; padding: 0; border: none; border-radius: 99px; background: var(--border); box-shadow: none; cursor: pointer; transition: background .15s; }
+            .dti-pk-xsw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .15s; }
+            .dti-pk-xsw[aria-checked="true"] { background: var(--danger, #e11d48); }
+            .dti-pk-xsw[aria-checked="true"]::after { transform: translateX(11px); }
+            .dti-pk-xsw:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+            /* your own colors: an × on hover */
+            .dti-cpk-rcw { position: relative; display: inline-flex; }
+            .dti-cpk-rcx { position: absolute; top: -3px; right: -3px; z-index: 1; display: grid; place-items: center; width: 15px; height: 15px; margin: 0; padding: 0; border: 1.5px solid var(--surface); border-radius: 50%; background: var(--text-muted); color: var(--surface); box-shadow: none; font: 700 11px/1 system-ui, sans-serif; cursor: pointer; opacity: 0; transform: scale(.6); transition: opacity .12s, transform .12s, background .12s; }
+            .dti-cpk-rcw:hover .dti-cpk-rcx, .dti-cpk-rcx:focus-visible { opacity: 1; transform: none; }
+            .dti-cpk-rcx:hover { background: var(--danger, #e11d48); color: #fff; }
             .dti-cpk-rc { border-radius: 8px; }
             /* With two or more colors: any of them / all of them (dimmed till two are shown) */
             .dti-pk-seg { display: flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); }
