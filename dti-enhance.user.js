@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      3.0
+// @version      3.1.337
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -22,7 +22,6 @@
 // @grant        GM_xmlhttpRequest
 // @connect      lebron-values.netlify.app
 // @connect      www.neopets.com
-// @connect      impress-2020.openneo.net
 // @connect      impress.openneo.net
 // @connect      pets.neopets.com
 // @connect      images.neopets.com
@@ -38,6 +37,12 @@
     // Before anything is saved on this load: was DTI Enhance used in this browser before? (An update shows "What's new";
     // a fresh install starts quietly.) And the version that's running.
     const DTI_HAD_DATA = (() => { try { return GM_listValues().length > 0; } catch (_) { return true; } })();
+    // (a fresh install starts in the Sunset theme (user asked) — saved as if picked, so it stays; ⚙ has the others and Your colors.
+    // Someone who used it before keeps their own look)
+    if (!DTI_HAD_DATA && window.top === window) try { GM_setValue('dti_theme_preset', 'sunset'); } catch (_) {}
+    // (3.1.337: the new Mini DTI on for everyone, once (user asked) — someone who'd turned the old one off gets it back; ⚙ › Neopets
+    // turns it off again, and then it stays off)
+    if (window.top === window) try { if (!GM_getValue('dti_np_fab_v3', false)) { GM_setValue('dti_np_fab', true); GM_setValue('dti_np_fab_v3', true); } } catch (_) {}   // (never in a frame: those do nothing)
     const DTI_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) || '';
     // DTI has no pages of its own for My Tokens, Notes, Neofriends, the NC Mall Guide, Trade Finder and Seeking: they're built
     // on an item search that finds nothing (/items?q=dti-enhance#tokens…) — a real DTI page (its layout, Turbo, the form
@@ -92,6 +97,9 @@
         window.addEventListener('hashchange', tkGo);   // (pasted into the address bar while on a DTI page)
     }
     if (location.hostname === 'impress.openneo.net') {
+        const _dtiPre = document.createElement('link');
+        _dtiPre.rel = 'preconnect'; _dtiPre.href = 'https://images.neopets.com';
+        document.documentElement.appendChild(_dtiPre);
         var _dtiCoverSt = document.createElement('style');
         _dtiCoverSt.textContent = 'html.dti-cov{opacity:0!important}'
             // Big closets ship 100k+ native nodes that we only read (never show). Hiding them before
@@ -620,6 +628,31 @@
         return close;
     }
 
+    // Our own store on Neopets pages (IndexedDB — that site's own storage is small, and Neopets keeps its own things in it): the
+    // value list, the token catalog, the Neoboards' looked-at lists. Missing or blocked: nothing kept, everything still works.
+    function npDb() {
+        return npDb.p || (npDb.p = new Promise((res, rej) => {
+            const r = indexedDB.open('dti-np', 1);
+            r.onupgradeneeded = () => r.result.createObjectStore('kv');
+            r.onsuccess = () => res(r.result);
+            r.onerror = () => rej(r.error);
+        }).catch(() => null));
+    }
+    async function npStoreGet(key) {
+        const db = await npDb();
+        return db ? new Promise(res => { try { const q = db.transaction('kv').objectStore('kv').get(key); q.onsuccess = () => res(q.result); q.onerror = () => res(undefined); } catch (_) { res(undefined); } }) : undefined;
+    }
+    async function npStoreSet(key, val) {
+        const db = await npDb();
+        if (db) await new Promise(res => { try { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(val, key); t.oncomplete = t.onerror = t.onabort = () => res(); } catch (_) { res(); } });
+    }
+    async function npStoreDel(key) {
+        const db = await npDb();
+        if (db) await new Promise(res => { try { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').delete(key); t.oncomplete = t.onerror = t.onabort = () => res(); } catch (_) { res(); } });
+    }
+    // (the old copies in the Neopets site's own storage: cleared — they filled it)
+    function npStorageTidy() { try { ['dti_lebron_cache', 'dti_tok_catalog_v3', 'dti_nb_closets2', 'dti_nb_closets', 'dti_np_mall'].forEach(k => localStorage.removeItem(k)); } catch (_) {} }
+
     // ── The catalog: DTI's NC Styles list (every style is one token — essences and Treasured too, each for one species).
     // 2.8 MB and ~10 s from DTI, so a slim copy is kept in this site's storage (fetched again after a day).
     let _tokCatP = null;
@@ -627,9 +660,9 @@
         if (_tokCatP && !force) return _tokCatP;
         _tokCatP = (async () => {
             const LS = 'dti_tok_catalog_v3';
+            const away = !/(^|\.)openneo\.net$/.test(location.hostname);   // (the DTI panel on Neopets: kept in our own store there)
             let slim = null;
-            if (!force) { try { slim = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (_) {} }
-            const away = !/(^|\.)openneo\.net$/.test(location.hostname);   // (the DTI panel on Neopets)
+            if (!force) { if (away) slim = (await npStoreGet('tokcat')) || null; else try { slim = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (_) {} }
             if (!slim || !Array.isArray(slim.styles) || Date.now() - slim.at > (away ? 7 : 1) * 864e5) {
                 const [styles, home] = await Promise.all([
                     away ? dtiGetText('/rainbow-pool/styles.json').then(t => JSON.parse(t))
@@ -642,7 +675,8 @@
                 // (a style with DTI's placeholder picture: its own picture of the style worn, so the tile shows what it is)
                 const art = s => /mall_bg_circle/.test(s.thumbnail_url || '') ? String((s.swf_assets || []).find(a => a?.urls?.png)?.urls.png || '').split('?')[0] : '';
                 slim = { at: Date.now(), species, colors, styles: styles.map(s => [s.id, s.species_id, tokBase(s.thumbnail_url), s.series_main_name || '', s.adjective_name || '', s.color_id || 0, art(s)]) };
-                try { localStorage.removeItem('dti_tok_catalog_v1'); localStorage.removeItem('dti_tok_catalog_v2'); localStorage.setItem(LS, JSON.stringify(slim)); } catch (_) {}
+                if (away) npStoreSet('tokcat', slim);
+                else try { localStorage.removeItem('dti_tok_catalog_v1'); localStorage.removeItem('dti_tok_catalog_v2'); localStorage.setItem(LS, JSON.stringify(slim)); } catch (_) {}
             }
             return buildTokenCatalog(slim);
         })();
@@ -662,6 +696,7 @@
         return 'https://ncmall.neopets.com/mall/search.phtml?type=search&text=' + encodeURIComponent(String(name || '').trim()).replace(/%20/g, '+') + '&page=1&limit=24';
     }
     function tokenCatalogIfCached() {
+        if (!/(^|\.)openneo\.net$/.test(location.hostname)) return _tokCatBuilt || null;   // (Neopets: the one read already, if any)
         try { const slim = JSON.parse(localStorage.getItem('dti_tok_catalog_v3') || 'null'); return slim?.styles ? buildTokenCatalog(slim) : null; } catch (_) { return null; }
     }
     let _tokCatBuilt = null;
@@ -835,14 +870,26 @@
     // (Baby Chocolate, Valentine Plushie). A color in the series counts too (Baby Chocolate: Baby and Chocolate; Plushie Baby: Baby and Plushie).
     // type = the whole style ("Prismatic Mint Chip: Delightful Chocolate"); base = without the Prismatic version.
     function tokTypeSplit(t) { const m = String(t).match(/^prismatic ([^:]+):\s*(.+)$/i); return m ? [m[2].trim(), m[1].trim()] : [String(t), '']; }   // [style, Prismatic version]
+    // (a catalog's series and color names made ready once — lower-cased, squeezed to letters and digits — not again for each of its
+    // thousands of styles)
+    const _tokPrep = new WeakMap();
+    const tokSq = x => String(x).toLowerCase().replace(/[^a-z0-9]/g, '');
+    function tokPrep(fams, colorNames) {
+        let p = _tokPrep.get(fams);
+        if (p && p.colorNames === colorNames && p.n === fams.length && p.cn === colorNames.length) return p;
+        p = { colorNames, n: fams.length, cn: colorNames.length, fams: fams.map(f => [f, f.toLowerCase()]), bySq: new Map() };
+        colorNames.forEach(c => { const k = tokSq(c); if (!p.bySq.has(k)) p.bySq.set(k, c); });   // (the first of a name, as find() had it)
+        _tokPrep.set(fams, p);
+        return p;
+    }
     function tokClassify(style, fams, dtiColor, colorNames) {
         const m = String(style).match(/^prismatic ([^:]+):\s*(.+)$/i);
-        const base = (m ? m[2] : String(style)).trim(), lo = base.toLowerCase();
-        const series = fams.filter(f => lo === f.toLowerCase() || lo.startsWith(f.toLowerCase() + ' ')).sort((a, b) => b.length - a.length)[0] || '';
+        const base = (m ? m[2] : String(style)).trim(), lo = base.toLowerCase(), P = tokPrep(fams, colorNames);
+        let series = '';   // (the longest series the name starts with — the first of those when two are as long)
+        for (const [f, fl] of P.fams) if (f.length > series.length && (lo === fl || lo.startsWith(fl + ' '))) series = f;
         const rest = series ? base.slice(series.length).trim() : '';
-        const sq = x => String(x).toLowerCase().replace(/[^a-z0-9]/g, '');
-        const color = !rest ? dtiColor || '' : colorNames.find(c => sq(c) === sq(rest)) || (dtiColor && sq(dtiColor).endsWith(sq(rest)) ? dtiColor : rest);
-        const colors = [color, ...series.split(' ').map(w => colorNames.find(c => sq(c) === sq(w)))].filter((c, k, a) => c && a.indexOf(c) === k);
+        const color = !rest ? dtiColor || '' : P.bySq.get(tokSq(rest)) || (dtiColor && tokSq(dtiColor).endsWith(tokSq(rest)) ? dtiColor : rest);
+        const colors = [color, ...series.split(' ').map(w => P.bySq.get(tokSq(w)))].filter((c, k, a) => c && a.indexOf(c) === k);
         const prismatic = m ? m[1].trim() : '';
         return { series, color, colors, base, prismatic, type: prismatic ? `Prismatic ${prismatic}: ${base}` : base };
     }
@@ -965,26 +1012,35 @@
             if (fromDTI || fresh || GM_getValue('dti_capture_live', '') === src.key) runNeoCapture(src);
         }
 
+        npStorageTidy();   // (our old copies in the site's own storage: gone)
         // DTI link linkifier — neoboards and neomails only
         const isLinkifyPage = location.pathname.startsWith('/neoboards/') || location.pathname === '/neomessages.phtml';
-        if (isLinkifyPage && GM_getValue('dti_linkify', true)) runLinkify();
+        if (isLinkifyPage && GM_getValue('dti_linkify', true)) npSafe('links', runLinkify);
         // (Seeking on the boards — off on its own in ⚙ › Neopets: items you're seeking marked in posts, a pill by each DTI link)
-        const nbSeek = location.pathname.startsWith('/neoboards/') && seekOn() && GM_getValue('dti_nb_seek', true) !== false;
-        if (nbSeek) runSeekHighlight();
+        const nbSeek = (location.pathname.startsWith('/neoboards/') || location.pathname === '/neomessages.phtml') && seekOn() && GM_getValue('dti_nb_seek', true) !== false;
+        // (an offer drafted from the Neoboards' Seeking popup: filled into the Neomail it opened)
+        if (location.pathname === '/neomessages.phtml' && /[?&]type=send\b/.test(location.search)) npSafe('Neomail draft', runNeomailDraft);
+        if (nbSeek) npSafe('Seeking marks', runSeekHighlight);
         if (nbSeek) {
-            if (document.body) runNbSeek(); else document.addEventListener('DOMContentLoaded', runNbSeek, { once: true });
+            const go = () => npSafe('Neoboards Seeking', runNbSeek);
+            if (document.body) go(); else document.addEventListener('DOMContentLoaded', go, { once: true });
         }
 
         // NC cap values on Neopets' item pages (only these — the script runs on every Neopets page now, for the DTI button)
-        if (/^\/(inventory\.phtml|safetydeposit\.phtml|closet\.phtml|gallery\/index\.phtml|stylingchamber\/)/.test(location.pathname)) runNeopetsNcValues();
+        if (/^\/(inventory\.phtml|safetydeposit\.phtml|closet\.phtml|gallery\/index\.phtml|stylingchamber\/)/.test(location.pathname)) npSafe('NC values', runNeopetsNcValues);
         // NC gift tracking (optional, off unless turned on in DTI's ⚙ › Neopets) — starts at once, so fast clicks are caught
-        if (window.top === window && GM_getValue('dti_track_gifts', false)) runGiftTracker();
+        if (window.top === window && GM_getValue('dti_track_gifts', false)) npSafe('NC gift tracking', runGiftTracker);
         // A small DTI button on Neopets pages, with your trade reports, an item search and DTI's pages (optional — DTI's ⚙ › Neopets)
         if (window.top === window && GM_getValue('dti_np_fab', true)) {
-            if (document.body) runNeopetsFab(); else document.addEventListener('DOMContentLoaded', runNeopetsFab, { once: true });
+            const go = () => npSafe('DTI button', runNeopetsFab);
+            if (document.body) go(); else document.addEventListener('DOMContentLoaded', go, { once: true });
         }
         return;
     }
+
+    // The page shown again (the start-up cover off) once DTI's part of the start-up has run — set going here, first, so a step of
+    // ours failing on the way can't leave the page blank: the frame comes after this whole start-up, finished or not
+    requestAnimationFrame(_dtiReveal);
 
     // ── Kill original stylesheets ─────────────────────────────────────────────
     // link.disabled alone doesn't hold when the file is still downloading: on a cold cache Chrome applies the
@@ -1376,10 +1432,61 @@
     const effMode   = () => presetOf()?.base || currentMode;
     const effAccent = () => (presetOf() ? presetOf().accentAttr || 'preset' : currentAccent);
     const effStyle  = () => (presetOf() ? 'solid' : currentStyle);
+    // ── Rules only another theme can use: dropped from the page's copy of our style sheets (their text keeps them all) ──
+    function dtiThemePrune() {
+        const S = dtiThemePrune.s || (dtiThemePrune.s = { done: new Map(), mo: null, t: 0 });
+        const cur = document.documentElement.dataset.dtiTheme || '';
+        // (another theme now: each sheet pruned for the old one read again from its text, whole, then pruned for this one)
+        S.done.forEach((theme, st) => { S.done.delete(st); if (theme !== cur && st.isConnected) st.textContent = st.textContent; });
+        document.querySelectorAll('style').forEach(st => {
+            if (S.done.has(st) || !st.sheet || !st.textContent.includes('data-dti-theme')) return;
+            try { dtiPruneRules(st.sheet, cur); } catch (_) {}
+            S.done.set(st, cur);
+        });
+        if (!S.mo && document.head) {   // (style sheets added later — a page's own, a popup's: pruned as they come)
+            S.mo = new MutationObserver(ms => { if (ms.some(m => [...m.addedNodes].some(n => n.nodeName === 'STYLE'))) { clearTimeout(S.t); S.t = setTimeout(dtiThemePrune, 50); } });
+            S.mo.observe(document.head, { childList: true });
+        }
+    }
+    function dtiPruneRules(group, cur) {
+        for (let i = group.cssRules.length - 1; i >= 0; i--) {
+            const r = group.cssRules[i];
+            if (r.selectorText != null) { if (dtiSelDead(r.selectorText, cur)) group.deleteRule(i); }
+            else if (r.cssRules && r.type !== 7) dtiPruneRules(r, cur);   // (inside @media / @supports; not @keyframes)
+        }
+    }
+    // (a list of selectors that can't match under this theme: each one starts with the page's own element named for another theme —
+    // anything else there (a negation, :has, an :is() with more than theme names) and it's kept)
+    function dtiSelDead(text, cur) {
+        if (!text.includes('data-dti-theme')) return false;
+        return dtiSplitTop(text, c => c === ',').every(sel => {
+            const first = dtiSplitTop(sel.trim(), c => c === ' ' || c === '>' || c === '+' || c === '~')[0];
+            if (!first.includes('data-dti-theme') || /:(not|has|where)\(/.test(first)) return false;
+            const is = first.indexOf(':is(');
+            if (is >= 0 && !dtiSplitTop(first.slice(is + 4, first.lastIndexOf(')')), c => c === ',').every(a => /^\s*\[data-dti-theme="[^"]+"\]\s*$/.test(a))) return false;
+            const ids = [...first.matchAll(/data-dti-theme="([^"]+)"/g)].map(m => m[1]);
+            return ids.length ? !ids.includes(cur) : !cur;
+        });
+    }
+    function dtiSplitTop(s, at) {   // (split where at(c) — outside brackets, parentheses and quotes)
+        const out = [];
+        let depth = 0, q = '', from = 0;
+        for (let i = 0; i < s.length; i++) {
+            const c = s[i];
+            if (q) { if (c === '\\') i++; else if (c === q) q = ''; continue; }
+            if (c === '"' || c === "'") q = c;
+            else if (c === '(' || c === '[') depth++;
+            else if (c === ')' || c === ']') depth--;
+            else if (!depth && at(c)) { out.push(s.slice(from, i)); from = i + 1; }
+        }
+        out.push(s.slice(from));
+        return out;
+    }
     function stampTheme() {
         const html = document.documentElement, d = html.dataset;
         d.mode = effMode(); d.accent = effAccent(); d.style = effStyle();
         if (currentPreset) d.dtiTheme = currentPreset; else delete d.dtiTheme;   // its own name — other code on DTI pages sets a plain "theme" attribute
+        if ((d.dtiTheme || '') !== dtiThemePrune.cur) { dtiThemePrune.cur = d.dtiTheme || ''; dtiThemePrune(); }   // (another theme: its rules back)
         // (a theme's own typeface for headings — Google Fonts, only while it's on; '' = one already here)
         const p = presetOf();
         if (p && 'font' in p) d.dtiFont = '1'; else delete d.dtiFont;
@@ -2266,6 +2373,7 @@
         _valisarPending.push({ norm, cb });
         if (!_valisarFetching) _fetchValisar();
     }
+    const VALISAR_WAIT_KEY = 'dti_val_wait';   // (localStorage: when Neopets may be asked for Valisar's page again)
     function _fetchValisar() {
         _valisarFetching = true;
         try {
@@ -2275,6 +2383,12 @@
                 _valisarMap = cached.m; _flushValisar(); _valisarFetching = false; return;
             }
         } catch(e) {}
+        // (an empty answer — logged out of Neopets — or none: 10 minutes before Neopets is asked again, kept here so other pages and
+        // popups wait too; each full page load used to ask again)
+        let wait = 0;
+        try { wait = +localStorage.getItem(VALISAR_WAIT_KEY) || 0; } catch (_) {}
+        if (Date.now() < wait) { _valisarFetching = false; _valisarMap = {}; _valisarRetry = wait; _flushValisar(); return; }
+        const fail = () => { _valisarRetry = Date.now() + NC_VAL_RETRY; try { localStorage.setItem(VALISAR_WAIT_KEY, String(_valisarRetry)); } catch (_) {} };
         GM_xmlhttpRequest({
             method: 'GET', url: VALISAR_URL, timeout: 15000,
             onload(resp) {
@@ -2282,12 +2396,12 @@
                 _valisarMap = _parseValisarHtml(resp.responseText);
                 if (Object.keys(_valisarMap).length) {
                     _valisarRetry = 0;
-                    try { localStorage.setItem(VALISAR_LS_KEY, JSON.stringify({ m: _valisarMap, t: Date.now() })); } catch(e) {}
-                } else _valisarRetry = Date.now() + NC_VAL_RETRY;   // logged out of Neopets (or the page changed): try again later
+                    try { localStorage.setItem(VALISAR_LS_KEY, JSON.stringify({ m: _valisarMap, t: Date.now() })); localStorage.removeItem(VALISAR_WAIT_KEY); } catch(e) {}
+                } else fail();   // logged out of Neopets (or the page changed): try again later
                 _flushValisar();
             },
-            onerror()   { _valisarFetching = false; _valisarMap = {}; _valisarRetry = Date.now() + NC_VAL_RETRY; _flushValisar(); },
-            ontimeout() { _valisarFetching = false; _valisarMap = {}; _valisarRetry = Date.now() + NC_VAL_RETRY; _flushValisar(); },
+            onerror()   { _valisarFetching = false; _valisarMap = {}; fail(); _flushValisar(); },
+            ontimeout() { _valisarFetching = false; _valisarMap = {}; fail(); _flushValisar(); },
         });
     }
     function _parseValisarHtml(html) {
@@ -2465,12 +2579,14 @@
     // Neopets pages can't see DTI's CSS — store the resolved theme colors for the capture panel there
     function _dtiSyncThemeTokens() {
         const cs = getComputedStyle(document.documentElement);
-        const t = { style: effStyle() };
+        const t = { style: effStyle(), mode: effMode() };
         ['--bg', '--surface', '--surface-2', '--border', '--text', '--text-muted', '--accent', '--accent-fg', '--accent-text', '--accent-glow', '--success', '--nc',
-         '--nav-bg', '--solid-bg', '--solid-fill', '--solid-fg', '--solid-fg-2', '--solid-hover', '--theme-font', '--theme-font-wt', '--theme-hc-track', '--theme-hc-case']
+         '--nav-bg', '--solid-bg', '--solid-fill', '--solid-fg', '--solid-fg-2', '--solid-hover', '--solid-active', '--solid-line', '--theme-font', '--theme-font-wt', '--theme-hc-track', '--theme-hc-case',
+         '--theme-hc-size', '--theme-brand-track']
             .forEach(k => { const v = cs.getPropertyValue(k).trim(); if (v) t[k] = v; });
         const font = presetOf()?.font;   // (the theme's own typeface, if it has one: its Google Fonts link, for a panel on Neopets)
         if (font) t.fontHref = `https://fonts.googleapis.com/css2?family=${font}&display=swap`;
+        if (currentPreset) { t.preset = currentPreset; if (presetOf()?.pv?.[0]) t.pageBg = presetOf().pv[0]; }   // (a theme: its name, and its page's background in small — Mini DTI's)
         const json = JSON.stringify(t);
         if (GM_getValue('dti_theme_tokens', '') !== json) GM_setValue('dti_theme_tokens', json);
     }
@@ -2692,6 +2808,45 @@
         t.addEventListener('mouseleave', () => go(1500));
         go(opts.duration || Math.max(v === 'error' ? 4000 : 2200, Math.min(6500, 1000 + String(msg).length * 45)));
     }
+
+    // Something of ours that failed on a page (user asked: a way to report it) — said once a page, with the details to copy for a bug
+    // report; the rest of the page goes on
+    function dtiReportError(where, err) {
+        try { console.error('[DTI Enhance] ' + where, err); } catch (_) {}
+        if (window.__dtiErrTold) return;
+        window.__dtiErrTold = true;
+        const details = [`DTI Enhance ${DTI_VERSION || '?'} \u2014 ${where}`, `Page: ${location.pathname}`, `Error: ${err?.message || err}`,
+            ...String(err?.stack || '').split('\n').slice(1, 6).map(l => '  ' + l.trim()), `Browser: ${navigator.userAgent}`].join('\n');
+        const say = () => dtiToast(`Part of DTI Enhance didn\u2019t load on this page (${where})`, { variant: 'error', duration: 15000,
+            action: { label: 'Copy details', run: () => dtiCopyText(details, () => dtiToast('Copied \u2014 paste it into a message about the problem', { variant: 'success' })) } });
+        if (document.body) say(); else document.addEventListener('DOMContentLoaded', say, { once: true });
+    }
+    GM_addStyle(`a.dti-pool-tile:hover { border-color: var(--accent) !important; box-shadow: 0 0 0 1px var(--accent) !important; }
+        a.dti-idb-full { opacity: .8; } a.dti-idb-full:hover { opacity: 1; }
+        a.dti-hover-acc:hover { border-color: var(--accent) !important; }`);
+    function dtiSafe(where, fn) { try { return fn(); } catch (e) { dtiReportError(where, e); } }
+    // Capsule tiles (item popups, the item pages DTI doesn't have) and those pages' pictures: one listener each, set up once — no
+    // handlers built into the HTML. A capsule tile remembers its item for the page it opens; a picture that won't load tries the
+    // other spelling, then the pool's picture, then a plain placeholder (the preview: the small picture)
+    function wirePoolTiles() {
+        if (window.__dtiPoolWired) return;
+        window.__dtiPoolWired = true;
+        document.addEventListener('click', e => {
+            const a = e.target.closest?.('a[data-pin][href*="#pool-"]');
+            const iid = a && (a.getAttribute('href').match(/#pool-([\w.-]+)/) || [])[1];
+            if (iid) try { localStorage.setItem('dti_pi_' + iid, JSON.stringify({ name: a.dataset.pin || '', image: a.dataset.pii || '', iid })); } catch (_) {}
+        }, true);
+        document.addEventListener('error', e => {
+            const img = e.target;
+            if (!(img instanceof HTMLImageElement)) return;
+            if (img.dataset.dtiFbSrc !== undefined) { const src = img.dataset.dtiFbSrc; delete img.dataset.dtiFbSrc; if (src) img.src = src; return; }
+            if (img.dataset.dtiFb !== 'thumb' || img.src.startsWith('data:')) return;
+            if (img.src.includes('_')) img.src = img.src.replace(/_/g, '-');
+            else if (img.dataset.pfb && img.src !== img.dataset.pfb) img.src = img.dataset.pfb;
+            else img.src = POOL_PIC_NONE;
+        }, true);
+    }
+    const POOL_PIC_NONE = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 80 80%22%3E%3Crect x=%225%22 y=%2228%22 width=%2270%22 height=%2245%22 rx=%224%22 fill=%22%2330363d%22/%3E%3Crect x=%222%22 y=%2222%22 width=%2276%22 height=%2214%22 rx=%223%22 fill=%22%2321262d%22/%3E%3Cline x1=%2240%22 y1=%2222%22 x2=%2240%22 y2=%2273%22 stroke=%22%237c3aed%22 stroke-width=%223%22/%3E%3Cpath d=%22M40 22 C40 22 30 14 22 18 C14 22 20 30 40 22Z%22 fill=%22%237c3aed%22/%3E%3Cpath d=%22M40 22 C40 22 50 14 58 18 C66 22 60 30 40 22Z%22 fill=%22%237c3aed%22/%3E%3C/svg%3E';
 
     // Item pages: "Brought to you by" can be dozens of names — folded to one line ("24 contributors ▾") each visit
     function foldItemContributors(box) {
@@ -7711,6 +7866,53 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         }));
         GM_setValue('dti_tf_new', { at: res.freshAt || 0, n });
     }
+    // New offers on your Seeking list (user asked: a dot when someone new offers something you're seeking) — what the daily check
+    // found newly offering (Trade Finder's check, or Seeking's own when Trade Finder's never been used), only items on the list, you,
+    // the people you avoid and the ones you hid left out: { at, items: { id: [owner, …] } }
+    function skSaveNew(fresh, byItem) {
+        const me = (GM_getValue('dti_user_slug', '') || '').replace(/^\d+-/, '').toLowerCase(), seek = new Set(DTISeek.list('all').map(e => String(e.id)));
+        const closetOf = {};
+        Object.values(byItem || {}).forEach(rows => (rows || []).forEach(r => { closetOf[r.owner] = r.closet; }));
+        const items = {};
+        Object.entries(fresh || {}).forEach(([id, owners]) => {
+            if (!seek.has(String(id))) return;
+            const o = owners.filter(n => { const uid = userIdOf(closetOf[n]); return n.toLowerCase() !== me && !dtiAvoid.has(uid) && !tfHidden.has(uid); });
+            if (o.length) items[id] = o;
+        });
+        if (Object.keys(items).length) GM_setValue('dti_sk_new', { at: Date.now(), items });
+    }
+    const skNewCount = () => { const t = GM_getValue('dti_sk_new', {}) || {}; return t.at > (GM_getValue('dti_sk_new_seen', 0) || 0) ? Object.values(t.items || {}).reduce((n, a) => n + a.length, 0) : 0; };
+    const skNewOf = id => { const t = GM_getValue('dti_sk_new', {}) || {}; return Date.now() - (t.at || 0) < 3 * 864e5 ? (t.items || {})[id] || null : null; };   // (on its row: 3 days)
+    // Seeking's own daily check — only when Trade Finder's has never run (it covers Seeking's items when it has); Trade Finder's
+    // daily switch turns it off too. One item every 1.5 s, at most 30, top only, one tab at a time.
+    function skAutoCheck() {
+        if (window.top !== window || window.__dtiSkAuto || !seekOn() || GM_getValue('dti_tf_auto', true) === false) return;
+        if (Date.now() - (GM_getValue('dti_sk_auto_at', 0) || 0) < 22 * 3600e3 || Date.now() - (GM_getValue('dti_sk_auto_lock', 0) || 0) < 5 * 60e3) return;
+        const list = DTISeek.list('all');
+        if (!list.length) return;
+        window.__dtiSkAuto = true;
+        setTimeout(async () => {
+            try {
+                if ((await cacheGet('tradefinder', TF_LS))?.byItem) return GM_setValue('dti_sk_auto_at', Date.now());   // (Trade Finder's check covers it)
+                const prev = await DTICache.get('seekoffers');
+                GM_setValue('dti_sk_auto_lock', Date.now());
+                const byItem = {};
+                for (const e of list.slice(0, 30)) {
+                    const rows = await tfOffering(e.id);
+                    if (rows) byItem[e.id] = rows;
+                    GM_setValue('dti_sk_auto_lock', Date.now());
+                    await new Promise(r => setTimeout(r, 1500));
+                }
+                if (!Object.keys(byItem).length) return;
+                if (prev?.byItem) skSaveNew(tfFresh(prev, byItem), byItem);
+                await DTICache.set('seekoffers', { at: Date.now(), byItem });
+                GM_setValue('dti_sk_auto_at', Date.now());
+            } finally {
+                GM_setValue('dti_sk_auto_lock', 0);
+                window.__dtiSkAuto = false;
+            }
+        }, 30000);
+    }
     const tfNewCount = () => { const t = GM_getValue('dti_tf_new', {}) || {}; return t.n && t.at > GM_getValue('dti_tf_new_seen', 0) ? t.n : 0; };
     // The daily check (on by default, once you've used Trade Finder): in the background, one item every 1.5s; then
     // "New" marks who's newly offering what, and More shows a dot until you've looked
@@ -7742,6 +7944,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 const res = { at: Date.now(), items, byItem, stale, staleAt: stale.length ? (prev.staleAt || prev.at) : 0, partial: items.some(it => !byItem[it.id]) || stale.length > 0, fresh, freshAt: Date.now() };
                 await DTICache.set('tradefinder', res);
                 tfSaveNew(res);
+                skSaveNew(fresh, byItem);   // (Seeking's items among them: their own "New")
                 GM_setValue('dti_tf_auto_at', Date.now());
                 GM_setValue('dti_tf_ping', Date.now());   // (an open Trade Finder redraws)
             } finally {
@@ -7822,7 +8025,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             </header>
             <div class="dti-sk-link"></div>
             <div class="dti-sk-add"><input type="search" placeholder="\uff0b Add an item you\u2019re seeking\u2026" autocomplete="off" spellcheck="false"><div class="dti-sk-res" hidden></div></div>
-            <div class="dti-sk-list"></div>`;
+            <div class="dti-sk-list"></div>
+            <section class="dti-sk-seen" hidden></section>`;
         host.appendChild(app);
         const listEl = app.querySelector('.dti-sk-list');
         let ownedNow = [];   // (what's on the list that's yours now — the bar's "Take them off")
@@ -7830,6 +8034,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         const vals = new Map();
         function paint() {
             paintLink();
+            paintSeen();
+            skSeenNew();
             const list = DTISeek.list(), many = acctMany(), all = acctActive() === 'all';
             const ac = !all && acctGet(acctActive());
             if (ac) injectAcctCSS();
@@ -7863,6 +8069,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                         <div class="dti-sk-meta">
                             <button type="button" class="dti-sk-tier t${t}" title="How much you want it \u2014 click to change" aria-haspopup="menu">${SEEK_TIERS[t]}</button>
                             <button type="button" class="dti-sk-offer dti-sk-trade${tn?.o ? ' has' : ''}" title="On DTI: how many are offering it, and how many are seeking it \u2014 click to see who\u2019s offering, in Trade Finder"${tn && !tn.o ? ' disabled' : ''}>${tn == null ? 'Who\u2019s trading it?' : `${tn.o ? '<i></i>' : ''}${skTradeText(tn)}`}</button>
+                            ${(n => n ? `<button type="button" class="dti-sk-newoff" title="${noteEsc('Newly offering it since the check before: ' + n.join(', '))} \u2014 click to see who\u2019s offering, in Trade Finder">New: ${noteEsc(n[0])}${n.length > 1 ? ` +${n.length - 1}` : ''}</button>` : '')(skNewOf(e.id))}
                             ${e.for?.name ? (e.for.id ? `<a class="dti-sk-for" href="/outfits/${noteEsc(e.for.id)}" title="For your custom \u2014 open it">for ${noteEsc(e.for.name)}</a>` : `<span class="dti-sk-for">for ${noteEsc(e.for.name)}</span>`) : ''}
                             <span>Added ${noteAgo(e.at)}</span>
                         </div>
@@ -7919,8 +8126,36 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             if (act === 'keep') return DTISeek.update(id, { kept: Date.now() });
             const tb = e.target.closest('.dti-sk-tier');
             if (tb) return tierMenu(tb, id);
-            if (e.target.closest('.dti-sk-trade')) _openTradeFinder({ id, name: it.name || '', img: it.img || '' });
+            if (e.target.closest('.dti-sk-trade, .dti-sk-newoff')) _openTradeFinder({ id, name: it.name || '', img: it.img || '' });
         });
+        // (new offers: seen once the page shows them — the menu's badge and dot go)
+        function skSeenNew() { const t = GM_getValue('dti_sk_new', {}) || {}; if (t.at && t.at > (GM_getValue('dti_sk_new_seen', 0) || 0)) GM_setValue('dti_sk_new_seen', t.at); }
+        // ── Seen on the boards (user asked): who had things from your Seeking list where — the Neoboards' pill notes them ──
+        const seenEl = app.querySelector('.dti-sk-seen');
+        function paintSeen() {
+            const ids = new Set(DTISeek.list().map(e => String(e.id)));
+            const rows = (GM_getValue('dti_nb_seen', []) || []).filter(x => x && x.slug).map(x => ({ ...x, items: (x.items || []).filter(it => ids.has(String(it.id))) })).filter(x => x.items.length);
+            seenEl.hidden = !rows.length;
+            if (!rows.length) { seenEl.innerHTML = ''; return; }
+            seenEl.innerHTML = `<div class="dti-sk-seenh"><b>Seen on the boards</b><span>${rows.length}</span><small>who had something from your list, where</small><button type="button" class="dti-sk-seenclr">Clear</button></div>`
+                + rows.map(x => {
+                    const home = `/user/${encodeURIComponent(x.slug)}/closet`, at = id => `${home}#dti-jump=${encodeURIComponent(id)}`;
+                    const where = x.mail ? 'in a Neomail' : /^https:\/\/www\.neopets\.com\//.test(x.where || '') ? `<a href="${noteEsc(x.where)}" target="_blank" rel="noopener">on the boards</a>` : 'on the boards';
+                    return `<div class="dti-sk-seenrow" data-slug="${noteEsc(x.slug)}"><a class="who" href="${noteEsc(at(x.items[0].id))}" target="_blank" rel="noopener" title="Their items on DTI">${noteEsc(x.who || x.slug)}</a>
+                        <span class="its">${x.items.map(it => `<a class="it" href="${noteEsc(at(it.id))}" target="_blank" rel="noopener" title="${noteEsc(it.name)} \u2014 see it in their lists">${it.img ? `<img src="${noteEsc(it.img)}" alt="" loading="lazy">` : ''}<span>${noteEsc(it.name)}</span></a>`).join('')}</span>
+                        <span class="when">${noteAgo(x.at)} \u00b7 ${where}${x.np ? ` \u00b7 <a href="https://www.neopets.com/neomessages.phtml?type=send&recipient=${noteEsc(encodeURIComponent(x.np))}" target="_blank" rel="noopener">Neomail</a>` : ''}</span>
+                        <button type="button" class="x" title="Forget this one" aria-label="Forget this one">\u00d7</button></div>`;
+                }).join('');
+        }
+        seenEl.addEventListener('click', e => {
+            if (e.target.closest('.dti-sk-seenclr')) { GM_setValue('dti_nb_seen', []); return paintSeen(); }
+            const x = e.target.closest('.x');
+            if (!x) return;
+            const slug = x.closest('.dti-sk-seenrow').dataset.slug;
+            GM_setValue('dti_nb_seen', (GM_getValue('dti_nb_seen', []) || []).filter(r => r && r.slug !== slug));
+            paintSeen();
+        });
+        gmWatch('dti_nb_seen', app, () => paintSeen());
         function takeOff(ids) {   // (off the list — Undo puts them back as they were)
             const d = DTISeek.raw(), back = ids.map(id => [id, d.items[id]]).filter(x => x[1]);
             if (!back.length) return;
@@ -8097,6 +8332,28 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         const st = document.createElement('style');
         st.id = 'dti-seek-css';
         st.textContent = `
+            /* The Seeking page: Seen on the boards; new offers */
+            .dti-sk-seen { margin-top: 18px; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+            .dti-sk-seen[hidden] { display: none; }
+            .dti-sk-seenh { display: flex; align-items: baseline; gap: 8px; margin: 0 2px 8px; }
+            .dti-sk-seenh b { font-size: 13px; font-weight: 800; color: var(--text); }
+            .dti-sk-seenh span { padding: 0 7px; border-radius: 99px; background: color-mix(in srgb, #f97316 16%, var(--surface)); color: #c2410c; font-size: 11px; font-weight: 800; }
+            .dti-sk-seenh small { flex: 1; font-size: 11.5px; color: var(--text-muted); }
+            .dti-sk-seenclr { height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text-muted); font-family: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+            .dti-sk-seenclr:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-sk-seenrow { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 8px 30px 8px 10px; border-top: 1px solid var(--border); }
+            .dti-sk-seenrow .who { font-size: 13px; font-weight: 800; color: var(--accent-text, var(--accent)); text-decoration: none; }
+            .dti-sk-seenrow .its { display: flex; flex-wrap: wrap; gap: 5px; flex: 1; min-width: 0; }
+            .dti-sk-seenrow .it { display: inline-flex; align-items: center; gap: 5px; max-width: 220px; padding: 2px 8px 2px 3px; border: 1px solid var(--border); border-radius: 99px; background: var(--surface-2); color: var(--text); font-size: 11.5px; font-weight: 600; text-decoration: none; }
+            .dti-sk-seenrow .it:hover { border-color: var(--accent); }
+            .dti-sk-seenrow .it img { width: 20px; height: 20px; border-radius: 50%; object-fit: contain; background: #fff; }
+            .dti-sk-seenrow .it span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .dti-sk-seenrow .when { font-size: 11.5px; color: var(--text-muted); }
+            .dti-sk-seenrow .when a { color: inherit; }
+            .dti-sk-seenrow .x { position: absolute; right: 6px; top: 8px; width: 22px; height: 22px; padding: 0; border: none; border-radius: 50%; background: transparent; color: var(--text-muted); font-size: 15px; line-height: 1; cursor: pointer; }
+            .dti-sk-seenrow .x:hover { background: var(--surface-2); color: var(--text); }
+            .dti-sk-newoff { height: 22px; padding: 0 9px; border: none; border-radius: 99px; background: #f97316; color: #fff; font-family: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
+            .dti-sk-newoff:hover { filter: brightness(1.08); }
             /* The Seeking page: tiers, "yours now", a month on the list, for a custom */
             .dti-sk-tierh { display: flex; align-items: center; gap: 8px; margin: 10px 2px 0; font-size: 10.5px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--text-muted); }
             .dti-sk-tierh:first-child { margin-top: 0; }
@@ -11270,8 +11527,12 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             #dti-seek-theirs .dti-skt-i:hover { border-color: #f97316; }
             #dti-seek-theirs .dti-skt-i img { flex: none; width: 24px; height: 24px; border-radius: 50%; object-fit: cover; background: #fff; }
             #dti-seek-theirs .dti-skt-i span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .dti-item-card.dti-flash { animation: dti-skt-flash 1.9s ease-out; }
+            /* (after its first flash it keeps pulsing, softer (user asked) — easy to find again — till another one's jumped to; with less
+               motion asked for: a ring instead) */
+            .dti-item-card.dti-flash { animation: dti-skt-flash 1.9s ease-out, dti-skt-pulse 2.2s ease-in-out 1.9s infinite; }
             @keyframes dti-skt-flash { 0%, 35% { box-shadow: 0 0 0 4px #f97316, 0 0 26px rgba(249, 115, 22, .55); } 100% { box-shadow: 0 0 0 0 transparent; } }
+            @keyframes dti-skt-pulse { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 3px rgba(249, 115, 22, .55), 0 0 14px rgba(249, 115, 22, .28); } }
+            @media (prefers-reduced-motion: reduce) { .dti-item-card.dti-flash { animation: none; box-shadow: 0 0 0 3px rgba(249, 115, 22, .6); } }
 
             /* ── Copy the name: the tile's bottom-left corner, on hover ── */
             .dti-copy-btn {
@@ -12353,6 +12614,10 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         }));
         html.classList.add('dti-ncval-tiers');
     }
+    // (a DTI list's quantity, for a cap total: 20 or more on one item is a label, not a count — some people number their items that
+    // way, DTI's own ways to sort them being few (user asked) — so it counts once)
+    const CAP_QTY_LABEL = 20;
+    function capQty(q) { q = +q || 1; return q >= CAP_QTY_LABEL ? 1 : q; }
     async function ncCapTotal(entries) {   // [{ name, qty }]
         const t = { min: 0, max: 0, valued: 0, unknown: 0 };
         const vals = await Promise.all(entries.map(e => ncCapRange(e.name)));
@@ -12410,7 +12675,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
 
     // ── Backup & restore: everything DTI Enhance keeps in this browser (Tampermonkey storage — notes, tokens,
     // Neofriends, theme, settings — plus Neofriends' saved lists and the token release dates) in one file ──
-    const BACKUP_SKIP = /^(dti_user_id|dti_user_slug|dti_user_name|dti_tok_capture|dti_nf_ping|dti_nf_autocheck_lock|dti_tf_ping|dti_tf_auto_lock|dti_cap_ping|dti_backup_nag_at|dti_seek_link_lock)$/;   // who's logged in, and passing signals
+    const BACKUP_SKIP = /^(dti_user_id|dti_user_slug|dti_user_name|dti_tok_capture|dti_nf_ping|dti_nf_autocheck_lock|dti_tf_ping|dti_tf_auto_lock|dti_cap_ping|dti_backup_nag_at|dti_seek_link_lock|dti_sk_auto_lock|dti_nm_draft)$/;   // who's logged in, and passing signals
     async function dtiBackupData() {
         const gm = {};
         (typeof GM_listValues === 'function' ? GM_listValues() : []).forEach(k => { if (!BACKUP_SKIP.test(k)) gm[k] = GM_getValue(k); });
@@ -12441,8 +12706,35 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         const n = Object.keys(d.gm).length;
         return { data: d, summary: `${notes} note${notes === 1 ? '' : 's'}, ${friends} Neofriend${friends === 1 ? '' : 's'}, ${n} saved setting${n === 1 ? '' : 's'}` };
     }
+    // (what a restore writes: the theme's colors for Neopets pages are left out — the next DTI page works them out again; colors that
+    // go into style sheets must be colors — a backup file from someone else can't add to the page's styles)
+    const RESTORE_SKIP = /^dti_theme_tokens$/;
+    const cssColorOk = v => typeof v === 'string' && /^(#[0-9a-f]{3,8}|(rgb|hsl)a?\([\d\s.,%/+-]+\)|[a-z]{3,20}|)$/i.test(v.trim());
+    function restoreClean(k, v) {
+        if (/_(color|bg|fg|border)$/.test(k)) return cssColorOk(v) ? v : undefined;   // (old single-color badge settings)
+        if (k !== BADGE_STYLES_KEY) return v;
+        let o = v;
+        if (typeof o === 'string') { try { o = JSON.parse(o); } catch (_) { return undefined; } }
+        if (!o || typeof o !== 'object') return undefined;
+        const out = {};
+        for (const [kind, st] of Object.entries(o)) {
+            if (!/^\w+$/.test(kind) || !st || typeof st !== 'object') continue;
+            const c = {};
+            for (const [p, x] of Object.entries(st)) {
+                if (/^(bg|fg|border)$/.test(p)) { if (cssColorOk(x)) c[p] = x.trim(); }
+                else if (p === 'mode') { if (/^(theme|solid|custom)$/.test(x)) c[p] = x; }
+                else if (typeof x === 'number' || typeof x === 'boolean') c[p] = x;
+            }
+            out[kind] = c;
+        }
+        return typeof v === 'string' ? JSON.stringify(out) : out;
+    }
     async function dtiRestoreBackup(d) {
-        Object.entries(d.gm).forEach(([k, v]) => { if (!BACKUP_SKIP.test(k)) GM_setValue(k, v); });
+        Object.entries(d.gm).forEach(([k, v]) => {
+            if (BACKUP_SKIP.test(k) || RESTORE_SKIP.test(k)) return;
+            const c = restoreClean(k, v);
+            if (c !== undefined) GM_setValue(k, c);
+        });
         for (const [id, snap] of Object.entries(d.idb || {})) { try { await NFDB.put(id, snap); } catch (_) {} }
         Object.entries(d.ls || {}).forEach(([k, v]) => { try { localStorage.setItem(k, v); } catch (_) {} });
     }
@@ -12702,7 +12994,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 const extra = _poolDisplay.length - shown.length;
                 poolHtml = `<div class="dti-ip-pool-wrap"><div class="dti-ip-section dti-ip-pool-toggle" role="button" tabindex="0" title="See everything inside, bigger (click again to go back)">${_inside}<i class="dti-ip-pool-arrow">\u203a</i><span class="dti-ip-dye-n">${_poolDisplay.length} item${_poolDisplay.length === 1 ? '' : 's'}${_bonusCount > 0 ? ` \u00b7 +${_bonusCount} possible bonus` : ''}</span></div>
                     <div class="dti-ip-pool-grid">
-                        ${_poolDisplay.map((x, xi) => `<a class="dti-ip-pool-item${x.isLE ? ' le' : ''}${xi >= shown.length ? ' dti-ip-pool-extra' : ''}" title="${noteEsc(x.name || '')}" href="/items/0#pool-${x.iid}" data-turbo="false" data-pin="${(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" data-pii="${(x.image||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" onclick="try{localStorage.setItem('dti_pi_${String(x.iid || "").replace(/[^\w.-]/g, "")}',JSON.stringify({name:this.dataset.pin,image:this.dataset.pii,iid:'${String(x.iid || "").replace(/[^\w.-]/g, "")}'}))}catch(e){}">
+                        ${_poolDisplay.map((x, xi) => `<a class="dti-ip-pool-item${x.isLE ? ' le' : ''}${xi >= shown.length ? ' dti-ip-pool-extra' : ''}" title="${noteEsc(x.name || '')}" href="/items/0#pool-${x.iid}" data-turbo="false" data-pin="${(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" data-pii="${(x.image||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">
                             ${x.image ? `<img src="${noteEsc(x.image)}" alt="" loading="lazy">` : ''}
                             ${x.isLE ? '<span class="dti-ip-pool-le">LE</span>' : ''}
                             <span class="dti-ip-pool-name">${noteEsc(x.name || '')}</span>
@@ -12736,8 +13028,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 <div class="dti-ip-row">
                     <span class="dti-ip-label">Trades</span>
                     <div class="dti-ip-trade-btns">
-                        <button class="dti-ip-tbtn offering" data-item-id="${id}" data-item-name="${noteEsc(name)}" data-item-img="${noteEsc(thumbSrc)}" data-item-capval="${capVal || ''}" data-trade-type="offering">${offering} Offering</button>
-                        <button class="dti-ip-tbtn seeking" data-item-id="${id}" data-item-name="${noteEsc(name)}" data-item-img="${noteEsc(thumbSrc)}" data-item-capval="${capVal || ''}" data-trade-type="seeking">${seeking} Seeking</button>
+                        <button class="dti-ip-tbtn offering" data-item-id="${id}" data-item-name="${noteEsc(name)}" data-item-img="${noteEsc(thumbSrc)}" data-item-capval="${noteEsc(capVal || '')}" data-trade-type="offering">${offering} Offering</button>
+                        <button class="dti-ip-tbtn seeking" data-item-id="${id}" data-item-name="${noteEsc(name)}" data-item-img="${noteEsc(thumbSrc)}" data-item-capval="${noteEsc(capVal || '')}" data-trade-type="seeking">${seeking} Seeking</button>
                     </div>
                 </div>
                 <div class="dti-ip-links">
@@ -13338,6 +13630,28 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['3.1.337', [
+            'The new Mini DTI is live on Neopets.com! Any bugs or improvements will be ironed out in the near future',
+            'Mini DTI: on for everyone with this update \u2014 its tab sits near the top of the right edge (drag it anywhere); \u2699 \u203a Neopets turns it off',
+            'Mini DTI: redesigned \u2014 a little DTI on every Neopets page, in your DTI theme: Home, Items, Seeking, Trades, Tokens and Notes',
+            'Mini DTI: Home shows what the page you\u2019re on has for you, and keeps up as the page changes \u2014 your Inventory\u2019s NC items with their values and total, your trades with the person you\u2019re looking at, what you want in the NC Mall',
+            'Mini DTI: an item\u2019s own page \u2014 its picture on a pet, its value, who\u2019s offering and seeking it on DTI, your lists, Seeking, a note, a trade report',
+            'Mini DTI: Trades \u2014 your trade reports with each side\u2019s cap value and how they compare, and every NC gift you\u2019ve recorded, made into a report right there',
+            'Mini DTI: DTI\u2019s item search with its filters, and your own DTI lists; drag its left edge to make it wider',
+            'Mini DTI: NC Mall items leaving soon are colored by how soon \u2014 under a day, 3 days or a week \u2014 as on DTI',
+            'Customs editor: a padlock at the top locks the custom\u2019s items \u2014 what\u2019s on stays on, nothing is taken out, and nothing new can take a worn item\u2019s place',
+            'Customs editor: opens faster and keeps up better as items go on and off \u2014 and every DTI page does less styling work for your theme',
+            'Customs: while you drag a custom to a section, the page scrolls \u2014 with the mouse wheel, or by holding it near the top or bottom of the window',
+            'Seeking: the pill by DTI links works in Neomail too \u2014 and its popup has Select items: pick what a trade could take in, and a Neomail to them opens with the items\u2019 names in, ready for the rest of your message',
+            'Seeking: \u201cSeen on the boards\u201d on the Seeking page \u2014 who had something from your list on the boards (or in a Neomail), and where',
+            'Seeking: a \u201cNew\u201d chip on an item when someone new starts offering it (the daily check), and a badge on Seeking in the menu',
+            'Seeking: on someone\u2019s items page, the item you jump to keeps pulsing gently, so it\u2019s easy to find again',
+            'Settings: Find a setting \u2014 a search box at the top of \u2699',
+            'Import from Neopets: a Gallery captures faster \u2014 what\u2019s wearable goes in as it\u2019s found, and what\u2019s been checked is remembered even if you leave part-way',
+            'Customs editor: in Pages, only the pages you look at are loaded (lighter and quicker), and the page buttons sit at the end of the line above the items',
+            'Cap value totals on Items pages: a quantity of 20 or more on one item counts as one \u2014 some people use quantities as labels',
+            'Fixes: if part of DTI Enhance fails on a page (after a DTI change, say), the page still shows and the rest still works \u2014 it says so, with the details to copy for a report; Quick new no longer makes two customs on a quick double Enter; fewer requests to Neopets while you\u2019re logged out of it; the \u2699 panel\u2019s scrollbar no longer cuts into its header; the editor\u2019s Shopping list tooltip is in your theme',
+        ]],
         ['3.0', [
             'Coming in a future update: the Mini DTI on Neopets.com, completely reworked and greatly improved',
             'Customs: drop a custom anywhere in a section to move it there (not just on its heading) \u2014 and Select several to move them together; up to 12 a row',
@@ -13422,147 +13736,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             'Customs: zones show matches from every page of a search, and “All in one list” by the page number shows any search without pages',
             'Customs: brand-new customs show the full search bar right away',
             'Fixes: the NC / NP switch keeps what you typed, plus smaller fixes',
-        ]],
-        ['2.5', [
-            'Customs: pick a color to see every match from every page of a search — one list or full pages — and click to try one on',
-            'Customs: All / NC / NP switch for search results, and an option to hide the NC / NP labels',
-            'Customs: layout menu — items per row, zones per row and tile size',
-            'Color filter: any color you like (color grid or code), and a Strict ↔ Loose slider',
-            'My Tokens: filter by color',
-            'Someone’s Items: all their lists open at once, and Compare shows what you want and what you have for them',
-            'Someone’s Items: select items to see their total value and copy their names',
-            'Shopping list: show worn items, everything saved, or one alternate outfit',
-            'Faster: color filters fill in much quicker, and Styles pictures load ahead',
-            'Security: other people’s list names always show as plain text',
-            'Fixes: search suggestions close when you click away, new customs no longer drop typed letters, alternate outfits can’t overwrite each other, plus smaller fixes',
-        ]],
-        ['2.4', [
-            'Customs: keep alternate outfits in one custom — each with its own items, color, pose and style. “Alternate outfits” by a custom’s name in the editor starts them; switch with the tabs under the name, double-click one to rename it (Customs shows how many a custom has)',
-            'Shopping list: an outfit’s NC Style is on it too when you don’t have its token (with its value and a Want button), and each item has a Seek button',
-            'Capsules: items wrongly reported from a capsule (common on brand-new ones — NP items, food…) are left out, so it shows just what’s really inside',
-            'Share on my DTI page: clearer choices for a list made for your tokens (the Tokens button is there either way — show the list to edit it yourself), and saving can no longer make a second list',
-        ]],
-        ['2.3', [
-            'My Tokens: “Share on my DTI page” lets you choose where your tokens live — in one of your own lists (a hidden code at the end of its description; the list doesn’t change, and a private list is made public only while it’s shared) or in a new list just for them (named “Tokens” or “Tokens · DTI Enhance”, with an optional description, shown as a Tokens button or as a list). It says exactly what will happen before you save, and “Change where” moves or edits it later',
-            'My Items: the list your tokens are shared from gets the Tokens icon, with “View tokens” under its description',
-            'Friends need 2.3 to see token shares made with 2.3 (on 2.2 they’ll see them once they update)',
-            'My Tokens: share links no longer break when a chat app leaves the last character out of the link (and ones that already did still open)',
-            'Trade reports: add style tokens and essences — search them by name next to DTI’s items, with their cap values; NC gifts that are tokens go in as tokens',
-            'NC gifts → trade reports: put several gifts in one report at once (your other gifts from that person are listed to tick), add later gifts to a report even after it’s completed, keep separate trades with the same person apart (each report shows what’s in it), and Undo',
-            'Capsule pages show the capsule’s own picture (one could show its LE instead)',
-            'Customs in dark mode: the item you clicked last no longer turns white with unreadable text',
-        ]],
-        ['2.2', [
-            'Customs: the Styles pictures are smoother (no jagged edges) and a little closer in, and they no longer flicker as they appear — a tile shows its picture once it’s ready, with a soft pulse while it loads',
-            'Customs: the Styles pictures load much faster — the whole list starts loading as soon as you open Styles (what’s on screen first), and each picture is remembered, so the next time they’re all there at once',
-        ]],
-        ['2.1', [
-            'Color filter (My Items and Customs): a new look — the button names the color you picked, and the palette shows every color as a named swatch in a clear shade',
-            'Customs: Styles opens as a grid of sharp pictures — each style worn on a pet, not the small blurry token (List is still a click away, and remembered)',
-            'My Items: the zone filter uses DTI’s real zones on your own items (a wig shows under Hat), and a zone in the Zones list shows just those items',
-            'My Items: your lists show as a grid unless you pick rows; the header no longer overlaps on smaller windows; Own / Want show just those lists; clearer sort names, and the value sort uses both value lists',
-            'My Tokens: mark owned tokens UFT (up for trade) — it shows on lists you share; token names copy with a click; the search & filters fold away; Share shows when your DTI page copy was last updated, with “Update now”',
-            'NC Mall Guide: bundles sit with the single item (“Bundles of 5 · 10” and how much you save), a row for each in the item panel, the price is a button to the NC Mall, and bonus-LE odds say “of LEs”. Home’s NC Mall card shows bundles the same way',
-            'NC Mall links go straight to the item (the NC Mall’s search for it), in a new tab',
-            'Capsule pages: the capsule’s own NC Mall price, its bundles, and LE odds',
-            'NC Styles: the any-pet essences’ unnamed stand-ins are named (“Essence of Brain Tree (Eyrie)”)',
-            'Top bar on a narrow window: “+ New Custom” becomes “+”, then the main links move into a Menu; Alt+T opens Tokens, Alt+O Notes; the Tokens icon is the circle with a star everywhere',
-            'Customs: the shopping-list button is a cart, and a search that finds nothing says so; Home’s Customs tiles are real links (Ctrl-click opens a new tab)',
-            'Try-On Haul: Clear all can be undone, and the ✦ button no longer covers the ⚙ panel',
-            'Home: “Enhance” over the logo, in your theme’s color',
-            'Fixes: Browse Items no longer squashes the top bar’s arrow on the next page; someone else’s items don’t light up My Items; the hidden token-share list stays hidden on item pages; notes like “Not enough data” don’t get “caps”; empty notes and trade reports left behind are cleared; the Import menu closes with Esc',
-        ]],
-        ['2.0', [
-            'Mini DTI on Neopets: the DTI button is now a small tab on the right edge \u2014 a click opens it, drag it up or down to move it',
-            'Mini DTI: a bigger panel with five tabs \u2014 Trades, Tokens, Seeking, Search and Notes (DTI\u2019s pages are under the DTI logo)',
-            'Mini DTI: click any item (in Search, Seeking or a note) to open it right there \u2014 Seeking, your DTI lists (saved from Neopets), add it to a trade, your note on it, and Own / Want for style tokens',
-            'Mini DTI: a Tokens tab \u2014 the tokens you want (by your want lists), the ones you own, and what\u2019s in the Styling Studio now; search any token to mark it',
-            'Mini DTI: a Notes tab \u2014 your notes on items, people and anything, saved as you type (the same notes as DTI\u2019s Notes)',
-            'Mini DTI: \u201cOn this page\u201d \u2014 the Styling Studio shows the tokens you want in its rotation, the NC Mall the items you\u2019re seeking that are for sale, someone\u2019s lookup, Neomail or gallery your trades with them (and the tokens you want in their gallery), and your Inventory, SDB, Gallery or Styling Chamber an \u201cImport tokens\u201d button. A dot on the tab when there\u2019s something for you',
-            'Customs: a custom\u2019s name lights up when you hover anywhere on its tile',
-            'Customs: double-click a name to rename it really works now (one click on the name still opens the custom)',
-        ]],
-        ['1.9', [
-            'Top bar: Tokens is up there now, between Customs and Notes (it was in More) \u2014 More is just its arrow, and Log out is a small square beside the gear (it ran past the bar’s edge)',
-            'My Tokens: \u201cAvailable now\u201d \u2014 the style tokens you can get on Neopets right now (the Styling Studio\u2019s current rotation, read from itemdb). Shows all of them, or with \u201cMy tokens\u201d the ones you own or want; those tokens get an \u201cAvailable\u201d tag everywhere in My Tokens',
-            'DTI on Neopets: trade reports take GBCs and BFGBCs — “+ GBC” / “+ BFGBC” under each side (or type gbc), the same as DTI’s Notes, which counts them at 1 and 1.5 caps',
-            'DTI on Neopets: Search shows more than the first 30 results — “Show more” at the bottom adds the next 30',
-            'Customs: in the item list view, the copy-name paperclip sits beside the pencil instead of on top of “Add to your lists”',
-        ]],
-        ['1.8', [
-            'More menu: Browse Items no longer shows as the page you’re on while you’re in My Tokens, Notes, Neofriends or the other DTI Enhance pages',
-            'My Items: making or editing a list (and Quick add) no longer reloads the page — My Items is refreshed in place, scrolled where you were',
-            'My Items: the Quick add window stays on screen — after a search it no longer runs off the bottom (the results give way on a short window)',
-            'Neofriends: the Neopets lookup button opens their lookup without the captcha',
-            'My Tokens: Share your tokens with anyone using DTI Enhance \u2014 they see your list (what you own, want and your want lists) with \u2665 on what you have that they want and \u2713 on what they have that you want. \u201cShare on my DTI page\u201d keeps it on one public DTI list (it just looks empty to anyone without DTI Enhance), always up to date, with a short link (impress.openneo.net/#tk + your DTI number) \u2014 and it shows from your Items page and in Neofriends. Or copy a one-off link (a snapshot) \u2014 and for anyone without DTI Enhance, download a page that opens in any browser (.html), or copy your list as text, by token type',
-        ]],
-        ['1.7', [
-            'My Tokens: the Styling Chamber import counts how many of each style you have (it read every one as 1)',
-            'My Tokens: import from your Safety Deposit Box too (its NC side \u2014 every page you look at is added)',
-            'Customs: the pose picker says M / F instead of Masc / Fem',
-            'Customs: the Color and Species menus have little pictures \u2014 each color\u2019s paint brush (or its potion), each species in the color you picked',
-            'My Tokens: Select (beside the filters) works everywhere \u2014 pick tokens (Shift-click for a run) and mark them owned or wanted, put them in a want list, or take them off your owned or wanted, all with Undo. The owned / wanted / essences counts at the top show those tokens; \u201cForget this import\u201d can be undone; clearer messages when nothing\u2019s owned or wanted yet',
-            'My Tokens: imported tokens can be taken off your Owned count with \u2212 (traded one away?) \u2014 until you import that place again, which counts afresh; + gives one back',
-            'My Tokens: a \u201cGroup by type\u201d button \u2014 your tokens under a heading for each series (Nostalgic, Baby, Mischievous\u2026, then essences) and each of its styles, each style\u2019s own tokens before its Prismatic versions; the order picked applies inside each group',
-            'My Tokens: want lists of your own \u2014 put each token you want in a list (\u201cReally want\u201d, \u201cJust like\u201d, anything): \u201c+ Add to a list\u201d on its card, or drag it onto a list. Wanted shows your lists to pick from (and how many are in each); \u201cMove all\u201d moves the tokens shown to another list, out of their list, or off your Want list (with Undo); the small token popover on NC Styles pages has the list too; Edit lists renames, recolors, reorders or deletes them; the \u201cWant list\u201d order groups them',
-            'Trade Finder: \u201cFind a trader\u2026\u201d works again, and the Neofriends filter does too when the Seeking one shows',
-            'Trade Finder: stopping \u201cCheck again\u201d part-way keeps what the check before found for the rest (\u201cCheck the other N\u201d updates them) \u2014 it used to drop them; it also says how long is left as it goes',
-            'Trade Finder: an item you look up shows first among the cards; Hide and Avoid can be undone; long list names are cut short',
-            'Trade Finder: choose exactly what it checks \u2014 the \u201cAll items \u25be\u201d button opens every wishlist with its items: pick single items, whole lists, or check / uncheck everything (and search). Whatever you leave out comes back from the same place',
-            'My Tokens, Notes, Neofriends, the NC Mall Guide, Trade Finder and Seeking open in place from any DTI page — faster, with nothing else flashing up first; Back and Forward work between them, and opened straight from the address bar they show a loading screen in your theme until they’re ready',
-            'Settings: your side accounts are on DTI’s Settings page too, above Your info (as well as in ⚙ › Neopets)',
-            'My Tokens: tokens DTI hasn’t named yet show their real look (one was showing an unrelated Blue Krawk) and are named after the style they most likely are, so they sort with it — “Celebratory Anniversary Grundo (unnamed)”',
-            'My Tokens: pick Essences and they sort into their kinds — Essence, All-Star Essence, Treasured, and the ones any pet can wear',
-            'Sticker packs show their 5 stickers — in the item popups, the NC Mall Guide and the pack’s item page; click “Inside This Pack” in a popup to see them bigger with their codes, and a sticker to copy its code for your Neosignature. Packs newer than that: opening JellyNeo’s sticker list adds them',
-            'NC Mall: items leaving get warmer as time runs out — amber within a week, orange-red within 3 days, red on the last day (on Home and in the NC Mall Guide)',
-            'Neopets gallery: cap values no longer push the gallery wider than the page — a long value note (“Current Dyeable & Buyable thru…”) is cut short, all of it on hover',
-            'My Tokens: a tidier bar — the view, search, order and tile size on top, the filters underneath; filters in use are highlighted, and Clear puts them all back',
-            'My Tokens: pick a color and its styles show under the filters as a little tree — Chocolate: Baby Chocolate, Delightful Chocolate, Nostalgic Chocolate; pick one and its Prismatic versions open under it (Original, Mint Chip, Cookies & Cream…). A click again goes back up. Also a Type sort',
-            'My Tokens: series and colors are read from each token’s name, so DTI’s mix-ups no longer show — one Habbo Hotel series (Green is Green, not Blue), the Nostalgic and Adoring Rainbows in their series, and a token whose series is two colors counts for both (Baby Chocolate: Baby and Chocolate)',
-        ]],
-        ['1.6', [
-            'My Tokens: filter by Color (its list follows the series you pick — Nostalgic › Halloween, say) or sort by it. Tokens DTI doesn’t have yet get their series and color from their name',
-            'My Tokens: bigger tiles no longer jump in size as you scroll — each picture appears once it’s sized to its card, the ones on screen first, and the sizes are remembered for next time',
-            'My Tokens › Import from Neopets shows each place’s Neopets icon',
-        ]],
-        ['1.5', [
-            'Side accounts (\u2699 \u203a Neopets): name your Neopets accounts, say which DTI lists are whose, and switch between them where your username is \u2014 My Items, tokens, Neopets imports, trade reports, Trade Finder and Neofriends follow the account you pick, or show them all together',
-            'Seeking: your short list of the items you want NOW (More \u203a Seeking, and a panel on My Items) \u2014 add from any item\u2019s \u201cAdd to your lists\u201d button, its popup or its page; drag to set priority, add notes, see who\u2019s offering, copy the list as text for the boards. Trade Finder puts it first (and ranks people who have it higher), Neofriends and the NC Mall alerts point it out, the DTI button on Neopets has a Seeking tab, and NC board posts that mention it are highlighted',
-            'Trade Finder, much improved: your wishlist as cards with each item\u2019s value (order them by value, how many offer it, what\u2019s new\u2026; pick several \u2014 people with all or any of them), choose which wishlists it checks or leave single items out, and look up any item',
-            'For each trader: what they want from you, their Neomail with a link to write to them, what their matching items are worth, which of their lists they\u2019re in, and a trade report in one click',
-            'Trade Finder checks again by itself once a day and marks who\u2019s newly offering what \u2014 More shows a dot when there\u2019s something new',
-            'Order traders by Best match (active people first), Most items, Most value or Recently active; show only people active lately; hide people, or mark someone to avoid \u2014 flagged wherever their name shows',
-            'Item trade lists (Offering / Seeking) show each owner\u2019s Neomail, and anyone you avoid; Neofriends shows when each friend was last on DTI',
-            'Neofriends: give each friend a picture \u2014 one of their pets, a picture link or one you upload (click their letter). On My Items they show with their pictures, and the buttons under them (and under My Tokens) fold away',
-            'My Tokens \u203a Browse all shows every token\u2019s release date on its card \u2014 and now has every Treasured and All-Star Essence token too. \u2726 on a card starts a new custom in that style, so NC Styles has left the menu (Home\u2019s Tokens tab opens My Tokens)',
-            'My Tokens: bigger tiles (right of the filters; four, three or two to a row) show every style worn on a pet right on its card, zoomed to fill it \u2014 or Full size at the picture\u2019s real size. Own and Want fill in once you have one',
-            'Importing from Neopets shows each item\u2019s cap value, and what the items you\u2019ve picked are worth. On Neopets, cap values no longer cover the Qty in your closet, SDB and gallery',
-            'My Items: a tile size slider next to items-per-row \u2014 smaller tiles fit up to 16 to a row',
-            'My Items: Select (pick one by one) and All (a second click unselects) at the top and on every list, pick by value \u2014 every 1-cap item, say \u2014 or extra copies, invert, and the actions stay in reach at the bottom while you scroll',
-            'Item popups show what\u2019s inside a capsule bigger, and how many items it holds \u2014 click \u201cInside this capsule\u201d to see everything in it, named; Newest Items on Home only labels real cap values; the NC Mall tags Dyeworks Hue Brew as Dyeworks and the bookshelf kits as Archive',
-            'Someone else\u2019s items page is named after them in your browser tab, and DTI Enhance runs lighter as you move between pages',
-        ]],
-        ['1.4', [
-            'A DTI button on every Neopets page: your trade reports (the same ones as in Notes \u2014 start one, change its status, add items), an item search with NC values, and DTI\u2019s pages. Drag it anywhere, or tuck it away',
-            'Trade Finder (More \u203a Trade Finder): who\u2019s offering the items on your wishlist, as a full page or a popup \u2014 and a check you stop part-way can carry on later',
-            'Optional NC gift tracking (\u2699 \u203a Neopets): the NC gifts you send and accept are noted, ready to put in a trade report \u2014 from Notes or the DTI button',
-            'The color filters (My Items and the outfit editor) now read each item\u2019s picture \u2014 its main colors, like itemdb\u2019s palettes \u2014 instead of guessing from the name. Plus Grey, and a Color sort on My Items',
-            'Copy an item\u2019s name: the paperclip on any item tile, or click the name on its page or in its info popup',
-            'A \u2665 on More when something on your wishlist is leaving the NC Mall within 3 days or goes on sale',
-            'Capsule and other non-wearable NC values now show on your Neopets Inventory, SDB and Closet too (from Valisar\u2019s list)',
-            'Keyboard shortcuts \u2014 press <kbd>?</kbd> to see them (Alt+H Home, Alt+N new custom, Alt+M NC Mall Guide\u2026)',
-            'Fold away either sidebar on My Items (the round button on its edge)',
-            'New Neopets links in More: spoilerss and dyeworking',
-            'Smoother over long sessions, tidier tab titles, and NC values no longer go missing when you\u2019re logged out of Neopets',
-        ]],
-        ['1.3', [
-            'NC Mall Guide: permanent buyables are hidden (one click shows them), a calmer banner, and new tags \u2014 Free, Cookie, Styling, PASS, TVW, Grave Danger, Snowager',
-            'Notes: change a trade\u2019s status right from the list, and see every trade report as tiles on the new Trade board',
-        ]],
-        ['1.2', [
-            'NC Mall Guide (More \u203a NC Mall Guide): everything in the NC Mall \u2014 what\u2019s new and leaving, what\u2019s inside each capsule, and what it\u2019s all worth',
-            'Gift Box capsules are labelled GBC, Home\u2019s NC Mall card can hide its badges, and Customs has a popup',
-            'Notes: \uff0b Trade Report starts a trade report in one click',
         ]],
     ];
     const _verNum = v => String(v || '0').split('.').map(Number).reduce((t, x, i) => t + (x || 0) / Math.pow(1000, i), 0);
@@ -14225,10 +14398,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
     function runPageInit() {
         const _path = location.pathname;
+        window.__dtiErrTold = false;   // (something failing on this page: said once here — each step below runs on its own)
         // Always disable DTI's link stylesheets — our GM_addStyle covers all pages (our font link stays).
-        document.querySelectorAll('link[rel="stylesheet"]:not([data-dti-font])').forEach(_dtiKillSheet);
+        dtiSafe('styles', () => document.querySelectorAll('link[rel="stylesheet"]:not([data-dti-font])').forEach(_dtiKillSheet));
         // Re-stamp theme attributes (just in case Turbo touches <html>)
-        stampTheme();
+        dtiSafe('theme', stampTheme);
 
         // Nuke any DTI flash/error messages immediately — CSS hides them but JS
         // catches any that are injected after our stylesheet runs
@@ -14249,18 +14423,20 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         _flashObserver.observe(document.body || document.documentElement, { childList: true, subtree: false });
         setTimeout(() => _flashObserver.disconnect(), 5000);
 
-        rebuildNav();
+        dtiSafe('top bar', rebuildNav);
 
         if (_nstInterval) clearInterval(_nstInterval);
-        _nstInterval = injectNSTClock();
+        _nstInterval = dtiSafe('NST clock', injectNSTClock);
 
-        injectThemePicker();
-        injectHaulTray();
-        injectEdMinBar();   // (a custom minimized: its bar)
-        installNoteHandlers();
-        installTurboConfirm();
-        _dtiSetFavicon();
-        _dtiSetTitle();
+        dtiSafe('theme picker', injectThemePicker);
+        dtiSafe('Try-On Haul', injectHaulTray);
+        dtiSafe('minimized customs', injectEdMinBar);   // (a custom minimized: its bar)
+        dtiSafe('notes', installNoteHandlers);
+        dtiSafe('questions', installTurboConfirm);
+        dtiSafe('tab icon', _dtiSetFavicon);
+        dtiSafe('tab title', _dtiSetTitle);
+        dtiSafe('capsule tiles', wirePoolTiles);
+        dtiSafe('theme rules', dtiThemePrune);   // (the style sheets this page added: other themes' rules dropped)
 
         const body = document.body;
         const isNotesPage = dtiAppHere() && location.hash.startsWith('#notes');
@@ -14309,44 +14485,47 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 hashSwap();
             }, true);
         }
-        if (GM_getValue('dti_tok_pub', null)) tokPubWire();   // (your tokens on your DTI page: kept up to date)
-        if      (isNotesPage)                                      initNotesPage();
-        else if (isTokensPage)                                     initTokensPage();
-        else if (isNfPage)                                         initNeofriendsPage();
-        else if (isMallPage)                                       initMallPage();
-        else if (isFinderPage)                                     initTradeFinderPage();
-        else if (isSeekPage)                                       initSeekingPage();
-        else if (body.classList.contains('outfits-new'))           initHomePage();
-        else if (body.classList.contains('closet_hangers-index'))  initClosetPage();
-        else if (body.classList.contains('outfits-index'))         initOutfitsPage();
-        else if (body.classList.contains('auth_users-edit'))       initSettingsPage();
-        else if (body.classList.contains('devise-sessions-new'))     initLoginPage();
-        else if (body.classList.contains('contributions-index') ||
-                 /\/contributions(?:$|\?)/.test(_path))             initContributionsPage();
-        else if (body.classList.contains('users-top_contributors') ||
-                 /\/top_contributors/.test(_path))                  initTopContributorsPage();
-        else if (document.getElementById('wardrobe-2020-root'))    initEditorPage();
-        else if (/^\/items\/\d+/.test(_path))                      initItemPage();
-        else if (/^\/items(?:$|\?|\/[^0-9])/.test(_path))         initItemsPage();
-        else if (body.classList.contains('pet_types-index') ||
-                 body.classList.contains('pet_types-show') ||
-                 /^\/rainbow-pool/.test(_path))                     initRainbowPoolPage();
-        else if (/^\/import\/gallery/.test(_path))                  initGalleryImportPage();
-        else if (document.querySelector('body > div.dialog'))     init404Page();
+        if (GM_getValue('dti_tok_pub', null)) dtiSafe('token sharing', tokPubWire);   // (your tokens on your DTI page: kept up to date)
+        dtiSafe('this page', () => {
+            if      (isNotesPage)                                      initNotesPage();
+            else if (isTokensPage)                                     initTokensPage();
+            else if (isNfPage)                                         initNeofriendsPage();
+            else if (isMallPage)                                       initMallPage();
+            else if (isFinderPage)                                     initTradeFinderPage();
+            else if (isSeekPage)                                       initSeekingPage();
+            else if (body.classList.contains('outfits-new'))           initHomePage();
+            else if (body.classList.contains('closet_hangers-index'))  initClosetPage();
+            else if (body.classList.contains('outfits-index'))         initOutfitsPage();
+            else if (body.classList.contains('auth_users-edit'))       initSettingsPage();
+            else if (body.classList.contains('devise-sessions-new'))     initLoginPage();
+            else if (body.classList.contains('contributions-index') ||
+                     /\/contributions(?:$|\?)/.test(_path))             initContributionsPage();
+            else if (body.classList.contains('users-top_contributors') ||
+                     /\/top_contributors/.test(_path))                  initTopContributorsPage();
+            else if (document.getElementById('wardrobe-2020-root'))    initEditorPage();
+            else if (/^\/items\/\d+/.test(_path))                      initItemPage();
+            else if (/^\/items(?:$|\?|\/[^0-9])/.test(_path))         initItemsPage();
+            else if (body.classList.contains('pet_types-index') ||
+                     body.classList.contains('pet_types-show') ||
+                     /^\/rainbow-pool/.test(_path))                     initRainbowPoolPage();
+            else if (/^\/import\/gallery/.test(_path))                  initGalleryImportPage();
+            else if (document.querySelector('body > div.dialog'))     init404Page();
+        });
 
         // Notes: pencils on item tiles everywhere, and the notes strip on item pages
-        if (!isNotesPage && !isTokensPage) watchNoteTiles();
-        mineLoad().then(() => document.querySelectorAll('[data-dti-item]').forEach(paintMineMark));   // ✓ / ♥ marks on item tiles
-        niBadgesApply();
-        nmBadgesApply();
-        nfAutoCheck();
-        tfAutoCheck();
-        paintMallAlert();
-        dtiCheckWhatsNew();
-        setTimeout(backupReminder, 4000);
-        if (/^\/items\/\d+/.test(_path) && !isNotesPage) { mountItemNoteStrip(); setTimeout(mountItemNoteStrip, 800); mountItemExtras(); setTimeout(mountItemExtras, 800); }
+        if (!isNotesPage && !isTokensPage) dtiSafe('note buttons', watchNoteTiles);
+        mineLoad().then(() => dtiSafe('own / want marks', () => document.querySelectorAll('[data-dti-item]').forEach(paintMineMark)));   // ✓ / ♥ marks on item tiles
+        dtiSafe('badges', niBadgesApply);
+        dtiSafe('badges', nmBadgesApply);
+        dtiSafe('Neofriends check', nfAutoCheck);
+        dtiSafe('Trade Finder check', tfAutoCheck);
+        dtiSafe('Seeking check', skAutoCheck);
+        dtiSafe('NC Mall alert', paintMallAlert);
+        dtiSafe('What\u2019s new', dtiCheckWhatsNew);
+        setTimeout(() => dtiSafe('backup reminder', backupReminder), 4000);
+        if (/^\/items\/\d+/.test(_path) && !isNotesPage) dtiSafe('item page extras', () => { mountItemNoteStrip(); setTimeout(mountItemNoteStrip, 800); mountItemExtras(); setTimeout(mountItemExtras, 800); });
 
-        _buildContribLocaleRow();
+        dtiSafe('footer', _buildContribLocaleRow);
         window.__dtiDropCover?.();
 
         // Keyboard shortcuts — inspired by power-user features in DTI Remix
@@ -16054,6 +16233,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             .dti-tp-sublabel { margin: 0 0 7px; font-size: 11.5px; font-weight: 700; color: var(--text-muted); }
             .dti-tp-section { padding: 0 16px; border-top: 1px solid var(--border); }
+            /* (find a setting) */
+            .dti-tp-find { display: flex; align-items: center; gap: 8px; margin: 2px 16px 8px; padding: 0 10px; height: 34px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); color: var(--text-muted); cursor: text; }
+            .dti-tp-find:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+            .dti-tp-find svg { width: 14px; height: 14px; flex: none; }
+            .dti-tp-find input { flex: 1; min-width: 0; height: auto !important; padding: 0 !important; border: none !important; background: none !important; box-shadow: none !important; outline: none; color: var(--text); font-family: inherit; font-size: 13px; }
+            .dti-tp-none { flex: none; font-size: 11.5px; white-space: nowrap; }
+            #dti-theme-panel.dti-tp-q .dti-tp-section.dti-tp-qmiss { display: none; }
+            #dti-theme-panel.dti-tp-q .dti-tp-section.dti-tp-qhit .dti-tp-section-body { display: block !important; }
+            #dti-theme-panel.dti-tp-q .dti-tp-section.dti-tp-qhit .dti-tp-chevron { transform: none; }
+            #dti-theme-panel.dti-tp-q .dti-tp-qhide { display: none !important; }
             .dti-tp-head + .dti-tp-section { border-top: none; }
             .dti-tp-section-hd {
                 display: flex; align-items: center; gap: 10px; width: 100%; height: 52px; padding: 0; cursor: pointer; text-align: left;
@@ -16574,7 +16763,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     function injectNavCSS() {
         GM_addStyle(`
             /* ── Non-selectable — everything except form inputs ─────────────── */
-            body * {
+            body {
                 user-select: none; -webkit-user-select: none;
             }
             input, textarea, select, [contenteditable="true"] {
@@ -16860,10 +17049,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 border-radius: 18px; padding: 0;
                 box-shadow: 0 24px 64px rgba(0,0,0,.2), 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent); min-width: 240px;
                 width: 440px !important; max-width: calc(100vw - 40px) !important;
-                max-height: calc(100vh - 86px); overflow-y: auto; overscroll-behavior: contain;
-                scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+                max-height: calc(100vh - 86px); display: flex; flex-direction: column; overflow: hidden;
                 animation: dti-tp-in .15s ease-out;
             }
+            #dti-theme-panel > .dti-tp-head { flex: none; }
+            .dti-tp-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
             @keyframes dti-tp-in { from { opacity: 0; transform: translateY(-6px); } }
             #dti-theme-panel[hidden] { display: none; }
             #dti-font-size-slider {
@@ -17243,7 +17433,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const moreBtn = document.createElement('button'); moreBtn.className = 'dti-nav-more-btn';
         moreBtn.innerHTML = '<span class="dti-more-arrow" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 6l4.5 4.5L12.5 6"/></svg></span>';
         moreBtn.title = 'More'; moreBtn.setAttribute('aria-label', 'More');
-        if (NF.list().some(NF.hasNew) || tfNewCount()) moreBtn.insertAdjacentHTML('afterbegin', `<i class="dti-more-dot" title="${tfNewCount() ? 'New offers on your wishlist (Trade Finder)' : 'Something new from your Neofriends'}"></i>`);
+        if (NF.list().some(NF.hasNew) || tfNewCount() || skNewCount()) moreBtn.insertAdjacentHTML('afterbegin', `<i class="dti-more-dot" title="${skNewCount() ? 'Someone new is offering something on your Seeking list' : tfNewCount() ? 'New offers on your wishlist (Trade Finder)' : 'Something new from your Neofriends'}"></i>`);
         const moreMenu = document.createElement('div'); moreMenu.className = 'dti-nav-more-menu';
         moreMenu.innerHTML = '<div class="dti-more-col dti-more-col-dti"><div class="dti-more-section-label">DTI</div></div>'
             + '<div class="dti-more-col dti-more-col-np"><div class="dti-more-section-label">Neopets<i>new tab ↗</i></div></div>';
@@ -17265,8 +17455,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             a.className = 'dti-nav-link dti-more-ico-link' + (isActiveHref(l.href) ? ' active' : '');
             a.href = l.href;
             const nfNew = l.href === '/items?q=dti-enhance#neofriends' ? NF.list().filter(NF.hasNew).length : 0;
-            const tfNew = l.href === '/items?q=dti-enhance#finder' ? tfNewCount() : 0;
-            a.innerHTML = `<span class="dti-more-ico">${l.icon}</span><span class="dti-more-txt"><b>${l.label}${nfNew ? `<em class="dti-more-new" title="Neofriends with new items">${nfNew} new</em>` : ''}${tfNew ? `<em class="dti-more-new" title="New offers on your wishlist since the check before">${tfNew} new</em>` : ''}</b><small>${l.desc}</small></span>`;
+            const tfNew = l.href === '/items?q=dti-enhance#finder' ? tfNewCount() : 0, skNew = l.href === '/items?q=dti-enhance#seeking' ? skNewCount() : 0;
+            a.innerHTML = `<span class="dti-more-ico">${l.icon}</span><span class="dti-more-txt"><b>${l.label}${nfNew ? `<em class="dti-more-new" title="Neofriends with new items">${nfNew} new</em>` : ''}${tfNew ? `<em class="dti-more-new" title="New offers on your wishlist since the check before">${tfNew} new</em>` : ''}${skNew ? `<em class="dti-more-new" title="Someone new is offering something on your Seeking list">${skNew} new</em>` : ''}</b><small>${l.desc}</small></span>`;
             if (l.notes) a.classList.add('dti-more-notes-link');
             const row = document.createElement('div'); row.className = 'dti-more-popup-row';
             row.appendChild(a);
@@ -17513,6 +17703,31 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         tpHead.innerHTML = `<span class="dti-tp-hico">${TP_ICO.gear}</span><span class="dti-tp-htitle">Settings</span><button type="button" class="dti-tp-x" title="Close (Esc)">${POP_ICO.close}</button>`;
         tpHead.querySelector('.dti-tp-x').addEventListener('click', closePanel);
         panel.appendChild(tpHead);
+        // (find a setting — there are a lot of them: the sections with a match open to show it, the rest step aside; your own open /
+        // closed choices are left as they are)
+        const tpFind = document.createElement('label'); tpFind.className = 'dti-tp-find';
+        tpFind.innerHTML = `${NAV_ICON_SEARCH}<input type="search" placeholder="Find a setting\u2026" aria-label="Find a setting" spellcheck="false" autocomplete="off"><span class="dti-tp-none" hidden>Nothing matches</span>`;
+        panel.appendChild(tpFind);
+        const findIn = tpFind.querySelector('input');
+        const TP_ROWS = '.dti-toggle-row, .dti-bdg-card, .dti-preset, .dti-accent-col, .dti-style-opt, .dti-mode-btn';
+        const tpText = el => (el.textContent + ' ' + (el.getAttribute('title') || '') + ' ' + [...el.querySelectorAll('[title]')].map(x => x.getAttribute('title')).join(' ')).toLowerCase();
+        function tpFilter(raw) {
+            const q = raw.trim().toLowerCase();
+            panel.classList.toggle('dti-tp-q', !!q);
+            let any = false;
+            panel.querySelectorAll('.dti-tp-section').forEach(sec => {
+                const titleHit = !!q && sec.querySelector('.dti-tp-stitle').textContent.toLowerCase().includes(q);
+                let hit = titleHit;
+                sec.querySelectorAll(TP_ROWS).forEach(r => { const m = !q || titleHit || tpText(r).includes(q); r.classList.toggle('dti-tp-qhide', !m); if (q && m) hit = true; });
+                if (q && !hit && tpText(sec).includes(q)) hit = true;   // (in its other words: a hint, a label)
+                sec.classList.toggle('dti-tp-qhit', !!q && hit);
+                sec.classList.toggle('dti-tp-qmiss', !!q && !hit);
+                if (hit) any = true;
+            });
+            tpFind.querySelector('.dti-tp-none').hidden = !q || any;
+        }
+        findIn.addEventListener('input', () => tpFilter(findIn.value));
+        findIn.addEventListener('keydown', e => { if (e.key === 'Escape' && findIn.value) { e.preventDefault(); e.stopPropagation(); findIn.value = ''; tpFilter(''); } });
         if (window.__dtiTpEsc) document.removeEventListener('keydown', window.__dtiTpEsc);   // (the previous page's panel)
         window.__dtiTpEsc = e => {
             if (e.key !== 'Escape' || panel.hidden || e.defaultPrevented) return;
@@ -17711,7 +17926,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const nbSeekTg = document.createElement('button');   // (Seeking on the Neoboards — off on its own, Seeking itself stays)
         nbSeekTg.type = 'button'; nbSeekTg.id = 'dti-nbseek-toggle';
         nbSeekTg.className = 'dti-toggle-row' + (GM_getValue('dti_nb_seek', true) !== false ? ' active' : '');
-        nbSeekTg.innerHTML = '<span class="dti-toggle-txt"><b>Seeking on the Neoboards</b><small>By each DTI link in a post: what they have from your Seeking list and wishlist, and what they want that you have \u2014 and the items you\u2019re seeking marked in posts</small></span><span class="dti-ts"></span>';
+        nbSeekTg.innerHTML = '<span class="dti-toggle-txt"><b>Seeking on the Neoboards and in Neomail</b><small>By each DTI link in a post or a Neomail: what they have from your Seeking list and wishlist, and what they want that you have \u2014 and the items you\u2019re seeking marked in posts</small></span><span class="dti-ts"></span>';
         nbSeekTg.addEventListener('click', () => {
             const next = GM_getValue('dti_nb_seek', true) === false;
             GM_setValue('dti_nb_seek', next);
@@ -17897,6 +18112,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             b.dataset.a === 'news' ? _openWhatsNew('') : _openShortcuts();
         });
         panel.appendChild(tpFoot);
+        // (only what's under the header scrolls (user: the panel "a bit broken on the right side") — its scrollbar used to run up beside
+        // the header too, a strip cut out of a filled one; now the header spans the panel and the scrollbar starts under it)
+        const tpScroll = document.createElement('div'); tpScroll.className = 'dti-tp-scroll';
+        tpScroll.append(...[...panel.children].filter(c => c !== tpHead));
+        panel.appendChild(tpScroll);
         document.body.appendChild(panel);
         panel.addEventListener('click', e => e.stopPropagation());
 
@@ -19476,7 +19696,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         const extra = _poolDisplay.length - shown.length;
                         poolHtml = `<div class="dti-ip-pool-wrap"><div class="dti-ip-section dti-ip-pool-toggle" role="button" tabindex="0" title="See everything inside, bigger (click again to go back)">${_inside}<i class="dti-ip-pool-arrow">\u203a</i><span class="dti-ip-dye-n">${_poolDisplay.length} item${_poolDisplay.length === 1 ? '' : 's'}${_bonusCount > 0 ? ` \u00b7 +${_bonusCount} possible bonus` : ''}</span></div>
                             <div class="dti-ip-pool-grid">
-                                ${_poolDisplay.map((x, xi) => `<a class="dti-ip-pool-item${x.isLE ? ' le' : ''}${xi >= shown.length ? ' dti-ip-pool-extra' : ''}" title="${noteEsc(x.name || '')}" href="/items/0#pool-${x.iid}" data-turbo="false" data-pin="${(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" data-pii="${(x.image||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" onclick="try{localStorage.setItem('dti_pi_${String(x.iid || "").replace(/[^\w.-]/g, "")}',JSON.stringify({name:this.dataset.pin,image:this.dataset.pii,iid:'${String(x.iid || "").replace(/[^\w.-]/g, "")}'}))}catch(e){}">
+                                ${_poolDisplay.map((x, xi) => `<a class="dti-ip-pool-item${x.isLE ? ' le' : ''}${xi >= shown.length ? ' dti-ip-pool-extra' : ''}" title="${noteEsc(x.name || '')}" href="/items/0#pool-${x.iid}" data-turbo="false" data-pin="${(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" data-pii="${(x.image||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">
                                     ${x.image ? `<img src="${noteEsc(x.image)}" alt="" loading="lazy">` : ''}
                                     ${x.isLE ? '<span class="dti-ip-pool-le">LE</span>' : ''}
                                     <span class="dti-ip-pool-name">${noteEsc(x.name || '')}</span>
@@ -19510,8 +19730,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         <div class="dti-ip-row">
                             <span class="dti-ip-label">Trades</span>
                             <div class="dti-ip-trade-btns">
-                                <button class="dti-ip-tbtn offering" data-item-id="${id}" data-item-name="${noteEsc(name)}" data-item-img="${noteEsc(thumbSrc)}" data-item-capval="${capVal || ''}" data-trade-type="offering">${offering} Offering</button>
-                                <button class="dti-ip-tbtn seeking" data-item-id="${id}" data-item-name="${noteEsc(name)}" data-item-img="${noteEsc(thumbSrc)}" data-item-capval="${capVal || ''}" data-trade-type="seeking">${seeking} Seeking</button>
+                                <button class="dti-ip-tbtn offering" data-item-id="${id}" data-item-name="${noteEsc(name)}" data-item-img="${noteEsc(thumbSrc)}" data-item-capval="${noteEsc(capVal || '')}" data-trade-type="offering">${offering} Offering</button>
+                                <button class="dti-ip-tbtn seeking" data-item-id="${id}" data-item-name="${noteEsc(name)}" data-item-img="${noteEsc(thumbSrc)}" data-item-capval="${noteEsc(capVal || '')}" data-trade-type="seeking">${seeking} Seeking</button>
                             </div>
                         </div>
                         <div class="dti-ip-links">
@@ -23320,16 +23540,17 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (gridPending.length) setTimeout(() => pumpGrid(gen), 0);
         }
 
-        // "≈ 412–530 caps" for a set of items (NC items only; copies counted). Late answers for an older render are dropped.
+        // "≈ 412–530 caps" for a set of items (NC items only; copies counted — 20+ on one item counts once). Late answers for an older render are dropped.
         function fillCaps(el, items) {
             if (!el) return;
             const nc = showNcValues ? items.filter(i => i.nc) : [];
             const tok = el._capTok = (el._capTok || 0) + 1;
             if (!nc.length) { el.textContent = ''; el.title = ''; return; }
-            ncCapTotal(nc.map(i => ({ name: i.name, qty: i.qty || 1 }))).then(t => {
+            const labels = nc.filter(i => +i.qty >= CAP_QTY_LABEL).length;   // (a quantity of 20+: a label — counted once)
+            ncCapTotal(nc.map(i => ({ name: i.name, qty: capQty(i.qty) }))).then(t => {
                 if (el._capTok !== tok) return;
                 el.textContent = capTotalText(t);
-                el.title = capTotalTitle(t);
+                el.title = capTotalTitle(t) + (labels ? ` \u2014 ${labels} item${labels === 1 ? '' : 's'} with a quantity of ${CAP_QTY_LABEL}+ counted once (quantities that high are usually labels)` : '');
             });
         }
         // A list's group in the grid: its header's id (also what remembers it folded) — someone else's items not in a list apart from yours
@@ -23531,8 +23752,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 jumped.set(id, n);
                 card.scrollIntoView({ block: 'center', behavior: 'smooth' });
                 document.querySelectorAll('.dti-item-card.dti-flash').forEach(c => c.classList.remove('dti-flash'));
-                void card.offsetWidth; card.classList.add('dti-flash');
-                setTimeout(() => card.classList.remove('dti-flash'), 2000);
+                void card.offsetWidth; card.classList.add('dti-flash');   // (and it stays: pulsing on, softer)
             }
             skBar.addEventListener('click', e => { const b = e.target.closest('.dti-skt-i'); if (b) jumpToItem(b.dataset.id); });
             // (a link from the Neoboards' Seeking button: #dti-jump=<item id>)
@@ -25045,8 +25265,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 .dti-osec-empty.drop { border-color: var(--accent); background: var(--accent-glow); color: var(--accent-text, var(--accent)); }
                 .dti-osec-hint { padding: 12px 16px; border-radius: 12px; background: var(--accent-glow); font-size: 12.5px; color: var(--text-muted); }
                 .dti-osec-hint b { color: var(--text); }
-                ul#outfits.dti-osec-on > li[draggable="true"] { cursor: ${dtiGrabCursor()}; }
+                ul#outfits.dti-osec-on > li { cursor: ${dtiGrabCursor()}; }
+                ul#outfits.dti-osec-on > li :is(a, img) { -webkit-user-drag: none; }   /* (a custom: moved by our own dragging, not the browser's) */
                 ul#outfits > li.dti-osec-lift { opacity: .45; }
+                html.dti-osec-dragging, html.dti-osec-dragging * { cursor: ${dtiGrabCursor(true)} !important; user-select: none !important; }
+                .dti-osec-ghost { position: fixed; z-index: 2147483000; left: 0; top: 0; width: 64px; height: 64px; pointer-events: none; will-change: transform;
+                    border: 2px solid var(--accent); border-radius: 14px; background: var(--surface); box-shadow: 0 10px 28px rgba(0,0,0,.28); }
+                .dti-osec-ghost img { width: 100%; height: 100%; object-fit: cover; border-radius: 12px; display: block; }
+                .dti-osec-ghost b { position: absolute; right: -9px; top: -9px; min-width: 22px; height: 22px; padding: 0 6px; box-sizing: border-box; border-radius: 99px;
+                    display: grid; place-items: center; background: var(--accent); color: var(--accent-fg, #fff); font-size: 11px; font-weight: 800; box-shadow: 0 0 0 2px var(--surface); }
                 /* (a section's heading: a grip on hover to drag it; while dragged, dimmed — a line where it will land) */
                 .dti-osec-h { position: relative; }
                 .dti-osec-grip { position: absolute; left: -15px; top: 50%; width: 10px; height: 16px; margin-top: -8px; cursor: ${dtiGrabCursor()}; opacity: 0; transition: opacity .12s;
@@ -25390,7 +25617,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     lis.forEach((li, i) => {
                         li.style.display = !shut && hit(li) ? '' : 'none';
                         li.style.order = base + 2 + i;
-                        li.draggable = true;
+                        li.draggable = false;   // (moved by our own dragging — below)
                     });
                     vis += hits.length;
                 });
@@ -25584,7 +25811,18 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             zone.dataset.label = `Move ${dragIds.length > 1 ? dragIds.length + ' ' : ''}to \u201c${secName(sid)}\u201d`;
             zone.hidden = false;
         }
-        const autoScroll = e => { const edge = 80, v = e.clientY < edge ? -1 : e.clientY > innerHeight - edge ? 1 : 0; if (v) scrollBy(0, v * 16); };
+        // (near the window's top or bottom while dragging, the page scrolls — every frame, faster nearer the edge, not just as the pointer moves)
+        let edgeY = -1, edgeRaf = 0;
+        function edgeTick() {
+            edgeRaf = 0;
+            if (edgeY < 0) return;
+            const E = 90, d = edgeY < E ? edgeY - E : edgeY > innerHeight - E ? edgeY - innerHeight + E : 0;
+            if (d) { scrollBy(0, Math.sign(d) * Math.ceil(Math.min(1, Math.abs(d) / E) ** 2 * 24)); if (pd?.on) pdOver(); }
+            edgeRaf = requestAnimationFrame(edgeTick);
+        }
+        const edgeAt = y => { edgeY = y; if (!edgeRaf) edgeRaf = requestAnimationFrame(edgeTick); };
+        const edgeStop = () => { edgeY = -1; cancelAnimationFrame(edgeRaf); edgeRaf = 0; };
+        const autoScroll = e => edgeAt(e.clientY);
         // (a section's heading dragged — Not in a section's too (user asked): where it lands — before the first heading below the pointer,
         // else last — shown by a line; dropped, the sections are in that order)
         let dragSec = null;   // (the section being dragged: its id — '' for Not in a section)
@@ -25616,7 +25854,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             list.querySelectorAll(':scope > li.dti-osec-lift').forEach(li => li.classList.remove('dti-osec-lift'));
             dragSec = null; ins.hidden = true;
             list.querySelectorAll(':scope > .dti-osec-hlift').forEach(h => h.classList.remove('dti-osec-hlift'));
-            document.removeEventListener('dragover', autoScroll);
+            document.removeEventListener('dragover', autoScroll); edgeStop();
         };
         list.addEventListener('dragstart', e => {
             if (OSD.view !== 'sec') return;
@@ -25629,46 +25867,78 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 requestAnimationFrame(() => { if (dragSec !== null) hd.classList.add('dti-osec-hlift'); });
                 return;
             }
-            const li = e.target.closest?.('ul#outfits > li'), id = li && outfitId(li);
-            if (!id) return;
-            dragIds = selOn && sel.has(id) ? [...sel] : [id];
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/x-dti-custom', dragIds.join(','));
-            const r = li.getBoundingClientRect();
-            try { e.dataTransfer.setDragImage(li, e.clientX - r.left, e.clientY - r.top); } catch (_) {}
-            document.addEventListener('dragover', autoScroll);
-            const lift = new Set(dragIds);
-            requestAnimationFrame(() => { if (dragIds.length) items.forEach(x => { if (lift.has(outfitId(x))) x.classList.add('dti-osec-lift'); }); });
+            if (e.target.closest?.('ul#outfits > li')) e.preventDefault();   // (a custom: our own dragging, below — not the browser's, of its link or picture)
         });
         list.addEventListener('dragover', e => {
-            if (dragSec !== null) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; secLand(e.clientY); return; }
-            if (!dragIds.length) return;
-            const sid = dropSec(e);
-            markDrop(sid);
-            if (sid === null) return;
-            e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+            if (dragSec === null) return;
+            e.preventDefault(); e.dataTransfer.dropEffect = 'move'; secLand(e.clientY);
         });
-        list.addEventListener('dragleave', e => {
-            if (list.contains(e.relatedTarget)) return;
-            if (dragIds.length) markDrop(null);
-            if (dragSec !== null) ins.hidden = true;
-        });
+        list.addEventListener('dragleave', e => { if (dragSec !== null && !list.contains(e.relatedTarget)) ins.hidden = true; });
         list.addEventListener('drop', e => {
-            if (dragSec !== null) {
-                e.preventDefault();
-                const sid = dragSec, before = secLand(e.clientY);
-                endDrag(); moveSection(sid, before);
-                return;
-            }
-            if (!dragIds.length) return;
-            const sid = dropSec(e), ids = dragIds;
-            endDrag();
-            if (sid === null) return;
+            if (dragSec === null) return;
             e.preventDefault();
-            moveMany(ids, sid, ids.length === 1);   // (one: you see it move; several: a toast, with Undo)
-            afterMove();
+            const sid = dragSec, before = secLand(e.clientY);
+            endDrag(); moveSection(sid, before);
         });
         list.addEventListener('dragend', endDrag);
+        // (a custom dragged (user asked: the page scrolls under it as you go — the mouse wheel too, which the browser's own dragging holds
+        // still on Windows): by the pointer, its picture following; dropped anywhere in a section's stretch of the page, it's in that
+        // section. A press that doesn't move is still a click; Esc lets go)
+        let pd = null;   // (a press on a custom — dragging once it's moved: { li, x, y, cx, cy, on, sid, ghost })
+        function pdOver() {   // (the section under the pointer — after a move or a scroll)
+            const el = document.elementFromPoint(pd.cx, pd.cy);
+            pd.sid = el ? dropSec({ target: el, clientY: pd.cy }) : null;
+            markDrop(pd.sid);
+        }
+        function pdEnd(drop) {
+            const d = pd;
+            pd = null;
+            if (!d?.on) return;
+            document.documentElement.classList.remove('dti-osec-dragging');
+            d.ghost.remove();
+            const ids = dragIds;
+            endDrag();
+            // (the click that ends it isn't a click: nothing opened, nothing ticked)
+            const eat = e => { e.preventDefault(); e.stopPropagation(); };
+            window.addEventListener('click', eat, true);
+            setTimeout(() => window.removeEventListener('click', eat, true), 0);
+            if (!drop || d.sid == null) return;
+            moveMany(ids, d.sid, ids.length === 1);   // (one: you see it move; several: a toast, with Undo)
+            afterMove();
+        }
+        list.addEventListener('pointerdown', e => {
+            if (OSD.view !== 'sec' || e.button !== 0 || e.pointerType === 'touch' || pd?.on) return;
+            const li = e.target.closest?.('ul#outfits > li');
+            pd = li && outfitId(li) && !e.target.closest('button, [role="button"], input, select, textarea, [contenteditable="true"]')   // (its buttons stay buttons)
+                ? { li, x: e.clientX, y: e.clientY, cx: e.clientX, cy: e.clientY, on: false, sid: null, ghost: null } : null;
+        });
+        document.addEventListener('selectstart', e => { if (pd) e.preventDefault(); });   // (no words picked up on the way)
+        document.addEventListener('pointermove', e => {
+            if (!pd) return;
+            pd.cx = e.clientX; pd.cy = e.clientY;
+            if (!pd.on) {
+                if (Math.hypot(pd.cx - pd.x, pd.cy - pd.y) < 6) return;
+                const id = outfitId(pd.li), img = pd.li.querySelector('img');
+                pd.on = true;
+                dragIds = selOn && sel.has(id) ? [...sel] : [id];   // (a ticked one brings the rest of the selection along)
+                const lift = new Set(dragIds);
+                items.forEach(x => { if (lift.has(outfitId(x))) x.classList.add('dti-osec-lift'); });
+                pd.ghost = document.createElement('div');
+                pd.ghost.className = 'dti-osec-ghost';
+                pd.ghost.innerHTML = (img ? `<img src="${noteEsc(img.currentSrc || img.src)}" alt="">` : '') + (dragIds.length > 1 ? `<b>${dragIds.length}</b>` : '');
+                document.body.appendChild(pd.ghost);
+                document.documentElement.classList.add('dti-osec-dragging');
+                getSelection()?.removeAllRanges();
+            }
+            pd.ghost.style.transform = `translate(${pd.cx + 12}px, ${pd.cy + 12}px) rotate(-4deg)`;
+            edgeAt(pd.cy);
+            pdOver();
+        });
+        document.addEventListener('pointerup', () => pdEnd(true));
+        document.addEventListener('pointercancel', () => pdEnd(false));
+        window.addEventListener('blur', () => pdEnd(false));
+        document.addEventListener('keydown', e => { if (e.key === 'Escape' && pd?.on) { e.preventDefault(); e.stopPropagation(); pdEnd(false); } }, true);
+        addEventListener('scroll', () => { if (pd?.on) pdOver(); }, { passive: true });   // (scrolled — by the wheel too: what's under the pointer now)
         // ── Select (user asked: several at once): a click ticks a custom — Shift ticks the run to it — and opens nothing; the bar at
         // the bottom moves them, or picks them all; Done (or Esc) ends it ──
         let selOn = false, selLast = null;
@@ -25749,11 +26019,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 nameIn.placeholder = petIn.value.trim() ? 'Its name (the pet\u2019s, if empty)' : 'Its name';
             });
             const make = async () => {
+                if (ok.disabled) return;   // (making it already — a second Enter: still one custom)
                 const pet = petIn.value.trim();
                 let name = nameIn.value.trim();
                 if (!name && !pet) return nameIn.focus();
                 let sid = secSel.value;
-                if (sid === '+') { const n = newIn.value.trim(); if (!n) return newIn.focus(); sid = newSection(n).id; }
+                const newSec = sid === '+' ? newIn.value.trim() : '';   // (a new section: made once the custom is)
+                if (sid === '+' && !newSec) return newIn.focus();
                 ok.disabled = true; st.textContent = pet ? 'Looking up that pet\u2026' : 'Making it\u2026'; st.classList.remove('err');
                 // (a pet: DTI's own "load my pet" — it answers with a new custom of it, its look in the address; a name it can't find: its
                 // home page, saying so)
@@ -25786,6 +26058,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (qpop !== pop) return;
                 if (!made?.id) { st.textContent = 'Couldn\u2019t make it \u2014 try again'; st.classList.add('err'); ok.disabled = false; return; }
                 const id = String(made.id);
+                if (newSec) sid = newSection(newSec).id;
                 if (sid) OSD.of[id] = sid;
                 osecSave(); GM_setValue('dti_oq_sec', sid);
                 qClose();
@@ -26629,7 +26902,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                             _pr = (_d > 0 ? _d + 'd ' : '') + _h + 'h ' + _m + 'm';
                         }
                     }
-                    return `<a href="/items/${p.item_id}" style="display:flex;align-items:center;gap:10px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:8px 10px;text-decoration:none;transition:border-color .13s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+                    return `<a href="/items/${p.item_id}" style="display:flex;align-items:center;gap:10px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:8px 10px;text-decoration:none;transition:border-color .13s;" class="dti-hover-acc">
                         ${p.image ? `<img src="${noteEsc(p.image)}" alt="" style="width:44px;height:44px;object-fit:contain;border-radius:6px;flex-shrink:0;">` : ''}
                         <div style="flex:1;min-width:0;">
                             <div style="font-size:11px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${noteEsc(p.name)}</div>
@@ -26643,7 +26916,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         <div class="dti-header-cols">
                             <div class="dti-col-info">
                                 <div class="item-header-main">
-                                    ${imgSrc ? `<img class="item-thumbnail" src="${noteEsc(imgSrc)}" alt="" data-pfb="${(poolFallbackImg||'').replace(/"/g,'&quot;')}" onerror="if(this.src.startsWith('data:')){return}if(this.src.includes('_')){this.src=this.src.replace(/_/g,'-')}else if(this.dataset.pfb&&this.src!==this.dataset.pfb){this.src=this.dataset.pfb}else{this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 80 80%22%3E%3Crect x=%225%22 y=%2228%22 width=%2270%22 height=%2245%22 rx=%224%22 fill=%22%2330363d%22/%3E%3Crect x=%222%22 y=%2222%22 width=%2276%22 height=%2214%22 rx=%223%22 fill=%22%2321262d%22/%3E%3Cline x1=%2240%22 y1=%2222%22 x2=%2240%22 y2=%2273%22 stroke=%22%237c3aed%22 stroke-width=%223%22/%3E%3Cpath d=%22M40 22 C40 22 30 14 22 18 C14 22 20 30 40 22Z%22 fill=%22%237c3aed%22/%3E%3Cpath d=%22M40 22 C40 22 50 14 58 18 C66 22 60 30 40 22Z%22 fill=%22%237c3aed%22/%3E%3C/svg%3E'}">` : '<div style="width:110px;height:110px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:12px;grid-row:1/5;grid-column:1;display:flex;align-items:center;justify-content:center;font-size:36px;color:var(--text-muted);">🎁</div>'}
+                                    ${imgSrc ? `<img class="item-thumbnail" src="${noteEsc(imgSrc)}" alt="" data-pfb="${(poolFallbackImg||'').replace(/"/g,'&quot;')}" data-dti-fb="thumb">` : '<div style="width:110px;height:110px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:12px;grid-row:1/5;grid-column:1;display:flex;align-items:center;justify-content:center;font-size:36px;color:var(--text-muted);">🎁</div>'}
                                     <h2 class="item-name">${noteEsc(name)}</h2>
                                     ${desc ? `<p class="item-description">${noteEsc(desc)}</p>` : ''}
                                     <nav class="item-links">
@@ -26688,7 +26961,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:18px;padding:20px;margin-top:16px;display:flex;flex-direction:column;align-items:center;gap:10px;">
                         <div style="font-size:12px;font-weight:800;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase;align-self:flex-start;">Item Preview</div>
                         <img src="${_largeImg}" alt="" style="max-width:100%;object-fit:contain;" loading="lazy"
-                             onerror="this.onerror=null;this.src='${noteEsc((imgSrc||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"))}'">
+                             data-dti-fb-src="${noteEsc(imgSrc || '')}">
                     </div>` : ''}
                     ${(hasPool || hasParents) ? (() => {
                         if (!hasPool) return ''; // hasParents-only: right column already shows FOUND INSIDE
@@ -26703,7 +26976,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                                 <span style="font-size:10px;font-weight:700;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:1px 8px;">${pool.items.length} items</span>
                                 ${_bonusCount > 0 ? `<span style="font-size:10px;color:var(--text-muted);">+ ${_bonusCount} possible bonus items</span>` : ''}
                             </div>
-                            <a href="https://www.itemdb.com.br/item/${slugParam}" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent-text, var(--accent));text-decoration:none;font-weight:600;opacity:.8;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.8'">Full list on ItemDB ↗</a>
+                            <a href="https://www.itemdb.com.br/item/${slugParam}" target="_blank" rel="noopener" class="dti-idb-full" style="font-size:11px;color:var(--accent-text, var(--accent));text-decoration:none;font-weight:600;">Full list on ItemDB ↗</a>
                         </div>
                         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;">
                             ${_displayItems.map(x => { return `
@@ -26711,11 +26984,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                                    data-turbo="false"
                                    data-pin="${(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"
                                    data-pii="${(x.image||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"
-                                   onclick="try{localStorage.setItem('dti_pi_${String(x.iid || "").replace(/[^\w.-]/g, "")}',JSON.stringify({name:this.dataset.pin,image:this.dataset.pii,iid:'${String(x.iid || "").replace(/[^\w.-]/g, "")}'}))}catch(e){}"
+                                  
                                    title="${(x.name||'').replace(/"/g,'&quot;')}${x.rate != null ? ' — ' + x.rate.toFixed(1) + '%' + (x.isLE && poolLeApart(pool.items) ? ' of the LE bonus drops' : '') : ''}"
                                    style="position:relative;display:flex;flex-direction:column;align-items:center;gap:5px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:10px 8px;text-decoration:none;transition:border-color .13s,box-shadow .13s;"
-                                   onmouseover="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 0 1px var(--accent)'"
-                                   onmouseout="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
+                                   class="dti-pool-tile">
                                     ${x.image ? `<img src="${noteEsc(x.image)}" alt="" style="width:80px;height:80px;object-fit:contain;" loading="lazy">` : '<div style="width:80px;height:80px;"></div>'}
                                     <span style="font-size:9px;color:var(--text-muted);text-align:center;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;width:100%;">${noteEsc(x.name)}</span>
                                     ${x.isLE ? '<span style="position:absolute;top:4px;right:4px;font-size:7px;font-weight:900;background:var(--accent);color:#fff;border-radius:3px;padding:1px 3px;line-height:1;">LE</span>' : ''}
@@ -28973,6 +29245,27 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (root.querySelector('[class]')) { mo.disconnect(); injectEditorCSS(); }
         });
         mo.observe(root, { childList: true, subtree: true });
+        // (the extras read DTI's own state — DTI's editor changed so that can't be read: they step aside and it says so, once)
+        let edTries = 0;
+        const edCheck = setInterval(() => {
+            if (!root.isConnected || edBridge().get()?.state) return clearInterval(edCheck);
+            if (!root.querySelector('input.react-autosuggest__input') || ++edTries < 20) return;   // (10 s after DTI's search box is up)
+            clearInterval(edCheck);
+            document.documentElement.classList.add('dti-ed-paused');
+            dtiToast('DTI\u2019s editor has changed \u2014 DTI Enhance\u2019s editor extras (Custom items, the Wearing row) are paused until an update; the editor itself works as usual', { variant: 'error', duration: 12000 });
+        }, 500);
+        const swingWatch = setInterval(() => {
+            if (!root.isConnected) return clearInterval(swingWatch);
+            if (document.hidden) return;
+            document.getAnimations().forEach(a => {
+                const el = a.animationName === 'swing' && a.effect?.target;
+                if (!el || !root.contains(el)) return;
+                let hidden = false;
+                for (let e = el.parentElement, i = 0; e && e !== root && i < 4; e = e.parentElement, i++) if (getComputedStyle(e).opacity === '0') { hidden = true; break; }
+                if (hidden && a.playState === 'running') a.pause();
+                else if (!hidden && a.playState === 'paused') a.play();
+            });
+        }, 250);
         // the Styles pictures for the pet on screen, made ahead: a few seconds in, and again whenever its species changes
         let warmedSp = '';
         const warmTick = setInterval(() => {
@@ -30006,10 +30299,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 headerRow = hr;
                 row.insertBefore(hr, row.firstChild);
                 layoutHeader(hr, h1);
+                const markName = () => row.toggleAttribute('data-dti-edname', !!hr.querySelector('.chakra-editable:not(:empty)'));   // (your own: its name to edit)
+                markName();
                 // Re-apply if React resets the style attribute
                 new MutationObserver(() => layoutHeader(hr, h1)).observe(hr, { attributes: true, attributeFilter: ['style'] });
                 fitRO.observe(hr.firstElementChild);
-                new MutationObserver(fitSoon).observe(hr, { childList: true, subtree: true, characterData: true });   // (the name, the saving note)
+                new MutationObserver(ms => { markName(); const box = hr.firstElementChild; if (ms.some(m => box && box.contains(m.target))) fitSoon(); })
+                    .observe(hr, { childList: true, subtree: true, characterData: true });   // (the name's own changes — the room it has: fitRO)
                 fitSoon();
             };
             adoptHeader();
@@ -30670,6 +30966,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             mode: GM_getValue('dti_cs_mode', 'list') === 'pages' ? 'pages' : 'list', tiles: new Map(), memo: new Map(),   // (memo: the last few searches, whole)
             sort: (k => CS_SORTS.some(o => o[0] === k) ? k : 'name')(GM_getValue('dti_cs_sort', 'name')) };   // (A–Z — DTI's own — or another order: user asked)
         let csPanel = null, csPaintT = 0, csWornT = 0, csCapAsk = false;
+        // (Pages in DTI's own order, nothing picked: how many of DTI's pages are needed — to the one after the page you're on; anything
+        // else needs them all)
+        const csNeedPages = () => CS.mode !== 'pages' || CS.sort !== 'name' || filtersOn() ? Infinity : Math.ceil((CS.page + 1) * CS_PER_PAGE / 50);
+        const csWake = () => (CS.wakers || []).splice(0).forEach(f => f());   // (pages waiting till they're needed: look again)
         const LIST_ICO = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>';
         // (its zones; its colors — by the picture's colors, the name only when the picture can't be read; not read yet: not yet)
         // (every item in some zones: DTI found them by zone — only the zones left out are looked at here)
@@ -30680,6 +30980,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const csOn = () => !!csPanel?.isConnected;
         function csOff() {
             CS.gen++; CS.base = '';
+            csWake();   // (its pages waiting: let go)
             clearInterval(csWornT); csWornT = 0;
             csPanel?.remove();
             root.querySelectorAll('.dti-cs-hide').forEach(el => el.classList.remove('dti-cs-hide'));
@@ -30811,14 +31112,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 const o = kindSplit(b);
                 if (o.key !== me.key) continue;
                 if ((o.kind || '') === kind) return m;
-                if (!o.kind && m.pages >= m.allPages) whole = m;
+                if (!o.kind && !m.part && m.pages >= m.allPages) whole = m;   // (one looked at by pages so far isn't whole)
             }
             return whole && (kind === 'nc' || kind === 'np') ? { pages: whole.pages, allPages: whole.allPages, items: whole.items.filter(r => kind === 'nc' ? r.nc : !r.nc && !r.pb) } : null;
         };
         const csKindOf = base => { const k = kindSplit(base).kind; return k === 'nc' || k === 'np' ? csKindPick(base, k) : null; };
         async function csStart(base, fresh) {
             const gen = ++CS.gen;
-            Object.assign(CS, { base, items: [], seen: new Set(), pages: 0, allPages: 0, fetched: 0, failed: 0, checked: 0, next: 0, active: 0, page: 1 });
+            csWake();   // (an older search's pages, waiting: let go)
+            Object.assign(CS, { base, items: [], seen: new Set(), pages: 0, allPages: 0, fetched: 0, failed: 0, checked: 0, next: 0, active: 0, page: 1, total: null, lazyQ: null });
             if (CS.tilesOf !== base) { CS.tiles.clear(); CS.tilesOf = base; }   // (the same search again — Back to search: its tiles kept)
             csPaintSoon();
             await ItemColors.ready();
@@ -30833,9 +31135,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 }
             }
             if (had && gen === CS.gen) {
-                Object.assign(CS, { items: had.items, pages: had.pages, allPages: had.allPages, fetched: had.pages, failed: 0, next: 0,
-                    checked: had.items.filter(r => r.pr !== undefined).length });
+                Object.assign(CS, { items: had.items, pages: had.pages, allPages: had.allPages, fetched: had.part ? had.pages - had.queue.length : had.pages, failed: 0, next: 0,
+                    checked: had.items.filter(r => r.pr !== undefined).length, total: had.total ?? null, lazyQ: had.part ? had.queue : null });
+                if (had.seen) CS.seen = had.seen;
                 csPump(gen);
+                if (had.part && had.queue.length) csFetchRest(gen, base, had.queue);   // (looked at by pages so far: on from where it was, as needed)
                 return csPaintSoon();
             }
             const every = base.startsWith('ALL|');
@@ -30855,14 +31159,41 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 for (let p = 2; p <= pages; p++) queue.push([k, p]);
             });
             firsts.forEach((first, k) => csTake(first, 1, gen, k));
-            const worker = async () => {   // (four pages at a time)
+            // (Pages, a plain search in DTI's order: only the pages you look at, and one ahead — the last one too, for how many there are;
+            // the rest when you get there, or when something needs them all: One list, another order, a color or a zone. Lighter on DTI.
+            // Kept as it goes, so Back to search carries on from there.)
+            if (parts.length === 1 && !every && !base.startsWith('Z|')) {
+                if (CS.pages > 1) {
+                    const last = CS.pages, qi = queue.findIndex(([, p]) => p === last);
+                    if (qi >= 0) queue.splice(qi, 1);
+                    try { const lj = await get(0, last); if (gen !== CS.gen) return; csTake(lj, last, gen, 0); CS.total = (last - 1) * 50 + (lj.items || []).length; }
+                    catch (_) { if (qi >= 0) queue.push([0, last]); }
+                } else CS.total = CS.items.length;
+                CS.lazyQ = queue;
+                CS.memo.set(base, { items: CS.items, seen: CS.seen, pages: CS.pages, allPages: CS.allPages, total: CS.total, queue, part: true });
+                while (CS.memo.size > 4) CS.memo.delete(CS.memo.keys().next().value);
+            }
+            await csFetchRest(gen, base, queue);
+        }
+        // (the pages still to ask for: four at a time — for a search looked at by pages, only as far as is needed; then kept, whole)
+        async function csFetchRest(gen, base, queue) {
+            const every = base.startsWith('ALL|');
+            const parts = base.startsWith('Z|') ? base.slice(2).split('|') : [every ? base.slice(4) : base];
+            const get = async (k, p) => {
+                const r = await fetch(`/items.json?${parts[k]}&page=${p}&per_page=50`, { credentials: 'include', priority: CS.mode === 'pages' ? 'auto' : 'low' });   // (One list: the rest fills in behind — DTI's own requests first)
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            };
+            const worker = async () => {
                 while (queue.length && gen === CS.gen) {
+                    if (CS.lazyQ === queue && queue[0][1] > csNeedPages()) { await new Promise(r => (CS.wakers ||= []).push(r)); continue; }
                     const [k, p] = queue.shift();
                     try { csTake(await get(k, p), p, gen, k); } catch (_) { if (gen === CS.gen) { CS.failed++; CS.fetched++; csPaintSoon(); } }
                 }
             };
             await Promise.all([worker(), worker(), worker(), worker()]);
-            if (gen !== CS.gen || CS.failed) return;
+            if (gen !== CS.gen || CS.failed || queue.length) return;
+            if (CS.lazyQ === queue) { CS.lazyQ = null; CS.memo.delete(base); }   // (every page asked for now: kept whole)
             CS.memo.set(base, { items: CS.items, pages: CS.pages, allPages: CS.allPages });   // (kept whole only)
             while (CS.memo.size > 4) CS.memo.delete(CS.memo.keys().next().value);
             DTICache.set('cs:' + base, { at: Date.now(), pages: CS.pages, allPages: CS.allPages,
@@ -30917,7 +31248,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             p.innerHTML = `<div class="dti-cs-head"><span class="dti-cs-sw"></span><b class="dti-cs-title"></b><span class="dti-cs-count"></span>
                 <span class="dti-cs-mode" role="group" aria-label="Show them as"><button type="button" data-m="list" title="Every one in one list">One list</button><button type="button" data-m="pages" title="${CS_PER_PAGE} a page">Pages</button></span>
                 <button type="button" class="dti-cs-again" title="Look through the search again (for items added since)" aria-label="Look through the search again">↻</button><button type="button" class="dti-cs-clear">✕</button></div>
-                <div class="dti-cs-sub"></div><div class="dti-cs-bar"><i></i></div>${pager}<div class="dti-cs-grid"></div><div class="dti-cs-empty" hidden></div>${pager}`;
+                <div class="dti-cs-subrow"><div class="dti-cs-sub"></div>${pager}</div><div class="dti-cs-bar"><i></i></div><div class="dti-cs-grid"></div><div class="dti-cs-empty" hidden></div>${pager}`;
             p.addEventListener('click', async e => {
                 const m = e.target.closest('.dti-cs-mode button');
                 if (m) { CS.mode = m.dataset.m; GM_setValue('dti_cs_mode', CS.mode); CS.page = 1; return csPaint(); }
@@ -30938,11 +31269,19 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     return;
                 }
                 if (e.target.closest('.dti-cs-x')) {   // (out of the custom altogether — a click on the tile only takes it off)
+                    if (window.__dtiEdLocked) return edLockSay('Locked \u2014 nothing can be taken out of the custom');
                     if (!csBr.remove(t.dataset.id)) dtiToast('Couldn’t remove that — try again', { variant: 'error' });
                     setTimeout(csPaintWorn, 120);
                     return;
                 }
                 if (e.target.closest('.dti-mine, .dti-note-btn, .dti-list-btn, .dti-copy-btn') || t.classList.contains('busy')) return;
+                if (window.__dtiEdLocked) {   // (locked: what's on stays on; one put on only when it replaces nothing)
+                    if (t.classList.contains('worn')) return edLockSay('Locked \u2014 what\u2019s on stays on');
+                    t.classList.add('busy');
+                    await edLockWear(t.dataset.id);
+                    t.classList.remove('busy');
+                    return setTimeout(csPaintWorn, 120);
+                }
                 t.classList.add('busy');
                 const res = t.classList.contains('worn') ? { ok: csBr.unwear(t.dataset.id) } : await csBr.wear(t.dataset.id);
                 t.classList.remove('busy');
@@ -30978,7 +31317,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const zoneRule = edZoneRule(), colorsOn = Picks.on(edColors), zonesOn = Picks.on(zoneRule), filtered = colorsOn || zonesOn;
             csWornNow = openOn() ? new Set((csBr.get()?.state?.wornItemIds || []).map(String)) : null;
             const p = csPanel, reading = colorsOn || CS.sort === 'color';
-            const all = CS.items.length, loading = !!CS.base && (CS.fetched < CS.pages || !CS.pages || (reading && CS.checked < all));
+            // (looked at by pages: waiting till more is needed isn't loading — and how many there are is known from the first and last pages)
+            const lazyIdle = !!CS.lazyQ?.length && CS.lazyQ[0][1] > csNeedPages(), known = !!CS.lazyQ?.length && CS.total != null;
+            const all = CS.items.length, loading = !!CS.base && !lazyIdle && (CS.fetched < CS.pages || !CS.pages || (reading && CS.checked < all));
             const everyAll = CS.base.startsWith('ALL|'), zoneAll = everyAll || CS.base.startsWith('Z|');
             const where = everyAll ? 'everything this pet can wear' : zoneAll ? Picks.text({ inc: zoneRule.inc, exc: [], all: false }, z => z, 'zone') : 'this search';
             const byName = (a, b) => a.name.localeCompare(b.name);
@@ -31002,7 +31343,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const title = p.querySelector('.dti-cs-title');
             title.textContent = everyAll ? (what ? `${what} — every item` : 'Every item') : filtered ? `${what} — ${zoneAll ? 'every item' : 'every page'}` : 'Every page';
             title.title = filtered ? what : '';
-            p.querySelector('.dti-cs-count').textContent = `${matches.length.toLocaleString()} ${loading ? 'so far' : filtered ? 'found' : `item${matches.length === 1 ? '' : 's'}`}`;
+            const count = known && !filtered ? CS.total : matches.length;
+            p.querySelector('.dti-cs-count').textContent = `${count.toLocaleString()} ${loading && !known ? 'so far' : filtered ? 'found' : `item${count === 1 ? '' : 's'}`}`;
             // (one list, or 30 a page — the same panel either way, the page buttons added (user asked: the same look in both))
             const mode = CS.mode;
             const seg = p.querySelector('.dti-cs-mode');
@@ -31014,16 +31356,18 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             p.querySelector('.dti-cs-sub').textContent = loading
                 ? (!CS.pages ? `Looking through ${zoneAll ? where : 'the search'}…` : CS.fetched < CS.pages || !reading ? `Looking through ${zoneAll ? where : 'the search'}… ${CS.fetched} of ${CS.pages} pages`
                     : `Reading colors… ${CS.checked.toLocaleString()} of ${expect.toLocaleString()} items${everyAll ? ' (once — they’re kept)' : ''}${settle ? ' · in color order once they’re read' : ''}`)
-                : `${filtered ? `${matches.length.toLocaleString()} of ${all.toLocaleString()}` : all.toLocaleString()} item${all === 1 ? '' : 's'} ${everyAll ? 'this pet can wear' : `in ${where}`}`
+                : `${filtered ? `${matches.length.toLocaleString()} of ${all.toLocaleString()}` : count.toLocaleString()} item${(filtered ? all : count) === 1 ? '' : 's'} ${everyAll ? 'this pet can wear' : `in ${where}`}`
                     + (CS.sort !== 'name' ? ` · ${CS_SORTS.find(o => o[0] === CS.sort)?.[3] || ''}` : '')
                     + (CS.allPages > CS.pages ? ` · the first ${(CS.pages * 50).toLocaleString()} (narrow the search for the rest)` : '')
                     + (CS.failed ? ` · ${CS.failed} page${CS.failed === 1 ? '' : 's'} didn’t load` : '');
             const bar = p.querySelector('.dti-cs-bar');
             bar.hidden = !loading;
             bar.firstElementChild.style.width = (CS.fetched < CS.pages || !reading ? (CS.pages ? CS.fetched / CS.pages * 100 : 4) : (expect ? Math.min(100, CS.checked / expect * 100) : 4)) + '%';
-            const pages = Math.max(1, Math.ceil(matches.length / CS_PER_PAGE));
+            const pages = Math.max(1, Math.ceil((known && mode === 'pages' && !filtered ? CS.total : matches.length) / CS_PER_PAGE));
             CS.page = Math.min(Math.max(1, CS.page), pages);
-            const shown = (mode === 'pages' ? matches.slice((CS.page - 1) * CS_PER_PAGE, CS.page * CS_PER_PAGE) : matches).map(csTile);
+            // (looked at by pages: the page's own items by their place in DTI's order — the ones asked for so far; the rest come as needed)
+            const from = (CS.page - 1) * CS_PER_PAGE, to = CS.page * CS_PER_PAGE;
+            const shown = (mode !== 'pages' ? matches : known ? matches.filter(r => r.ord >= from && r.ord < to) : matches.slice(from, to)).map(csTile);
             // (the tiles: only the new ones added when the list just grew — a whole search can be thousands)
             const grid = p.querySelector('.dti-cs-grid'), kids = grid.children;
             let grew = kids.length <= shown.length;
@@ -31031,14 +31375,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (grew) grid.append(...shown.slice(kids.length)); else grid.replaceChildren(...shown);
             p.querySelectorAll('.dti-cs-pager').forEach(pg => {
                 pg.hidden = mode !== 'pages' || pages < 2 && !loading;
-                pg.querySelector('span').textContent = `Page ${CS.page} of ${pages}${loading ? '+' : ''}`;
+                pg.querySelector('span').textContent = `Page ${CS.page} of ${pages}${loading && !known ? '+' : ''}`;
                 pg.querySelector('[data-d="-1"]').disabled = CS.page <= 1;
                 pg.querySelector('[data-d="1"]').disabled = CS.page >= pages;
             });
             const empty = p.querySelector('.dti-cs-empty');
-            empty.hidden = matches.length > 0;
-            empty.textContent = loading ? 'Looking…' : filtered ? `Nothing in ${where} matches these filters` : 'Nothing found';
+            empty.hidden = (mode === 'pages' && known ? shown.length : matches.length) > 0;
+            empty.textContent = loading || (known && !shown.length) ? 'Looking…' : filtered ? `Nothing in ${where} matches these filters` : 'Nothing found';
             csPaintWorn();
+            csWake();   // (a page further on, another mode, a filter: pages waiting till needed look again)
         }
         // ── Wearing, while searching (user asked: see what's on while you search, and switch things around): the custom's items in a last
         // row of the search card — what's worn, then what's in it but not worn (dimmed), each by its zone. A click takes one off or puts
@@ -31119,6 +31464,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (!it || it.classList.contains('busy')) return;
                 const id = it.dataset.id, worn = it.classList.contains('on'), name = wbItems.find(x => x.id === id)?.name || 'that item';
                 if (e.target.closest('.dti-wb-x')) {   // (out of the custom — Undo puts it back as it was, worn or not)
+                    if (window.__dtiEdLocked) return edLockSay('Locked \u2014 nothing can be taken out of the custom');
                     if (!csBr.remove(id)) return dtiToast('Couldn\u2019t take that out \u2014 try again', { variant: 'error' });
                     wbAfter();
                     dtiToast(`Took \u201c${name}\u201d out of the custom`, { duration: 5000, undo: async () => {
@@ -31131,6 +31477,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         wbAfter();
                     } });
                     return;
+                }
+                if (window.__dtiEdLocked) {
+                    if (worn) return edLockSay('Locked \u2014 what\u2019s on stays on');
+                    it.classList.add('busy');
+                    await edLockWear(id);
+                    it.classList.remove('busy');
+                    return wbAfter();
                 }
                 it.classList.add('busy');
                 const res = worn ? { ok: csBr.unwear(id) } : await csBr.wear(id);
@@ -31198,7 +31551,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         function srPaint(row, searching) {
             const sh = srShow(!row ? '' : searching ? 'go' : srParked ? 'back' : '', row ? srWait : '', Date.now() - srWaitAt), mode = sh.mode;
             if (!sh.wait) srWait = '';
-            if (!mode) { srEl?.remove(); return; }
+            if (!mode) { srEl?.remove(); lkPaint(); return; }
             if (!srEl) {
                 srEl = document.createElement('div');
                 srEl.id = 'dti-srb';
@@ -31221,6 +31574,61 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (srEl.parentElement !== row) row.appendChild(srEl);
             const q = srEl.querySelector('.q'), t = mode === 'back' && srParked ? srLabel(srParked) : '';
             if (q && q.textContent !== t) q.textContent = t;
+            lkPaint();   // (the padlock: just after it)
+        }
+        const LOCK_ICO = shut => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7.2" width="10" height="7" rx="1.6"/><path d="${shut ? 'M5.2 7.2V5.1a2.8 2.8 0 0 1 5.6 0v2.1' : 'M5.2 7.2V5.1a2.8 2.8 0 0 1 5.3-1.3'}"/></svg>`;
+        let lkEl = null, lkNew = false;
+        const lkOutfit = () => String(csBr.get()?.state?.id || '');
+        const lkOn = () => { const id = lkOutfit(); return id ? !!(GM_getValue('dti_ed_locks', {}) || {})[id] : lkNew; };
+        function lkSet(on) {
+            const id = lkOutfit();
+            if (id) { const m = GM_getValue('dti_ed_locks', {}) || {}; if (on) m[id] = Date.now(); else delete m[id]; GM_setValue('dti_ed_locks', m); }
+            else lkNew = on;
+            lkPaint();
+            dtiToast(on ? 'Locked \u2014 what\u2019s on stays on: nothing taken off, taken out or put in its place' : 'Unlocked', { duration: 3000 });
+        }
+        function lkPaint() {
+            const id = lkOutfit();
+            if (id && lkNew) { const m = GM_getValue('dti_ed_locks', {}) || {}; m[id] = Date.now(); GM_setValue('dti_ed_locks', m); lkNew = false; }   // (saved while locked: locked under its own name)
+            const on = lkOn(), row = document.getElementById('dti-search-row');
+            window.__dtiEdLocked = on;
+            if (!row) return;
+            if (!lkEl) { lkEl = document.createElement('button'); lkEl.type = 'button'; lkEl.id = 'dti-lockb'; lkEl.addEventListener('click', () => lkSet(!lkOn())); }
+            if (lkEl.classList.contains('on') !== on || !lkEl.firstChild) {
+                lkEl.classList.toggle('on', on); lkEl.setAttribute('aria-pressed', String(on));
+                lkEl.setAttribute('aria-label', on ? 'Unlock the custom\u2019s items' : 'Lock the custom\u2019s items');
+                lkEl.title = on ? 'Locked: what\u2019s on stays on \u2014 nothing taken off, taken out or put in its place. Click to unlock'
+                    : 'Lock the custom\u2019s items: what\u2019s on stays on \u2014 nothing taken off, taken out or put in its place';
+                lkEl.innerHTML = LOCK_ICO(on);
+            }
+            const sr = document.getElementById('dti-srb');
+            if (sr && sr.parentElement === row) { if (sr.nextElementSibling !== lkEl) sr.after(lkEl); }
+            else if (lkEl.parentElement !== row) row.appendChild(lkEl);
+        }
+        const lkT = setInterval(() => { if (!document.getElementById('wardrobe-2020-root')) return clearInterval(lkT); lkPaint(); }, 1000);
+        // (DTI's own controls under the lock: a worn item's toggle, Remove, ours too — stopped before DTI sees the click; an item put on:
+        // only once it's known to replace nothing)
+        if (!window.__dtiLockWired) {
+            window.__dtiLockWired = true;
+            const inRoot = t => { const r = document.getElementById('wardrobe-2020-root'); return !!(r && t?.closest && r.contains(t)); };
+            document.addEventListener('click', e => {
+                const t = e.target;
+                if (!window.__dtiEdLocked || !inRoot(t)) return;
+                const stop = () => { e.preventDefault(); e.stopPropagation(); };
+                if (t.closest('button[aria-label="Remove"], button[aria-label="Remove from the custom"], .dti-cs-x, .dti-wb-x')) { stop(); return edLockSay('Locked \u2014 nothing can be taken out of the custom'); }
+                if (t.closest('button, a, [role="button"], #dti-cs, #dti-wb')) return;   // (its other buttons — and our own panels, which check for themselves)
+                const lab = t.closest('label'), inp = t.matches('input[type="checkbox"], input[type="radio"]') ? t : lab?.querySelector(':scope > input[type="checkbox"], :scope > input[type="radio"]');
+                if (!inp || !/^\d+$/.test(inp.value || '')) return;
+                stop();
+                // (worn or not: by the outfit itself — a tick clicked has already flipped by now)
+                if ((csBr.get()?.state?.wornItemIds || []).map(String).includes(inp.value)) return edLockSay('Locked \u2014 what\u2019s on stays on');
+                edLockWear(inp.value);
+            }, true);
+            document.addEventListener('keydown', e => {   // (a zone's items are a radio group: the arrow keys would put another on)
+                if (!window.__dtiEdLocked || !/^Arrow/.test(e.key) || !e.target.matches?.('input[type="radio"]') || !inRoot(e.target) || !/^\d+$/.test(e.target.value || '')) return;
+                e.preventDefault(); e.stopPropagation();
+                edLockSay('Locked \u2014 what\u2019s on stays on');
+            }, true);
         }
         function srPark() {   // (Custom items: the search kept, DTI's emptied by its own ✕ — then ours cleared: every one of the custom's items)
             srParked = srSnap();
@@ -31297,6 +31705,22 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     // DTI's editor, from the page's own side (React keeps its state on the page's elements, which a userscript may not see): the
     // look on screen and the one saved, or a look put on screen — DTI's own "load this outfit" step, so its Save lights up as usual.
     // Asked through an attribute + an event (both sides see those), answered the same way.
+    // ── The editor's lock (user asked: "locking current items … helpful for having a custom part way done and not losing track of where
+    // you are"): what's on can't be taken off, nothing in the custom can be taken out, and what's put on mustn't take a worn item's place
+    // (its zones — DTI would take the other off); anything else still goes on. window.__dtiEdLocked: the padlock's on ──
+    function edLockSay(msg) {
+        dtiToast(msg, { duration: 4500, action: { label: 'Unlock', run: () => document.getElementById('dti-lockb')?.click() } });
+    }
+    async function edLockWear(id) {   // (put on only when it replaces nothing that's on → true when it went on)
+        const br = edBridge();
+        const [mine, cand] = await Promise.all([br.zones(), br.zones([String(id)])]);
+        if (!mine?.items || !cand?.items) { edLockSay('Locked \u2014 couldn\u2019t check what it would replace, so it wasn\u2019t put on'); return false; }
+        const c = cand.items[0], meet = (a, b) => (a || []).some(z => (b || []).includes(z));
+        const clash = c ? mine.items.filter(w => w.id !== c.id && (meet(c.zids, w.zids) || meet(c.rids, w.zids) || meet(w.rids, c.zids))) : [];
+        if (clash.length) { edLockSay(`Locked \u2014 \u201c${c.name || 'that'}\u201d would take the place of ${clash.map(w => `\u201c${w.name}\u201d`).join(', ')}`); return false; }
+        const r = await br.wear(String(id));
+        return !!r?.ok;
+    }
     function edBridge() {
         if (!document.getElementById('dti-ed-bridge')) {
             const s = document.createElement('script');
@@ -31422,8 +31846,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         }
                         else if (c && req.op === 'unwear') { c.dispatchToOutfit({ type: 'unwearItem', itemId: String(req.id) }); out = { ok: true }; }
                         else if (c && req.op === 'remove') { c.dispatchToOutfit({ type: 'removeItem', itemId: String(req.id), itemIdsToReconsider: [] }); out = { ok: true }; }
-                        else if (c && req.op === 'zones') {   // (what's worn: each item's zones on this pet, and the ones it keeps others out of)
-                            const st = c.outfitState, client = window.__APOLLO_CLIENT__, ids = Array.from(st.wornItemIds || []).map(String);
+                        else if (c && req.op === 'zones') {   // (what's worn — or the items asked for: each one's zones on this pet, and the ones it keeps others out of)
+                            const st = c.outfitState, client = window.__APOLLO_CLIENT__, ids = (Array.isArray(req.ids) ? req.ids : Array.from(st.wornItemIds || [])).map(String);
                             if (!ids.length) out = { items: [] };
                             else {
                                 out = { pending: true };
@@ -31432,8 +31856,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                                         if (!client) throw new Error('DTI\u2019s data client isn\u2019t there');
                                         const r = await client.query({ query: WORN_ZONES, variables: { itemIds: ids, speciesId: st.speciesId, colorId: st.colorId, altStyleId: st.altStyleId == null ? null : st.altStyleId } });
                                         const labels = zs => Array.from(new Set((zs || []).map(z => z && z.label).filter(Boolean)));
+                                        const zids = zs => Array.from(new Set((zs || []).map(z => z && String(z.id)).filter(Boolean)));
                                         done(req.rid, { items: (r.data.items || []).filter(Boolean).map(i => ({ id: String(i.id), name: i.name || '', img: i.thumbnailUrl || '',
-                                            zones: labels(i.appearanceOn && i.appearanceOn.layers.map(l => l.zone)), restricts: labels(i.appearanceOn && i.appearanceOn.restrictedZones) })) });
+                                            zones: labels(i.appearanceOn && i.appearanceOn.layers.map(l => l.zone)), restricts: labels(i.appearanceOn && i.appearanceOn.restrictedZones),
+                                            zids: zids(i.appearanceOn && i.appearanceOn.layers.map(l => l.zone)), rids: zids(i.appearanceOn && i.appearanceOn.restrictedZones) })) });
                                     } catch (e) { done(req.rid, { error: String((e && e.message) || e) }); }
                                 })();
                             }
@@ -31509,7 +31935,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             },
             setKind: k => ask({ op: 'kind', kind: k })?.ok === true,
             wear: id => askLater({ op: 'wear', id }), unwear: id => ask({ op: 'unwear', id })?.ok === true,
-            remove: id => ask({ op: 'remove', id })?.ok === true, zones: () => askLater({ op: 'zones' }), outfit: () => askLater({ op: 'outfit' }),
+            remove: id => ask({ op: 'remove', id })?.ok === true, zones: ids => askLater({ op: 'zones', ...(ids ? { ids } : {}) }), outfit: () => askLater({ op: 'outfit' }),
         };
     }
     // Alternate outfits in one custom (user asked: several looks for one pet in one save, not a custom each): a strip under the
@@ -31891,7 +32317,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #dti-search-row h1, #dti-search-row .chakra-editable__preview { max-width: 100% !important; overflow: hidden !important; text-overflow: ellipsis !important; }
             #dti-search-row .chakra-editable__preview { vertical-align: top !important; }
             /* Hide static h1 when chakra-editable is populated (own outfit has editable name) */
-            #dti-search-row :has(.chakra-editable:not(:empty)) .chakra-heading {
+            #dti-search-row[data-dti-edname] > :first-child .chakra-heading {
                 display: none !important;
             }
             /* Invisible flex-break forces search+filter onto row 2 */
@@ -32163,12 +32589,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
 
             /* ── Tooltips ────────────────────────────────────────────────── */
-            #wardrobe-2020-root [role="tooltip"] {
+            /* (DTI's own come in a portal at the end of the page, outside the editor — Shopping list's was still DTI's purple (user asked)) */
+            #wardrobe-2020-root [role="tooltip"], .chakra-portal [role="tooltip"] {
                 background: var(--surface) !important; color: var(--text) !important;
                 border: 1px solid var(--border) !important; border-radius: 8px !important;
                 font-size: 12px !important; font-family: 'Poppins', system-ui, sans-serif !important;
                 box-shadow: var(--shadow-md) !important;
+                --tooltip-bg: var(--surface) !important; --popper-arrow-bg: var(--surface) !important;
             }
+            .chakra-portal [role="tooltip"] [data-popper-arrow-inner] { background: var(--surface) !important; }
 
             /* ── Outfit name heading (h1 stays large) ───────────────────── */
             #wardrobe-2020-root h1 {
@@ -32910,6 +33339,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #dti-wb .dti-wb-off { flex: none; margin-left: auto; width: 24px; height: 24px; padding: 0; display: grid; place-items: center; border: none; border-radius: 50%;
                 background: transparent; color: var(--text-muted); font-family: inherit; font-size: 16px; line-height: 1; cursor: pointer; }
             #dti-wb .dti-wb-off:hover { background: var(--surface-2); color: var(--text); }
+            html.dti-ed-paused :is(#dti-srb, #dti-wb, #dti-lockb) { display: none !important; }   /* (DTI's editor can't be read: these step aside) */
+            #dti-lockb { order: 1; flex: none; align-self: center; width: 30px; height: 30px; margin: 0; padding: 0; display: grid; place-items: center; box-sizing: border-box;
+                border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: 99px; background: var(--surface); color: var(--accent-text, var(--accent)); cursor: pointer; }
+            #dti-lockb:hover { border-color: var(--accent); background: var(--accent-glow); }
+            #dti-lockb.on { border-color: var(--accent); background: var(--accent); color: var(--accent-fg, #fff); }
+            #dti-lockb svg { width: 14px; height: 14px; }
             #dti-srb { order: 1; flex: 1 1 0px; min-width: 112px; max-width: max-content; display: inline-flex; align-self: center; }   /* (gives way, its words cut short — the row's buttons stay on its line) */
             #dti-srb .dti-srb-go {
                 display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 30px; margin: 0; padding: 0 12px 0 10px; box-sizing: border-box;
@@ -33079,6 +33514,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #dti-cs .dti-cs-again { width: 26px !important; height: 26px !important; min-width: 0 !important; display: grid; place-items: center; padding: 0 !important; border: 1px solid var(--border) !important; border-radius: 8px !important; background: var(--surface) !important; color: var(--text-muted) !important; font-size: 14px !important; line-height: 1 !important; cursor: pointer; }
             #dti-cs .dti-cs-again:hover { border-color: var(--accent) !important; color: var(--accent-text, var(--accent)) !important; }
             .dti-cs-sub { margin: 4px 0 8px; font-size: 11.5px; color: var(--text-muted); }
+            /* (the line under the title — in Pages its page buttons at its end, so the grid starts where it does in One list (user asked)) */
+            .dti-cs-subrow { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; min-height: 20px; margin: 4px 0 8px; }
+            .dti-cs-subrow .dti-cs-sub { flex: 1 1 auto; min-width: 0; margin: 0; }
+            .dti-cs-subrow .dti-cs-pager { height: 20px; margin: 0 0 0 auto; gap: 8px; font-size: 11.5px; }
+            #wardrobe-2020-root #dti-cs .dti-cs-subrow .dti-cs-pager button { height: 20px !important; padding: 0 9px !important; border-radius: 7px !important; font-size: 11.5px !important; line-height: 18px !important; }
             .dti-cs-bar { height: 3px; margin: -3px 0 10px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
             .dti-cs-bar[hidden] { display: none; }
             .dti-cs-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
@@ -33557,6 +33997,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     // Steps in progress sit in this tab's sessionStorage (instant, survives page changes) and GM `dti_gift_pend`;
     // finished gifts go to GM `dti_np_gifts`, which Notes on DTI turns into trade reports. ──
     function runGiftTracker() {
+        if (window.__dtiGiftTrack) return;   // (once a page — the Mini DTI can turn it on part-way through one)
+        window.__dtiGiftTrack = true;
         const SS = 'dti_gift_flow';
         const flow = () => { try { return JSON.parse(sessionStorage.getItem(SS) || '{}'); } catch (_) { return {}; } };
         const setFlow = f => { try { sessionStorage.setItem(SS, JSON.stringify(f)); } catch (_) {} };
@@ -33632,62 +34074,114 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     setFlow(f);
                 }
             };
-            const start = () => new MutationObserver(watch).observe(document.body, { childList: true, subtree: true, characterData: true });
+            let watchT = 0;   // (read at most every 120 ms — reading it measures the page; a step stays up far longer than that)
+            const watchSoon = () => { if (!watchT) watchT = setTimeout(() => { watchT = 0; watch(); }, 120); };
+            const start = () => new MutationObserver(watchSoon).observe(document.body, { childList: true, subtree: true, characterData: true });
             if (document.body) start(); else document.addEventListener('DOMContentLoaded', start, { once: true });
         }
     }
 
-    // ── The DTI button on Neopets, and its panel. The button: a small round one in your DTI theme's colors, in a corner.
-    // Drag it anywhere (it settles against the nearest side); × tucks it into a slim tab on that side. A click opens the panel:
-    //   Trades — your trade reports: the very same ones as in DTI's Notes (GM `dti_notes`), so a change on either side shows
-    //            on the other at once. Start one, change a status, add items (found on DTI); new NC gifts (when tracking
-    //            is on) wait at the top to go into a report.
-    //   Search — any item on DTI by name, with its NC value.
-    //   Pages  — links into DTI (new tab).
-    // Self-contained: only the early part of the script runs on Neopets (the rest isn't set up yet), and it lives in a
-    // shadow root so the site's styles can't reach it. ──
+    // ── Mini DTI: a little DTI on every Neopets page (⚙ › Neopets › Mini DTI). A tab on the right edge opens it (drag the tab up or
+    // down to move it, and the window's left edge to make it wider); a click elsewhere or Esc closes it. Your DTI theme, and the same
+    // data as DTI — live both ways:
+    //   Home     what this page has for you (its items, with their values and your marks; your trades with the person; what's in
+    //            the NC Mall that you want…), your numbers at a glance, what you looked at last, the NC Mall now
+    //   Items    DTI's search (filters, a grid) and your own lists — and an item's page: its picture on a pet, its value, your
+    //            lists, who's offering and seeking it on DTI, Seeking, a trade report, a note (a style token: own / want)
+    //   Seeking · Trades (trade reports and NC gifts) · Tokens · Notes
+    // Light on every page: only the tab is made with the page — the window the first time it opens, each part when it's first looked
+    // at, and what a part needs from DTI only then (kept a while). Self-contained: on Neopets only the early part of the script is set
+    // up (functions, and the shared consts above the Neopets branch); a shadow root keeps the site's styles out. ──
     function runNeopetsFab() {
         if (document.getElementById('dti-np-fab')) return;
-        let tok = {};
-        try { tok = JSON.parse(GM_getValue('dti_theme_tokens', '') || '{}'); } catch (_) {}
-        const A = tok['--accent'] || '#4f46e5', AF = tok['--accent-fg'] || '#ffffff', S = tok['--surface'] || '#ffffff';
-        const T = tok['--text'] || '#1a1e2a', M = tok['--text-muted'] || '#6b7491', B = tok['--border'] || '#c7d2fe', S2 = tok['--surface-2'] || '#f5f3ff';
-        const AT = tok['--accent-text'] || A, AG = tok['--accent-glow'] || `color-mix(in srgb, ${A} 14%, transparent)`;
-        const NC = tok['--nc'] || '#d97706', OK = tok['--success'] || '#16a34a', RED = '#e5484d';
-        const slug = GM_getValue('dti_user_slug', ''), D = 'https://impress.openneo.net';
-        const LINKS = [   // (the DTI logo's menu: DTI's pages, in a new tab)
-            ['Home', D + '/', 'Your pets and the newest items'],
-            ['My Items', slug ? `${D}/user/${slug}/closet` : D + '/your-items', 'Your item lists'],
-            ['Customs', D + '/your-outfits', 'Your saved outfits'],
-            ['My Tokens', D + '/items?q=dti-enhance#tokens', 'Style tokens and essences'],
-            ['Notes', D + '/items?q=dti-enhance#notes', 'Notes and trade reports'],
-            ...(seekOn() ? [['Seeking', D + '/items?q=dti-enhance#seeking', 'The items you want now']] : []),
-            ['NC Mall Guide', D + '/items?q=dti-enhance#mall', 'What\u2019s new, leaving and inside'],
-            ['Trade Finder', D + '/items?q=dti-enhance#finder', 'Who\u2019s offering your wishlist'],
-            ['Neofriends', D + '/items?q=dti-enhance#neofriends', 'Traders you follow'],
-        ];
-        const TABS = [['trades', 'Trades'], ['tokens', 'Tokens'], ...(seekOn() ? [['seeking', 'Seeking']] : []), ['search', 'Search'], ['notes', 'Notes']];
-        const LOGO = '<svg viewBox="0 0 16 15" fill="none" aria-hidden="true"><path d="M8 1C8 1 9.8 1 9.8 2.6 9.8 3.8 8.8 4.2 8 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 4.5 2 10h12z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M2 12.5h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+        const D = 'https://impress.openneo.net', esc = noteEsc;
+
+        // ── Your DTI theme (DTI saves it for Neopets pages: dti_theme_tokens) — CSS variables on the shadow root, again when it changes ──
+        const SQUARE = ['bauhaus', 'bitmap', 'retroos'];   // (themes whose cards have square corners on DTI)
+        function themeOf() {
+            let t = {};
+            try { t = JSON.parse(GM_getValue('dti_theme_tokens', '') || '{}') || {}; } catch (_) {}
+            const v = (k, d) => t[k] || d;
+            const A = v('--accent', '#4f46e5'), AF = v('--accent-fg', '#ffffff'), solid = (t.style || 'solid') === 'solid';   // (DTI's own default: Solid)
+            const sq = SQUARE.includes(t.preset);
+            const vars = {
+                '--a': A, '--af': AF, '--at': v('--accent-text', A), '--ag': v('--accent-glow', `color-mix(in srgb, ${A} 14%, transparent)`),
+                '--s': v('--surface', '#ffffff'), '--s2': v('--surface-2', '#f5f3ff'), '--b': v('--border', '#c7d2fe'),
+                '--t': v('--text', '#1a1e2a'), '--m': v('--text-muted', '#6b7491'), '--nc': v('--nc', '#d97706'), '--ok': v('--success', '#16a34a'),
+                '--pgc': v('--bg', '#eef2ff'), '--pg': t.pageBg || v('--bg', '#eef2ff'),
+                '--hf': v('--theme-font', "'Poppins', system-ui, sans-serif"), '--hw': v('--theme-font-wt', '800'),
+                '--htr': v('--theme-hc-track', '.09em'), '--hcs': v('--theme-hc-case', 'uppercase'), '--hsz': v('--theme-hc-size', '11px'),
+                '--btr': v('--theme-brand-track', '-.02em'), '--r': sq ? '3px' : '14px', '--r2': sq ? '2px' : '10px',
+                ...(solid ? {   // (Solid: the bar filled like DTI's nav, and the cards' heads with it)
+                    '--nv': v('--solid-fill', v('--solid-bg', A)), '--nvfg': v('--solid-fg', '#ffffff'), '--nvfg2': v('--solid-fg-2', 'rgb(255 255 255 / .8)'),
+                    '--nvh': v('--solid-hover', 'rgb(255 255 255 / .14)'), '--nva': v('--solid-active', 'rgb(255 255 255 / .22)'), '--nvl': v('--solid-line', 'rgb(255 255 255 / .32)'),
+                    '--nvaf': v('--solid-fg', '#ffffff'), '--nvb': 'transparent', '--gem': v('--solid-fg', '#ffffff'), '--gemfg': v('--solid-bg', A),
+                } : {
+                    '--nv': v('--nav-bg', v('--surface', '#ffffff')), '--nvfg': v('--text', '#1a1e2a'), '--nvfg2': v('--text-muted', '#6b7491'),
+                    '--nvh': v('--surface-2', '#f5f3ff'), '--nva': `color-mix(in srgb, ${A} 9%, transparent)`, '--nvl': `color-mix(in srgb, ${A} 42%, transparent)`,
+                    '--nvaf': v('--accent-text', A), '--nvb': v('--border', '#c7d2fe'), '--gem': A, '--gemfg': AF,
+                }),
+            };
+            // (saved values go into a style sheet: anything that could end the rule is left out — its fallback shows instead)
+            const css = Object.entries(vars).filter(([, x]) => !/[;{}]|<\//.test(String(x))).map(([k, x]) => `${k}:${x}`).join(';');
+            return { css: `:host{${css}}`, solid, dark: t.mode === 'dark', font: /^https:\/\/fonts\.googleapis\.com\//.test(t.fontHref || '') ? t.fontHref : '' };
+        }
+
+        // ── Bits used all over ──
+        const svg = (d, w = 1.7) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+        const GEM = '<svg viewBox="0 0 16 15" fill="none" aria-hidden="true"><path d="M8 1C8 1 9.8 1 9.8 2.6 9.8 3.8 8.8 4.2 8 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 4.5 2 10h12z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M2 12.5h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
         const ICO = {
-            plus: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>',
-            back: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg>',
+            home: svg('<path d="M2.4 7.3 8 2.6l5.6 4.7"/><path d="M3.8 6.2v7.2h8.4V6.2"/><path d="M6.6 13.4V9.7h2.8v3.7"/>'),
+            items: svg('<circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14"/>', 1.8),
+            seeking: svg('<circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.6"/><path d="M8 .9v2.2M8 12.9v2.2M.9 8h2.2M12.9 8h2.2"/>'),
+            trades: svg('<path d="M2.5 5.5h10M10 3l2.5 2.5L10 8M13.5 10.5h-10M6 8l-2.5 2.5L6 13"/>', 1.6),
+            tokens: TOK_ICO.replace('<svg ', '<svg aria-hidden="true" '),
+            notes: svg('<path d="M3 13h3l7-7-3-3-7 7z"/><path d="M9 4l3 3"/>', 1.6),
+            plus: svg('<path d="M8 3v10M3 8h10"/>', 2),
+            back: svg('<path d="M10 3 5 8l5 5"/>', 2),
             ext: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5h5v5M9.5 2.5 3 9"/></svg>',
-            search: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14"/></svg>',
-            swap: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 5.5h10M10 3l2.5 2.5L10 8M13.5 10.5h-10M6 8l-2.5 2.5L6 13"/></svg>',
-            gift: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5.6" width="12" height="3.2" rx=".8"/><path d="M3 8.8v4.4c0 .5.3.8.8.8h8.4c.5 0 .8-.3.8-.8V8.8M8 5.6V14M8 5.6S6.9 2.4 5.2 3c-1.3.5-.7 2.6 2.8 2.6zm0 0s1.1-3.2 2.8-2.6c1.3.5.7 2.6-2.8 2.6z"/></svg>',
-            note: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h3l7-7-3-3-7 7z"/><path d="M9 4l3 3"/></svg>',
-            pin: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2.5h4l-.6 4 2.1 2.2H4.5l2.1-2.2z"/><path d="M8 8.7V14"/></svg>',
-            user: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="5.6" r="2.7"/><path d="M2.8 13.8c.6-2.6 2.7-4 5.2-4s4.6 1.4 5.2 4"/></svg>',
-            here: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 14.5s4.8-4.3 4.8-8a4.8 4.8 0 0 0-9.6 0c0 3.7 4.8 8 4.8 8z"/><circle cx="8" cy="6.5" r="1.7"/></svg>',
-            down: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.8 7.6 8 10.8l3.2-3.2M3 13.5h10"/></svg>',
+            x: svg('<path d="M4 4l8 8M12 4l-8 8"/>', 1.9),
+            grid: svg('<rect x="2.5" y="2.5" width="4.4" height="4.4" rx="1.2"/><rect x="9.1" y="2.5" width="4.4" height="4.4" rx="1.2"/><rect x="2.5" y="9.1" width="4.4" height="4.4" rx="1.2"/><rect x="9.1" y="9.1" width="4.4" height="4.4" rx="1.2"/>', 1.5),
+            gift: svg('<rect x="2" y="5.6" width="12" height="3.2" rx=".8"/><path d="M3 8.8v4.4c0 .5.3.8.8.8h8.4c.5 0 .8-.3.8-.8V8.8M8 5.6V14M8 5.6S6.9 2.4 5.2 3c-1.3.5-.7 2.6 2.8 2.6zm0 0s1.1-3.2 2.8-2.6c1.3.5.7 2.6-2.8 2.6z"/>', 1.5),
+            pin: svg('<path d="M6 2.5h4l-.6 4 2.1 2.2H4.5l2.1-2.2z"/><path d="M8 8.7V14"/>', 1.6),
+            user: svg('<circle cx="8" cy="5.6" r="2.7"/><path d="M2.8 13.8c.6-2.6 2.7-4 5.2-4s4.6 1.4 5.2 4"/>', 1.6),
+            here: svg('<path d="M8 14.5s4.8-4.3 4.8-8a4.8 4.8 0 0 0-9.6 0c0 3.7 4.8 8 4.8 8z"/><circle cx="8" cy="6.5" r="1.7"/>', 1.6),
+            down: svg('<path d="M8 2.5v8M4.8 7.6 8 10.8l3.2-3.2M3 13.5h10"/>', 1.8),
+            copy: svg('<rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 5.5V3.9c0-.8-.6-1.4-1.4-1.4H3.9c-.8 0-1.4.6-1.4 1.4v5.2c0 .8.6 1.4 1.4 1.4h1.6"/>', 1.5),
+            again: svg('<path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2.6v3.2H9.8"/>', 1.7),
+            pet: svg('<circle cx="4.2" cy="7.2" r="1.4"/><circle cx="6.6" cy="4.3" r="1.4"/><circle cx="9.4" cy="4.3" r="1.4"/><circle cx="11.8" cy="7.2" r="1.4"/><path d="M8 8.4c-2 0-3.6 2-3.6 3.4 0 1 .8 1.6 1.8 1.6.7 0 1.2-.3 1.8-.3s1.1.3 1.8.3c1 0 1.8-.6 1.8-1.6 0-1.4-1.6-3.4-3.6-3.4z"/>', 1.4),
+            mall: svg('<path d="M3.2 5.2h9.6l-.8 8.3H4z"/><path d="M5.8 7V4.6a2.2 2.2 0 0 1 4.4 0V7"/>', 1.6),
+            clock: svg('<circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/>', 1.6),
+            eye: svg('<path d="M1.8 8S4 3.8 8 3.8 14.2 8 14.2 8 12 12.2 8 12.2 1.8 8 1.8 8z"/><circle cx="8" cy="8" r="1.9"/>', 1.5),
+            list: svg('<path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><circle cx="2.6" cy="4" r=".6"/><circle cx="2.6" cy="8" r=".6"/><circle cx="2.6" cy="12" r=".6"/>', 1.6),
+            tryon: svg('<path d="M6 2.6 3 4.2 1.8 7.6l2.4.9V13.4h7.6V8.5l2.4-.9L13 4.2 10 2.6c-.4 1-1.1 1.6-2 1.6s-1.6-.6-2-1.6z"/>', 1.4),
+            mail: svg('<rect x="2" y="3.6" width="12" height="8.8" rx="1.6"/><path d="M2.6 4.6 8 8.8l5.4-4.2"/>', 1.5),
         };
-        const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
         const ago = ts => {
             const s = (Date.now() - (ts || 0)) / 1000;
             return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + 'm ago' : s < 86400 ? Math.floor(s / 3600) + 'h ago'
                 : s < 7 * 86400 ? Math.floor(s / 86400) + 'd ago' : new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         };
         const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+        const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`;
+        const isDtiId = id => /^\d+$/.test(String(id || ''));
+        const itemdbHref = name => 'https://itemdb.com.br/item/' + String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const slug = () => GM_getValue('dti_user_slug', '');
+        // DTI's pages (the menu by the bar's ✕ — a new tab)
+        const LINKS = () => [
+            ['Home', D + '/', 'Your pets and the newest items'],
+            ['My Items', slug() ? `${D}/user/${slug()}/closet` : D + '/your-items', 'Your item lists'],
+            ['Customs', D + '/your-outfits', 'Your saved outfits'],
+            ['Browse Items', D + '/items', 'Every item, with filters'],
+            ['My Tokens', D + '/items?q=dti-enhance#tokens', 'Style tokens and essences'],
+            ['Notes', D + '/items?q=dti-enhance#notes', 'Notes and trade reports'],
+            ...(seekOn() ? [['Seeking', D + '/items?q=dti-enhance#seeking', 'The items you want now']] : []),
+            ['NC Mall Guide', D + '/items?q=dti-enhance#mall', 'What’s new, leaving and inside'],
+            ['Trade Finder', D + '/items?q=dti-enhance#finder', 'Who’s offering your wishlist'],
+            ['Neofriends', D + '/items?q=dti-enhance#neofriends', 'Traders you follow'],
+        ];
+        const VIEWS = () => [['home', 'Home'], ['items', 'Items'], ...(seekOn() ? [['seeking', 'Seeking']] : []), ['trades', 'Trades'], ['tokens', 'Tokens'], ['notes', 'Notes']];
+        const ctx = npPageCtx(location.href, npWhoAmI());
 
         // ── Trade reports: DTI's own notes (the same code as DTI's Notes — live both ways) ──
         const STATUS = TRADE_STATUS;
@@ -33695,7 +34189,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const gbcCaps = id => { const c = GBC_KINDS[id]?.caps || 0; return `${c} cap${c === 1 ? '' : 's'}`; };
         const itemPic = (x, title) => GBC_KINDS[x.id] ? `<span class="gico"${title ? ` title="${esc(title)}"` : ''}>${ICO.gift}</span>`
             : x.img ? `<img src="${esc(x.img)}" alt=""${title ? ` title="${esc(title)}"` : ''}>` : `<span class="noimg"${title ? ` title="${esc(title)}"` : ''}></span>`;
-        // Side accounts: the trades and gifts of the Neopets account you're logged into here (or all, with "All accounts")
+        // Side accounts: the Neopets account you're logged into here — its trades, gifts, Seeking and tokens (or all, with "All accounts")
         const meAcct = () => acctOfNp(npWhoAmI());
         const inMine = acct => !acctMany() || ui.allAcct || acct === meAcct();
         const trades = () => DTINotes.all().filter(n => n && String(n.key || '').startsWith('trade:'));
@@ -33709,7 +34203,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             DTINotes.save(key, Object.assign({}, patch, { trade }));
         }
         const removeNote = key => DTINotes.remove(key);
-        // the most recent open trade with someone (where a gift from or to them goes)
+        const myTrades = () => trades().filter(n => inMine(acctOfTrade(n.trade))).sort((a, b) => (b.updated || 0) - (a.updated || 0));
         // names to suggest: the people in your trade reports and gifts, the latest first
         const partnerNames = () => [...new Set([
             ...trades().sort((a, b) => (b.updated || 0) - (a.updated || 0)).map(n => n.trade?.partner?.name),
@@ -33722,433 +34216,1298 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const waitingGifts = () => giftsOn() ? gifts().filter(g => !g.gift && giftLeft(g).length && inMine(acctOfNp(g.np))) : [];
         const saveGift = (uid, patch) => GM_setValue('dti_np_gifts', gifts().map(g => g.uid === uid ? Object.assign({}, g, patch) : g));
 
-        // ── DTI's item search, from here ──
+        // ── Seeking: your short list of items you want now (DTI's Seeking page), for the account you're logged into ──
+        const seekAll = () => Object.entries((GM_getValue('dti_seeking', null) || {}).items || {}).map(([id, e]) => ({ ...e, id }));
+        const seekAcct = e => e.acct && acctGet(e.acct) ? e.acct : 'main';
+        const seekSave = mut => { const d = GM_getValue('dti_seeking', null) || { v: 1, items: {} }; d.items = d.items || {}; mut(d.items); GM_setValue('dti_seeking', d); };
+        const seekHas = id => seekOn() && !!((GM_getValue('dti_seeking', null) || {}).items || {})[String(id)];
+        const seekMine = () => seekAll().filter(e => inMine(seekAcct(e)));
+        const seekNames = () => new Set(seekOn() ? seekMine().map(e => String(e.name || '').toLowerCase()) : []);
+        const seekEntry = it => ({ name: it.name, img: it.img || '', at: Date.now(), note: '', acct: acctMany() ? meAcct() : '', ord: -Date.now() });
+        const tierOf = e => (e.tier === 0 || e.tier === 2 ? e.tier : 1);   // (Must have, Want, Maybe)
+        const seekSorted = () => seekMine().sort((a, b) => tierOf(a) - tierOf(b) || (a.ord ?? 0) - (b.ord ?? 0) || (b.at || 0) - (a.at || 0));
+        // new offers on it (Trade Finder's daily check, or Seeking's own): who — on its row for 3 days; the count until you look
+        const skNew = () => { const t = GM_getValue('dti_sk_new', {}) || {}; return Date.now() - (t.at || 0) < 3 * 864e5 ? t.items || {} : {}; };
+        const skNewCount = () => { const t = GM_getValue('dti_sk_new', {}) || {}; return t.at > (GM_getValue('dti_sk_new_seen', 0) || 0) ? Object.values(t.items || {}).reduce((n, a) => n + a.length, 0) : 0; };
+
+        // ── DTI from here (through Tampermonkey, with your DTI login) ──
         const dtiJSON = path => new Promise(res => GM_xmlhttpRequest({
             method: 'GET', url: D + path, headers: { Accept: 'application/json' }, timeout: 12000,
             onload: r => { try { res(r.status === 200 ? JSON.parse(r.responseText) : null); } catch (_) { res(null); } },
             onerror: () => res(null), ontimeout: () => res(null),
         }));
         const npId = name => 'np-' + String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+        const asItem = it => ({ id: String(it.id), name: it.name, img: it.thumbnail_url || '', nc: !!it['nc?'], pb: !!it['pb?'] });
+        // A Neopets item by its name → DTI's ({ id, name, img, nc }), or null when DTI doesn't have it — asked once a page
+        const byNameP = new Map();
+        function dtiByName(name, img) {
+            const k = String(name).toLowerCase();
+            if (!byNameP.has(k)) byNameP.set(k, dtiJSON('/items.json?per_page=10&q=' + encodeURIComponent('"' + name + '"')).then(d => {
+                const hit = (d?.items || []).find(x => x.name.toLowerCase() === k);
+                if (!d) byNameP.delete(k);   // (DTI didn't answer: ask again next time)
+                return hit ? { ...asItem(hit), img: hit.thumbnail_url || img || '' } : null;
+            }));
+            return byNameP.get(k);
+        }
         // gift items as trade entries: DTI's own item when there's one by that exact name, else a plain entry
         const asTradeItems = list => Promise.all(list.map(async it => {
             let cat = tkCat || tokenCatalogIfCached();
             const tok = tokTradeFor(it, cat);   // (a style token: DTI doesn't have it)
             if (tok) return tok;
-            const d = await dtiJSON('/items.json?per_page=10&q=' + encodeURIComponent('"' + it.name + '"'));
-            const hit = (d?.items || []).find(x => x.name.toLowerCase() === it.name.toLowerCase());
-            if (hit) return { id: String(hit.id), name: hit.name, img: hit.thumbnail_url || it.img || '', qty: 1 };
+            const hit = await dtiByName(it.name, it.img);
+            if (hit) return { id: hit.id, name: hit.name, img: hit.img || it.img || '', qty: 1 };
             if (!cat) { cat = await loadTokenCatalog().catch(() => null); if (cat) tkCat = cat; const tk = tokTradeFor(it, cat); if (tk) return tk; }   // (not on DTI: a token after all?)
             return { id: npId(it.name), name: it.name, img: it.img || '', qty: 1 };
         }));
 
-        const host = document.createElement('div');
-        host.id = 'dti-np-fab';
-        const root = host.attachShadow({ mode: 'open' });
-        root.innerHTML = `<style>
+        // ── NC values (Lebron's and Valisar's lists, kept a day): "6-7 caps" on NC tiles, once the lists are in ──
+        const valTxt = v => v ? (capNums(v) ? String(v).replace(/\*$/, '') + ' caps' : String(v)) : '';
+        function paintVals(scope) {
+            scope.querySelectorAll('[data-val]:not([data-vd])').forEach(el => {
+                el.dataset.vd = '1';
+                npNcValue(el.dataset.val).then(v => { const t = valTxt(v); if (t && el.isConnected) { el.textContent = t; el.title = String(v); el.hidden = false; } }).catch(() => {});
+            });
+        }
+        // ≈ the caps a set of NC items is worth ([{ name, qty }] → "≈ 12–15 caps", or '' when none has a cap value)
+        async function capSum(list) {
+            const vals = await Promise.all(list.map(x => npNcValue(x.name).catch(() => null)));
+            let lo = 0, hi = 0, n = 0;
+            vals.forEach((v, i) => { const r = capNums(v); if (r) { lo += r[0] * (list[i].qty || 1); hi += r[1] * (list[i].qty || 1); n++; } });
+            const f = x => (Math.round(x * 10) / 10).toLocaleString();
+            return n ? `≈ ${lo === hi ? f(lo) : `${f(lo)}–${f(hi)}`} caps` : '';
+        }
+
+        // ── Your DTI lists: your own Items page, read through Tampermonkey (your DTI login) and kept two hours in our store on this
+        // site — only when something here needs them (Your items; the ✓ / ♥ marks on a page's items) ──
+        let mineP = null, mineIx = null;
+        function mineLoad(force) {
+            if (mineP && !force) return mineP;
+            return mineP = (async () => {
+                const me = slug();
+                if (!me) return null;
+                const c = await npStoreGet('mine');
+                if (!force && c?.slug === me && Date.now() - c.at < 2 * 3600e3) return mineIndex(c);
+                let p = null;
+                try { p = nbParseCloset(await dtiGetText(`/user/${encodeURIComponent(me)}/closet`, 60000)); } catch (_) {}
+                if (!p) return c?.slug === me ? mineIndex(c) : null;   // (couldn't read it now: the copy from before, if there is one)
+                const e = { at: Date.now(), slug: me, have: p.have, want: p.want };
+                npStoreSet('mine', e);
+                return mineIndex(e);
+            })().catch(() => null);
+        }
+        function mineIndex(m) {   // (item id → { own, want, lists }, and the same by name — Neopets pages only have names)
+            const byId = new Map(), byName = new Map();
+            const add = (it, k) => {
+                const e = byId.get(it.id) || { id: it.id, name: it.name, img: it.img, nc: it.nc, own: 0, want: 0, lists: [] };
+                e[k] += it.qty || 1;
+                String(it.list || '').split(', ').filter(Boolean).forEach(l => e.lists.push({ name: l, own: k === 'own' }));
+                byId.set(it.id, e); byName.set(String(it.name).toLowerCase(), e);
+            };
+            (m.have || []).forEach(it => add(it, 'own'));
+            (m.want || []).forEach(it => add(it, 'want'));
+            return mineIx = { at: m.at, have: m.have || [], want: m.want || [], byId, byName };
+        }
+        const mineOf = it => mineIx && (mineIx.byId.get(String(it.id)) || mineIx.byName.get(String(it.name || '').toLowerCase())) || null;
+        function mineStale() { mineP = null; npStoreGet('mine').then(c => { if (c) npStoreSet('mine', { ...c, at: 0 }); }); }   // (a list changed here: read again next time)
+
+        // ── What you looked at here (the last 16 items) ──
+        const recent = () => (GM_getValue('dti_np_recent', []) || []).filter(x => x && x.name);
+        function addRecent(it) {
+            if (it.tok) return;
+            const e = { id: String(it.id || ''), name: it.name, img: it.img || '', nc: !!it.nc };
+            GM_setValue('dti_np_recent', [e, ...recent().filter(x => x.name !== e.name)].slice(0, 16));
+        }
+
+        // ── An item tile, DTI's way: its picture on white, the name; NC in the corner and its value under it; your marks — ◎ Seeking,
+        // ✓ yours on DTI, ♥ on your wishlist — on the other. data-item is what opens it here ──
+        function marksOf(it, skt) {
+            const sk = !skt && seekOn() && (isDtiId(it.id) ? seekHas(it.id) : seekNames().has(String(it.name).toLowerCase()));
+            const m = mineOf(it);
+            const s = (sk ? `<i class="sk" title="On your Seeking list">${ICO.seeking}</i>` : '') + (m?.own ? `<i class="ow" title="You own ${m.own} (DTI)">✓</i>` : '') + (m?.want ? '<i class="wa" title="On your DTI wishlist">♥</i>' : '');
+            return s ? `<span class="mk">${s}</span>` : '';
+        }
+        const itemAttr = it => esc(JSON.stringify({ id: String(it.id || ''), name: it.name, img: it.img || '', nc: !!it.nc, ...(it.tok ? { tok: 1 } : {}) }));
+        function tile(it, o = {}) {
+            const skt = !!o.skt && isDtiId(it.id) && seekOn();
+            return `<button type="button" class="tile${o.cls ? ' ' + o.cls : ''}" data-item="${itemAttr(it)}"${o.urg ? ` data-urgency="${o.urg}"` : ''} title="${esc(it.name)}${o.tip ? ' — ' + esc(o.tip) : ''}">
+                ${it.img ? `<img class="pic" src="${esc(it.img)}" alt="" loading="lazy">` : '<span class="pic none"></span>'}
+                <span class="nm">${esc(it.name)}</span>
+                ${o.sub ? `<span class="sub${o.subCls ? ' ' + o.subCls : ''}">${o.sub}</span>` : it.nc ? `<span class="v" data-val="${esc(it.name)}" hidden></span>` : ''}
+                ${it.nc ? '<i class="kd">NC</i>' : it.pb ? '<i class="kd pb">PB</i>' : ''}${o.qty > 1 ? `<i class="qt">×${o.qty}</i>` : ''}${o.marks === false ? '' : marksOf(it, skt)}
+                ${skt ? `<span class="skt${seekHas(it.id) ? ' on' : ''}" data-sktog title="${seekHas(it.id) ? 'On your Seeking list — click to take it off' : 'Seeking now: add it to your Seeking list'}">${ICO.seeking}</span>` : ''}
+            </button>`;
+        }
+        const tiles = (list, o) => `<div class="grid">${list.map(it => tile(it, typeof o === 'function' ? o(it) : o)).join('')}</div>`;
+        const card = (ico, title, n, actions, inner, cls = '') => `<section class="card${cls ? ' ' + cls : ''}"><div class="ch"><span class="ci">${ico}</span><span class="ct">${title}</span>${n !== '' && n != null ? `<span class="cn">${n}</span>` : ''}<span class="ca">${actions || ''}</span></div>${inner}</section>`;
+        const emptyBox = (ico, title, line) => `<div class="empty">${ico}<b>${title}</b>${line ? `<span>${line}</span>` : ''}</div>`;
+        const acctBar = what => {
+            const ma = acctMany() ? acctGet(meAcct()) : null;
+            return ma ? `<div class="acctbar"><i style="background:${esc(ma.color)}"></i><span>${ui.allAcct ? 'All your accounts' : `${esc(acctName(ma))}${what}`}</span><button type="button" class="acctall">${ui.allAcct ? `Just ${esc(acctName(ma))}` : 'All accounts'}</button></div>` : '';
+        };
+
+        // ── The tab (made with the page — small) ──
+        const TAB_CSS = `
             :host { all: initial; }
             * { box-sizing: border-box; }
-            .wrap { position: relative; font-family: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif; color: ${T}; }
-            button, input, textarea { font-family: inherit; }
-            :focus-visible { outline: 2px solid ${A}; outline-offset: 1px; }
             [hidden] { display: none !important; }
-            /* The DTI button: a tab on the right edge — a click opens the panel, a drag slides it up or down */
-            .fab { position: relative; width: 18px; height: 50px; padding: 0; border: none; border-radius: 10px 0 0 10px; cursor: pointer; display: grid; place-items: center;
-                background: ${A}; color: ${AF}; box-shadow: 0 2px 10px rgba(0,0,0,.2); opacity: .72; transition: opacity .15s, width .15s; touch-action: none; }
-            .fab:hover, .wrap.open .fab, .wrap.drag .fab { opacity: 1; width: 22px; }
-            .wrap.drag .fab { cursor: grabbing; }
-            .fab svg { width: 12px; height: 11px; pointer-events: none; }
-            .badge { position: absolute; top: -7px; left: -9px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 99px; pointer-events: none;
-                background: ${RED}; color: #fff; font: 800 10px/18px system-ui, sans-serif; font-style: normal; text-align: center; box-shadow: 0 0 0 2px ${S}; }
-            .cdot { position: absolute; top: 5px; left: 50%; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: ${AF}; box-shadow: 0 0 0 1.5px ${A}; pointer-events: none; }
+            .tab { position: fixed; right: 0; z-index: 2; width: 20px; height: 56px; padding: 0; border: none; border-radius: 12px 0 0 12px; cursor: pointer;
+                display: grid; place-items: center; background: var(--a); color: var(--af); box-shadow: -2px 3px 12px rgb(0 0 0 / .22), inset 1px 0 0 rgb(255 255 255 / .18);
+                opacity: .8; transition: width .15s, opacity .15s; touch-action: none; font: 13px system-ui, sans-serif; }
+            .tab:hover, .tab.open, .tab.drag { width: 26px; opacity: 1; }
+            .tab.drag { cursor: grabbing; }
+            .tab:focus-visible { outline: 2px solid var(--a); outline-offset: 2px; }
+            .tab svg { width: 13px; height: 12px; pointer-events: none; }
+            .tab .badge { position: absolute; top: -7px; left: -9px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 99px; pointer-events: none;
+                background: #e5484d; color: #fff; font: 800 10px/18px system-ui, sans-serif; font-style: normal; text-align: center; box-shadow: 0 0 0 2px var(--s); }
+            .tab .dot { position: absolute; top: 6px; left: 50%; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--af); box-shadow: 0 0 0 1.5px var(--a); pointer-events: none; }`;
 
-            /* The panel */
-            .panel { position: absolute; bottom: 0; width: 420px; max-width: calc(100vw - 40px); display: flex; flex-direction: column; overflow: hidden;
-                border-radius: 16px; background: ${S}; border: 1px solid ${B}; box-shadow: 0 16px 44px rgba(0,0,0,.26); font-size: 13px; color: ${T}; }
-            .panel { right: 28px; }
-            .wrap.down .panel { bottom: auto; top: 0; }
-            .ph { display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 12px; border-bottom: 1px solid ${B}; }
-            .brand { position: relative; flex: none; display: inline-flex; align-items: center; gap: 3px; height: 32px; padding: 0 5px 0 4px; border: none; border-radius: 9px; background: none; cursor: pointer; color: ${M}; }
-            .brand:hover, .brand.on { background: ${S2}; color: ${T}; }
-            .brand i { width: 24px; height: 24px; border-radius: 8px; display: grid; place-items: center; background: ${A}; color: ${AF}; }
-            .brand i svg { width: 14px; height: 13px; }
-            .brand .chev { width: 12px; height: 12px; transition: transform .15s; }
-            .brand.on .chev { transform: rotate(180deg); }
-            .tabs { margin-left: auto; display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: ${S2}; }
-            .tabs button { height: 27px; padding: 0 9px; border: none; border-radius: 7px; background: none; color: ${M}; cursor: pointer; font-size: 12px; font-weight: 700;
-                display: inline-flex; align-items: center; gap: 5px; }
-            .tabs button:hover { color: ${T}; }
-            .tabs button.on { background: ${S}; color: ${AT}; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
-            .tabs b { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 99px; background: ${RED}; color: #fff; font-size: 10px; line-height: 16px; text-align: center; }
-            .tabs b:empty { display: none; }
-            .body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: 12px; scrollbar-width: thin; scrollbar-color: ${B} transparent; }
+        // ── The window (added the first time it opens) ──
+        const WIN_CSS = `
+            .win { position: fixed; right: 32px; z-index: 3; display: flex; flex-direction: column; overflow: hidden; max-width: calc(100vw - 44px);
+                border-radius: calc(var(--r) + 4px); border: 1px solid var(--b); background: var(--pgc); background: var(--pg, var(--pgc));
+                box-shadow: 0 24px 64px rgb(0 0 0 / .3), 0 2px 10px rgb(0 0 0 / .12); color: var(--t);
+                font: 500 13px/1.45 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif; container: win / inline-size; animation: win-in .16s ease-out; }
+            @keyframes win-in { from { opacity: 0; transform: translateX(14px) scale(.985); } }
+            @media (prefers-reduced-motion: reduce) { .win, .tab, .tile, .sheet { animation: none !important; transition: none !important; } }
+            .win button, .win input, .win textarea, .win select { font-family: inherit; color: inherit; }
+            .win :focus-visible { outline: 2px solid var(--a); outline-offset: 1px; }
+            .win a { color: inherit; }
+            .grip { position: absolute; left: 0; top: 0; bottom: 0; width: 7px; z-index: 6; cursor: ew-resize; }
+            .grip:hover, .grip.on { background: linear-gradient(90deg, var(--ag), transparent); }
 
-            /* Shared bits */
-            .btn { height: 30px; padding: 0 11px; border-radius: 8px; border: 1px solid ${B}; background: ${S}; color: ${T}; cursor: pointer; font-size: 12px; font-weight: 700; }
-            .btn:hover:not(:disabled) { border-color: ${A}; color: ${AT}; }
-            .btn.pri { border-color: ${A}; background: ${A}; color: ${AF}; }
-            .btn.pri:hover:not(:disabled) { filter: brightness(1.08); color: ${AF}; }
-            .btn:disabled { opacity: .6; cursor: wait; }
-            .txt { display: block; width: 100%; height: 34px; margin: 0; padding: 0 10px; border-radius: 9px; border: 1px solid ${B}; background: ${S}; color: ${T}; font-size: 13px; outline: none; }
-            textarea.txt { height: auto; min-height: 62px; padding: 8px 10px; resize: vertical; line-height: 1.45; }
-            .txt:focus { border-color: ${A}; box-shadow: 0 0 0 3px ${AG}; }
-            .txt::placeholder { color: ${M}; opacity: .8; }
-            .sec { display: flex; align-items: center; gap: 6px; margin: 16px 2px 7px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: ${M}; }
-            .sec b { padding: 0 6px; border-radius: 99px; background: ${S2}; color: ${T}; letter-spacing: 0; line-height: 17px; }
-            .list { display: flex; flex-direction: column; gap: 6px; }
-            .msg { padding: 10px; font-size: 12px; color: ${M}; text-align: center; }
-            .empty { padding: 26px 12px 10px; text-align: center; font-size: 12.5px; line-height: 1.55; color: ${M}; }
-            .empty b { display: block; margin-bottom: 4px; font-size: 14px; color: ${T}; }
-            .hint { margin: 14px 2px 0; font-size: 11px; line-height: 1.5; color: ${M}; }
-            .noimg { display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 6px; background: ${S2}; box-shadow: 0 0 0 1px ${B}; }
-            .noimg::after { content: '?'; font-size: 12px; font-weight: 800; color: ${M}; }
-            .tag { flex: none; padding: 0 5px; border-radius: 4px; font-size: 9.5px; font-weight: 800; font-style: normal; line-height: 16px; background: color-mix(in srgb, ${NC} 16%, transparent); color: ${NC}; }
-            .tag.typed { background: ${S2}; color: ${M}; }
-            .s-planned { background: ${AG}; color: ${AT}; }
-            .s-pending { background: color-mix(in srgb, ${NC} 16%, transparent); color: ${NC}; }
-            .s-done { background: color-mix(in srgb, ${OK} 16%, transparent); color: ${OK}; }
-            .s-off { background: ${S2}; color: ${M}; text-decoration: line-through; }
+            /* The bar: DTI's nav, small — the gem and "DTI", the parts as links, DTI's pages and ✕ */
+            .nav { position: relative; z-index: 4; flex: none; display: flex; align-items: center; gap: 4px; height: 54px; padding: 0 8px 0 10px;
+                background: var(--nv); color: var(--nvfg); border-bottom: 1px solid var(--nvb); box-shadow: 0 2px 10px rgb(0 0 0 / .06); }
+            .brand { flex: none; display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 8px 0 4px; border: none; border-radius: 11px; background: none; cursor: pointer; color: var(--nvfg); }
+            .brand:hover { background: var(--nvh); }
+            .gem { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 9px; background: var(--gem); color: var(--gemfg); box-shadow: 0 2px 8px rgb(0 0 0 / .16); }
+            .gem svg { width: 16px; height: 15px; }
+            .brand b { font-family: var(--hf); font-weight: var(--hw); font-size: 18px; line-height: 1; letter-spacing: var(--btr); }
+            .links { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: safe center; gap: 1px; }
+            .links button { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 9px; border: 1px solid transparent; border-radius: 10px;
+                background: none; color: var(--nvfg2); cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap; transition: background .12s, color .12s; }
+            .links button svg { width: 15px; height: 15px; flex: none; display: none; }
+            .links button:hover { background: var(--nvh); color: var(--nvfg); }
+            .links button.on { background: var(--nva); border-color: var(--nvl); color: var(--nvaf); }
+            .links .nb { position: absolute; top: -3px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 99px; background: #e5484d; color: #fff;
+                font: 800 9.5px/16px system-ui, sans-serif; text-align: center; box-shadow: 0 0 0 2px var(--s); pointer-events: none; }
+            .links .nb.sk { background: #ea580c; }
+            .links .nb.dot { min-width: 9px; width: 9px; height: 9px; padding: 0; top: 4px; right: 3px; }
+            .links .nb:empty:not(.dot) { display: none; }
+            .nbtn { width: 34px; height: 34px; flex: none; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 10px; background: none; color: var(--nvfg2); cursor: pointer; }
+            .nbtn svg { width: 15px; height: 15px; }
+            .nbtn:hover, .nbtn.on { background: var(--nvh); color: var(--nvfg); }
+            /* (narrower: the parts as icons, the one you're on still named; narrower still: icons only) */
+            @container win (max-width: 610px) { .links button svg { display: block; } .links button:not(.on) span { display: none; } .links button { padding: 0 8px; } }
+            @container win (max-width: 470px) { .links button span { display: none; } .brand b { display: none; } }
 
-            /* Trades */
-            .newbtn { width: 100%; height: 38px; border: none; border-radius: 10px; background: ${A}; color: ${AF}; font-size: 13.5px; font-weight: 700; cursor: pointer;
-                display: flex; align-items: center; justify-content: center; gap: 6px; }
-            .newbtn svg { width: 13px; height: 13px; }
-            .newbtn:hover { filter: brightness(1.08); }
-            .trow { position: relative; display: flex; align-items: flex-start; gap: 8px; padding: 9px 9px 9px 11px; border-radius: 12px; border: 1px solid ${B}; background: ${S}; transition: border-color .12s; }
-            .trow:hover { border-color: ${A}; }
-            .tmain { flex: 1; min-width: 0; padding: 0; border: none; background: none; text-align: left; cursor: pointer; color: ${T}; display: flex; flex-direction: column; gap: 7px; }
-            .ttop { display: flex; align-items: baseline; gap: 6px; }
-            .ttop b { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .when { flex: none; font-size: 11px; color: ${M}; }
-            .thumbs { display: flex; align-items: center; gap: 4px; min-height: 26px; }
-            .thumbs img { width: 26px; height: 26px; flex: none; border-radius: 6px; background: #fff; box-shadow: 0 0 0 1px ${B}; object-fit: contain; }
-            .thumbs .n { font-size: 11px; font-weight: 700; color: ${M}; }
-            .thumbs .none { font-size: 11px; color: ${M}; font-style: italic; }
-            .thumbs .sw { display: grid; flex: none; margin: 0 3px; color: ${M}; }
-            .thumbs .sw svg { width: 14px; height: 14px; }
-            .chip { flex: none; height: 22px; padding: 0 7px; border: none; border-radius: 6px; cursor: pointer; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
-                display: inline-flex; align-items: center; gap: 3px; }
-            .chip i { font-style: normal; font-size: 8px; opacity: .7; }
-            .stmenu { position: absolute; right: 8px; top: 34px; z-index: 3; min-width: 156px; padding: 5px; border-radius: 11px; background: ${S}; border: 1px solid ${B};
-                box-shadow: 0 10px 28px rgba(0,0,0,.2); display: flex; flex-direction: column; gap: 1px; }
-            .stmenu button { display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 9px; border: none; border-radius: 7px; background: none; color: ${T}; cursor: pointer;
-                font-size: 12.5px; font-weight: 600; text-align: left; }
-            .stmenu button:hover { background: ${S2}; }
-            .stmenu button.on { color: ${AT}; font-weight: 800; }
-            .dot { width: 8px; height: 8px; flex: none; border-radius: 50%; }
-            .dot.s-planned { background: ${A}; } .dot.s-pending { background: ${NC}; } .dot.s-done { background: ${OK}; } .dot.s-off { background: ${M}; }
-            .morebtn { width: 100%; margin-top: 10px; height: 30px; border: 1px dashed ${B}; border-radius: 9px; background: none; color: ${M}; cursor: pointer; font-size: 12px; font-weight: 700; }
-            .morebtn:hover { color: ${AT}; border-color: ${A}; }
-            .skrow { display: flex; align-items: center; gap: 9px; padding: 6px; border-radius: 10px; }
-            .skrow:hover { background: ${S2}; }
-            .skrow img, .skrow .noimg { width: 40px; height: 40px; border-radius: 8px; background: #fff; flex: none; display: block; }
-            .sktxt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-            .sktxt b { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .sktxt small { font-size: 11px; color: ${M}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .skval { font-size: 11px; font-weight: 800; color: ${AT}; }
-            .sr .sk { flex: none; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; font-size: 14px; line-height: 1; color: #ea580c; border: 1px solid #fdba74; cursor: pointer; }
-            .sr .sk.on { background: #f97316; border-color: #f97316; color: #fff; }
-            .seekgot { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 8px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; }
-            .seekgot span { flex: 1; }
-            .seekoff { flex: none; height: 26px; padding: 0 10px; border-radius: 8px; border: none; background: #f97316; color: #fff; font-family: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer; }
-            .acctbar { display: flex; align-items: center; gap: 7px; margin: 0 0 9px; font-size: 12px; font-weight: 700; color: ${M}; }
-            .acctbar i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-            .acctbar span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .acctall { height: 24px; padding: 0 9px; border: 1px solid ${B}; border-radius: 99px; background: none; color: ${AT}; cursor: pointer; font-size: 11px; font-weight: 700; font-family: inherit; }
-            .alllink { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 14px; font-size: 12px; font-weight: 700; color: ${AT}; text-decoration: none; }
-            .alllink:hover { text-decoration: underline; }
-            .alllink svg { width: 10px; height: 10px; }
-            /* NC gifts waiting for a report */
-            .gift { border-radius: 12px; border: 1px solid color-mix(in srgb, ${A} 35%, ${B}); background: color-mix(in srgb, ${A} 5%, ${S}); overflow: hidden; }
-            .gmain { width: 100%; display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: none; background: none; cursor: pointer; text-align: left; color: ${T}; }
-            .gdir { width: 28px; height: 28px; flex: none; border-radius: 8px; display: grid; place-items: center; background: ${AG}; color: ${AT}; }
-            .gdir.in { background: color-mix(in srgb, ${OK} 16%, transparent); color: ${OK}; }
-            .gdir svg { width: 15px; height: 15px; }
-            .gtxt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
-            .gtxt b { font-size: 12.5px; font-weight: 700; }
-            .gtxt small { font-size: 11px; color: ${M}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .caret { flex: none; color: ${M}; font-size: 10px; }
-            .gbody { display: flex; flex-direction: column; gap: 6px; padding: 2px 10px 10px; }
-            .gi { display: flex; align-items: center; gap: 8px; font-size: 12.5px; cursor: pointer; }
-            .gi img { width: 28px; height: 28px; flex: none; border-radius: 6px; background: #fff; box-shadow: 0 0 0 1px ${B}; object-fit: contain; }
-            .gi input { margin: 0; accent-color: ${A}; }
-            .gacts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-            .gnote { font-size: 11px; color: ${M}; }
-            .gsib { margin-top: 4px; font-size: 11px; font-weight: 700; color: ${M}; }
-            .gi .gside { margin-left: auto; flex: none; font-style: normal; font-size: 10px; font-weight: 700; color: ${OK}; }
-            .gi .gside.out { color: ${NC}; }
-            .tickall { margin-left: 4px; height: 20px; padding: 0 7px; border-radius: 6px; border: 1px solid ${B}; background: ${S}; color: ${AT}; font-size: 10.5px; font-weight: 700; cursor: pointer; }
-            .gdestw { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; font-size: 11px; font-weight: 700; color: ${M}; }
-            .gdestw .gdest { height: 32px; padding: 0 8px; font-size: 12px; }
-            .undobar { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 6px 6px 6px 10px; border-radius: 9px; background: ${S2}; font-size: 12px; color: ${T}; }
-            .undobar .btn { margin-left: auto; height: 26px; }
-            /* One trade report */
-            .edhead { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-            .iconbtn { width: 30px; height: 30px; flex: none; padding: 0; border: 1px solid ${B}; border-radius: 9px; background: ${S}; color: ${T}; cursor: pointer;
-                display: grid; place-items: center; text-decoration: none; }
-            .iconbtn:hover { border-color: ${A}; color: ${AT}; }
-            .iconbtn svg { width: 13px; height: 13px; }
-            .edtitle { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .fld { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
-            .fld > span { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: ${M}; }
-            .seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 3px; margin-bottom: 12px; border-radius: 10px; background: ${S2}; }
-            .seg button { height: 28px; padding: 0 3px; border: none; border-radius: 7px; background: none; color: ${M}; cursor: pointer; font-size: 11px; font-weight: 700; white-space: nowrap; }
-            .seg button:hover { color: ${T}; }
-            .seg button.on { box-shadow: 0 1px 3px rgba(0,0,0,.12); text-decoration: none; }
-            .seg button.on.s-planned { background: ${AG}; color: ${AT}; }
-            .seg button.on.s-pending { background: color-mix(in srgb, ${NC} 16%, ${S}); color: ${NC}; }
-            .seg button.on.s-done { background: color-mix(in srgb, ${OK} 16%, ${S}); color: ${OK}; }
-            .seg button.on.s-off { background: ${S}; color: ${M}; }
-            .side { margin-bottom: 10px; padding: 10px; border-radius: 12px; border: 1px solid ${B}; background: color-mix(in srgb, ${S2} 55%, ${S}); }
-            .shd { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12.5px; font-weight: 800; }
-            .shd b { padding: 0 6px; border-radius: 99px; background: ${S}; color: ${M}; font-size: 11px; line-height: 17px; }
-            .shd b:empty { display: none; }
-            .it { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 5px; margin-bottom: 5px; border-radius: 9px; background: ${S}; box-shadow: 0 0 0 1px ${B}; }
-            .it img, .it .noimg { width: 30px; height: 30px; flex: none; border-radius: 6px; background: #fff; box-shadow: 0 0 0 1px ${B}; object-fit: contain; }
-            .it .noimg, .opt .noimg { background: ${S2}; }
-            .gico { display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 6px; background: ${AG}; color: ${AT}; }
-            .gico svg { width: 15px; height: 15px; }
-            .it .gico { width: 30px; height: 30px; }
-            .opt .gico { width: 28px; height: 28px; }
-            .quick { display: flex; gap: 6px; margin-top: 6px; }
-            .quick button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 99px; border: 1px dashed ${B}; background: ${S}; color: ${M}; cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 700; }
-            .quick button svg { width: 13px; height: 13px; }
-            .quick button:hover { border-style: solid; border-color: ${AT}; color: ${AT}; }
-            .it .nm { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: ${T}; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .it a.nm:hover { color: ${AT}; text-decoration: underline; }
-            .qty { display: inline-flex; align-items: center; flex: none; border: 1px solid ${B}; border-radius: 7px; overflow: hidden; }
-            .qty button { width: 22px; height: 22px; padding: 0; border: none; background: ${S}; color: ${M}; cursor: pointer; font-size: 14px; line-height: 1; }
-            .qty button:hover:not(:disabled) { color: ${AT}; background: ${S2}; }
-            .qty button:disabled { opacity: .35; cursor: default; }
-            .qty b { min-width: 20px; text-align: center; font-size: 12px; }
-            .rm { width: 24px; height: 24px; flex: none; padding: 0; border: none; border-radius: 6px; background: none; color: ${M}; cursor: pointer; font-size: 16px; line-height: 1; }
-            .rm:hover { color: ${RED}; background: ${S2}; }
-            .add { position: relative; }
-            .add .txt { height: 32px; font-size: 12.5px; }
-            .drop { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 4; max-height: 232px; overflow-y: auto; padding: 4px; border-radius: 10px;
-                background: ${S}; border: 1px solid ${B}; box-shadow: 0 10px 28px rgba(0,0,0,.2); }
-            .opt { width: 100%; display: flex; align-items: center; gap: 8px; padding: 5px 6px; border: none; border-radius: 7px; background: none; color: ${T}; cursor: pointer; text-align: left; font-size: 12.5px; }
-            .opt:hover, .opt.hl { background: ${S2}; }
-            .opt img, .opt .noimg { width: 28px; height: 28px; flex: none; border-radius: 6px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px ${B}; }
-            .opt > span:not(.noimg) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .edfoot { display: flex; align-items: center; gap: 8px; }
-            .edfoot .txt { width: auto; height: 30px; font-size: 12px; }
-            .del { margin-left: auto; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid transparent; background: none; color: ${M}; cursor: pointer; font-size: 12px; font-weight: 700; }
-            .del:hover, .del.sure { color: ${RED}; border-color: color-mix(in srgb, ${RED} 40%, ${B}); }
-            /* Search */
-            .sbox { position: relative; display: block; margin-bottom: 8px; }
-            .sbox svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: ${M}; pointer-events: none; }
-            .sbox .txt { padding-left: 33px; }
-            .sr { display: flex; align-items: center; gap: 9px; padding: 6px; border-radius: 10px; color: ${T}; text-decoration: none; }
-            .sr:hover { background: ${S2}; }
-            .sr img { width: 38px; height: 38px; flex: none; border-radius: 8px; background: #fff; box-shadow: 0 0 0 1px ${B}; object-fit: contain; }
-            .sr .nm { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .sr:hover .nm { color: ${AT}; }
-            .val { flex: 0 1 auto; min-width: 0; max-width: 42%; padding: 1px 7px; border-radius: 99px; background: ${AG}; color: ${AT}; font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-            .imeta .val { max-width: none; white-space: normal; line-height: 1.4; border-radius: 9px; }
-            .val:empty { display: none; }
-            .go { display: grid; flex: none; color: ${M}; }
-            .go svg { width: 10px; height: 10px; }
-            .smore { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 34px; margin: 6px 0 2px; border-radius: 10px; border: 1px solid ${B}; background: ${S2}; color: ${T}; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 700; }
-            .smore small { font-size: 11px; font-weight: 600; color: ${M}; }
-            .smore:hover:not(:disabled) { border-color: ${AT}; color: ${AT}; }
-            .smore:disabled { cursor: wait; opacity: .7; }
-            /* Pages */
-            .lnk { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; color: ${T}; text-decoration: none; }
+            /* DTI's pages */
+            .menu { position: absolute; top: 58px; right: 8px; z-index: 8; width: 280px; max-height: calc(100% - 70px); overflow-y: auto; padding: 6px; border-radius: 14px;
+                background: var(--s); border: 1px solid var(--b); box-shadow: 0 14px 36px rgb(0 0 0 / .24); animation: win-in .12s ease-out; }
+            .menu .mh { margin: 4px 8px 6px; font: var(--hw) 10.5px/1.2 var(--hf); letter-spacing: var(--htr); text-transform: var(--hcs); color: var(--m); }
+            .lnk { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border-radius: 10px; color: var(--t); text-decoration: none; }
             .lnk span { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
             .lnk b { font-size: 13px; font-weight: 700; }
-            .lnk small { font-size: 11px; color: ${M}; }
-            .lnk svg { width: 10px; height: 10px; flex: none; color: ${M}; }
-            .lnk:hover { background: ${S2}; }
-            .lnk:hover b, .lnk:hover svg { color: ${AT}; }
+            .lnk small { font-size: 11px; color: var(--m); }
+            .lnk svg { width: 10px; height: 10px; flex: none; color: var(--m); }
+            .lnk:hover { background: var(--s2); }
+            .lnk:hover b, .lnk:hover svg { color: var(--at); }
+            .mhint { margin: 6px 9px 4px; font-size: 10.5px; line-height: 1.45; color: var(--m); }
 
-            /* DTI's pages (the logo) */
-            .menu { position: absolute; top: 50px; left: 8px; z-index: 6; width: 262px; max-height: calc(100% - 60px); overflow-y: auto; padding: 5px; border-radius: 12px; background: ${S}; border: 1px solid ${B}; box-shadow: 0 12px 32px rgba(0,0,0,.22); }
-            .menu .lnk { padding: 7px 9px; }
-            .mhint { margin: 6px 9px 4px; font-size: 10.5px; line-height: 1.45; color: ${M}; }
-            .addbtn { width: 100%; height: 38px; border: none; border-radius: 10px; background: ${A}; color: ${AF}; font-size: 13.5px; font-weight: 700; cursor: pointer;
-                display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 10px; }
-            .addbtn svg { width: 13px; height: 13px; }
-            .addbtn:hover { filter: brightness(1.08); }
-            .ndel { margin-left: auto; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid transparent; background: none; color: ${M}; cursor: pointer; font-size: 12px; font-weight: 700; }
-            .ndel:hover, .ndel.sure { color: ${RED}; border-color: color-mix(in srgb, ${RED} 40%, ${B}); }
-            /* On this page */
-            .ctx { margin: 0 0 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, ${A} 40%, ${B}); background: color-mix(in srgb, ${A} 6%, ${S}); overflow: hidden; }
-            .ctxhd { width: 100%; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: none; background: none; cursor: pointer; color: ${T}; font-size: 12px; text-align: left; }
-            .ctxhd svg { width: 14px; height: 14px; flex: none; color: ${AT}; }
-            .ctxhd b { flex: none; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: ${AT}; }
-            .ctxhd span { flex: 1; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .ctxhd i { flex: none; padding: 0 6px; border-radius: 99px; background: ${A}; color: ${AF}; font-style: normal; font-size: 10.5px; font-weight: 800; line-height: 17px; }
-            .ctxhd em { flex: none; font-style: normal; font-size: 10px; color: ${M}; }
-            .ctxbody { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 10px; }
-            .ctxbody .btn.pri { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; }
-            .cline { font-size: 12px; line-height: 1.5; color: ${T}; }
-            .cline small { color: ${M}; }
-            .crow { width: 100%; display: flex; align-items: center; gap: 8px; padding: 5px 7px 5px 5px; border-radius: 9px; background: ${S}; border: 1px solid ${B}; cursor: pointer; text-align: left; color: ${T}; font: inherit; font-size: 12px; }
-            .crow:hover { border-color: ${A}; }
-            .crow img, .crow .noimg { width: 30px; height: 30px; flex: none; border-radius: 6px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px ${B}; }
-            .crow span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-            .crow em { flex: none; font-style: normal; font-size: 11px; font-weight: 700; color: ${M}; }
-            .crow em.sale { color: ${OK}; } .crow em.soon { color: ${NC}; }
-            .lnkbtn { align-self: flex-start; padding: 0; border: none; background: none; color: ${AT}; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
-            .lnkbtn:hover { text-decoration: underline; }
-            /* Search and Seeking rows open the item here */
-            .sr, .skrow { cursor: pointer; }
-            .sr:focus-visible, .skrow:focus-visible { outline-offset: -2px; }
-            .sr .go { padding: 5px; margin: -5px 0; border-radius: 6px; color: ${M}; text-decoration: none; }
-            .sr .go:hover { background: ${S}; color: ${AT}; }
-            /* One item */
-            .ihero { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
-            .ihero img, .ihero .noimg { width: 72px; height: 72px; flex: none; border-radius: 12px; background: #fff; box-shadow: 0 0 0 1px ${B}; object-fit: contain; }
-            .ihtxt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-            .ihtxt b { font-size: 14px; line-height: 1.35; }
-            .imeta { display: flex; align-items: center; gap: 6px; min-height: 18px; }
-            .iseek { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 11px; border: 1px solid #fdba74; background: #fff7ed; color: #9a3412; cursor: pointer; text-align: left; font: inherit; }
-            .iseek .skic { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 1px solid #fdba74; color: #ea580c; font-size: 15px; background: #fff; }
+            /* The page under the bar */
+            .body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: 12px; display: flex; flex-direction: column; gap: 12px;
+                scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--t) 25%, transparent) transparent; }
+            .body > * { flex: none; }
+
+            /* Cards: DTI's Home cards — a head (its chip, the title in your theme's type, a count, actions) over the content */
+            .card { background: var(--s); border: 1px solid var(--b); border-radius: var(--r); overflow: hidden; box-shadow: 0 1px 3px rgb(0 0 0 / .05); }
+            .ch { width: 100%; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 7px 10px 7px 8px; border: none; border-bottom: 1px solid var(--b);
+                background: var(--s); color: var(--t); text-align: left; }
+            button.ch { cursor: pointer; }
+            .ci { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 8px; background: var(--ag); color: var(--at); }
+            .ci svg { width: 15px; height: 15px; }
+            .ci.sk, .card.sk > .ch .ci { background: color-mix(in srgb, #f97316 16%, transparent); color: #ea580c; }
+            .ch .tot { font-size: 11.5px; font-weight: 700; color: inherit; opacity: .85; white-space: nowrap; }
+            .ct { flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                font-family: var(--hf); font-weight: var(--hw); font-size: var(--hsz); letter-spacing: var(--htr); text-transform: var(--hcs); }
+            .cn { flex: none; min-width: 22px; padding: 0 7px; border-radius: 99px; background: var(--s2); color: var(--t); font-size: 11px; font-weight: 800; line-height: 19px; text-align: center; }
+            .cn.hot { background: var(--a); color: var(--af); }
+            .ca { margin-left: auto; flex: none; display: flex; align-items: center; gap: 6px; }
+            .cb { padding: 12px; }
+            .cb.tight { padding: 8px; }
+            .solid .ch { background: var(--nv); color: var(--nvfg); border-bottom-color: transparent; }
+            .solid .ci, .solid .cn, .solid .card.sk > .ch .ci { background: var(--nvh); color: var(--nvfg); }
+            .solid .cn.hot { background: var(--nvfg); color: var(--gemfg); }
+            .solid .ch .ibtn, .solid .ch .alink { color: var(--nvfg); }
+            .solid .ch .ibtn:hover { background: var(--nvh); border-color: var(--nvl); }
+            .card.fold .ch { border-bottom: none; }
+            .sub { display: flex; align-items: center; gap: 6px; margin: 14px 2px 7px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--m); }
+            .sub:first-child { margin-top: 0; }
+            .sub b { padding: 0 6px; border-radius: 99px; background: var(--s2); color: var(--t); letter-spacing: 0; line-height: 17px; }
+
+            /* Controls (DTI's: 10px corners) */
+            .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 13px; border-radius: var(--r2); border: 1px solid var(--b);
+                background: var(--s); color: var(--t); cursor: pointer; font-size: 12.5px; font-weight: 700; white-space: nowrap; text-decoration: none; }
+            .btn svg { width: 12px; height: 12px; flex: none; }
+            .btn:hover:not(:disabled) { border-color: var(--a); color: var(--at); }
+            .btn.pri { border-color: var(--a); background: var(--a); color: var(--af); box-shadow: 0 2px 8px color-mix(in srgb, var(--a) 30%, transparent); }
+            .btn.pri:hover:not(:disabled) { filter: brightness(1.07); color: var(--af); }
+            .btn.sm { height: 28px; padding: 0 10px; font-size: 11.5px; }
+            .btn.wide { width: 100%; height: 40px; font-size: 13.5px; }
+            .btn:disabled { opacity: .55; cursor: default; }
+            .btn.done { border-color: var(--ok); color: var(--ok); }
+            .ibtn { width: 30px; height: 30px; flex: none; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 9px; background: none; color: var(--m); cursor: pointer; text-decoration: none; }
+            .ibtn:hover { background: var(--s2); border-color: var(--b); color: var(--at); }
+            .ibtn svg { width: 14px; height: 14px; }
+            .ibtn.on { background: var(--a); border-color: var(--a); color: var(--af); }
+            .alink { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: var(--at); text-decoration: none; white-space: nowrap; background: none; border: none; padding: 0; cursor: pointer; }
+            .alink:hover { text-decoration: underline; }
+            .alink svg { width: 10px; height: 10px; }
+            .inp { display: block; width: 100%; height: 38px; margin: 0; padding: 0 12px; border-radius: var(--r2); border: 1px solid var(--b); background: var(--s); color: var(--t); font-size: 13px; outline: none; }
+            textarea.inp { height: auto; min-height: 70px; padding: 9px 12px; resize: vertical; line-height: 1.45; }
+            .inp:focus { border-color: var(--a); box-shadow: 0 0 0 3px var(--ag); }
+            .inp::placeholder { color: var(--m); opacity: .85; }
+            .sbox { position: relative; display: block; }
+            .sbox > svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--m); pointer-events: none; }
+            .sbox .inp { padding-left: 37px; }
+            .seg { display: flex; gap: 3px; padding: 3px; border-radius: calc(var(--r2) + 2px); background: var(--s2); border: 1px solid var(--b); }
+            .seg button { flex: 1; min-width: 0; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 8px; border: none; border-radius: calc(var(--r2) - 1px);
+                background: none; color: var(--m); cursor: pointer; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+            .seg button:hover { color: var(--t); }
+            .seg button.on { background: var(--a); color: var(--af); box-shadow: 0 1px 4px color-mix(in srgb, var(--a) 35%, transparent); }
+            .seg button i { font-style: normal; font-size: 10.5px; font-weight: 800; padding: 0 6px; border-radius: 99px; background: color-mix(in srgb, var(--t) 8%, transparent); line-height: 17px; }
+            .seg button.on i { background: rgb(255 255 255 / .24); }
+            .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+            .chip { height: 28px; padding: 0 11px; border-radius: 99px; border: 1px solid var(--b); background: var(--s); color: var(--t); cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; }
+            .chip:hover { border-color: var(--a); color: var(--at); }
+            .chip.on { background: var(--ag); border-color: var(--a); color: var(--at); font-weight: 700; }
+            .sel { height: 32px; max-width: 100%; padding: 0 8px; border-radius: 9px; border: 1px solid var(--b); background: var(--s); color: var(--t); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+            .msg { padding: 14px 10px; font-size: 12.5px; color: var(--m); text-align: center; }
+            .msg.err { color: #e5484d; }
+            .empty { padding: 22px 16px 18px; text-align: center; color: var(--m); font-size: 12.5px; line-height: 1.5; }
+            .empty svg { display: block; width: 26px; height: 26px; margin: 0 auto 8px; opacity: .55; }
+            .empty b { display: block; color: var(--t); font-size: 13.5px; margin-bottom: 2px; }
+            .hint { margin: 0 2px; font-size: 11.5px; line-height: 1.5; color: var(--m); }
+            .hint a, .hint button { color: var(--at); font-weight: 700; }
+            .noimg { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 7px; background: var(--s2); box-shadow: 0 0 0 1px var(--b); }
+            .noimg::after { content: '?'; font-size: 12px; font-weight: 800; color: var(--m); }
+            .tag { flex: none; padding: 0 5px; border-radius: 5px; font-size: 9.5px; font-weight: 800; font-style: normal; line-height: 16px; background: color-mix(in srgb, var(--nc) 16%, transparent); color: var(--nc); }
+            .tag.typed { background: var(--s2); color: var(--m); }
+            .acctbar { display: flex; align-items: center; gap: 7px; padding: 0 2px; font-size: 12px; font-weight: 700; color: var(--m); }
+            .acctbar i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+            .acctbar span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .acctall { height: 26px; padding: 0 10px; border: 1px solid var(--b); border-radius: 99px; background: var(--s); color: var(--at); cursor: pointer; font-size: 11px; font-weight: 700; }
+
+            /* Item tiles: DTI's — the picture on white, the name; NC and the value; your marks */
+            .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(94px, 1fr)); gap: 8px; }
+            .strip { display: grid; grid-auto-flow: column; grid-auto-columns: 94px; gap: 8px; overflow-x: auto; padding: 4px 2px 6px; margin: -4px -2px -2px; scrollbar-width: thin; }   /* (room inside it for a tile lifted on hover — a row that scrolls clips: its tops were cut off) */
+            .tile { position: relative; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 6px 8px; border-radius: calc(var(--r) - 3px);
+                border: 1px solid var(--b); background: var(--s); color: var(--t); cursor: pointer; text-align: center; font-size: 11.5px;
+                transition: transform .12s, box-shadow .12s, border-color .12s; }
+            .tile:hover { border-color: var(--a); transform: translateY(-2px); box-shadow: 0 6px 16px rgb(0 0 0 / .1); }
+            .tile .pic { width: 64px; height: 64px; flex: none; border-radius: 9px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px var(--b); }
+            .tile .pic.none { display: grid; place-items: center; }
+            .tile .pic.none::after { content: '?'; font-weight: 800; color: #9ca3af; }
+            .tile .nm { width: 100%; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+            .tile .v, .tile .sub { max-width: 100%; padding: 0 7px; border-radius: 99px; background: var(--ag); color: var(--at); font-size: 10.5px; font-weight: 700; line-height: 18px;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .tile .sub { background: var(--s2); color: var(--m); }
+            .tile .sub.sale { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+            .tile[data-urgency="week"] { background: color-mix(in srgb, #f59e0b 7%, var(--s)); border-color: color-mix(in srgb, #f59e0b 40%, var(--b)); }
+            .tile[data-urgency="soon"] { background: color-mix(in srgb, #f4511e 9%, var(--s)); border-color: color-mix(in srgb, #f4511e 48%, var(--b)); }
+            .tile[data-urgency="day"] { background: color-mix(in srgb, #ef4444 12%, var(--s)); border-color: color-mix(in srgb, #ef4444 60%, var(--b)); }
+            .tile .sub.week { color: #b45309; background: color-mix(in srgb, #f59e0b 14%, var(--s)); }
+            .dark .tile .sub.week { color: #fbbf24; }
+            .tile .sub.soon { color: #fff; background: #f4511e; }
+            .tile .sub.day { color: #fff; background: #ef4444; }
+            .tile .kd { position: absolute; top: 5px; left: 5px; padding: 0 5px; border-radius: 5px; font-style: normal; font-size: 9px; font-weight: 800; line-height: 15px;
+                background: color-mix(in srgb, var(--nc) 18%, var(--s)); color: var(--nc); box-shadow: 0 0 0 1px color-mix(in srgb, var(--nc) 30%, transparent); }
+            .tile .kd.pb { background: color-mix(in srgb, #8b5cf6 16%, var(--s)); color: #7c3aed; box-shadow: none; }
+            .tile .qt { position: absolute; top: 52px; right: 12px; padding: 0 5px; border-radius: 99px; font-style: normal; font-size: 10px; font-weight: 800; line-height: 16px; background: var(--t); color: var(--s); }
+            .mk { position: absolute; top: 5px; right: 5px; display: flex; gap: 3px; }
+            .mk i { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; color: #fff; font-style: normal; font: 800 10px/1 system-ui, sans-serif; box-shadow: 0 0 0 1.5px var(--s); }
+            .mk i svg { width: 12px; height: 12px; }
+            .mk .sk { background: #f97316; } .mk .ow { background: var(--ok); } .mk .wa { background: #db2777; }
+            .tile .skt { position: absolute; top: 50px; left: 12px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; border: 1px solid #fdba74;
+                background: #fff; color: #ea580c; opacity: 0; transition: opacity .12s; }
+            .tile .skt svg { width: 13px; height: 13px; }
+            .tile:hover .skt, .tile:focus-visible .skt, .tile .skt.on { opacity: 1; }
+            .tile .skt.on { background: #f97316; border-color: #f97316; color: #fff; }
+            .tile.sk-tile { pointer-events: none; }
+            .tile.sk-tile .pic, .tile.sk-tile .nm { background: linear-gradient(90deg, var(--s2), color-mix(in srgb, var(--s2) 40%, var(--s)), var(--s2)); background-size: 200% 100%; animation: shimmer 1.1s linear infinite; color: transparent; border-radius: 6px; box-shadow: none; }
+            .tile.sk-tile .nm { height: 14px; width: 80%; }
+            @keyframes shimmer { to { background-position: -200% 0; } }
+            .more { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 36px; border-radius: var(--r2); border: 1px dashed var(--b); background: none; color: var(--m); cursor: pointer; font-size: 12.5px; font-weight: 700; }
+            .more:hover:not(:disabled) { border-style: solid; border-color: var(--a); color: var(--at); }
+            .more small { font-weight: 600; opacity: .8; }
+
+            /* Home */
+            .hero { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+            .hero-t { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+            .hero-t b { font-family: var(--hf); font-weight: var(--hw); font-size: 20px; line-height: 1.15; letter-spacing: var(--btr); }
+            .hero-t b span { color: var(--at); }
+            .hero-t small { font-size: 12px; color: var(--m); }
+            .hrow { display: flex; gap: 8px; }
+            .hrow .sbox { flex: 1; min-width: 0; }
+            .glance { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 8px; }
+            .stat { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 10px 11px; border-radius: calc(var(--r) - 3px); border: 1px solid var(--b);
+                background: var(--s); color: var(--t); cursor: pointer; text-align: left; transition: border-color .12s, transform .12s; }
+            .stat:hover { border-color: var(--a); transform: translateY(-1px); }
+            .stat .sn { display: flex; align-items: center; gap: 6px; font-size: 21px; font-weight: 800; line-height: 1.2; color: var(--at); }
+            .stat .sn svg { width: 15px; height: 15px; opacity: .8; }
+            .stat.zero .sn { color: var(--m); }
+            .stat .sl { font-size: 11.5px; font-weight: 700; }
+            .stat small { font-size: 10.5px; color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+            .stat small.hot { color: #ea580c; font-weight: 700; }
+            .here .hl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 700; }
+            .here .cb { display: flex; flex-direction: column; gap: 10px; }
+            .hline { font-size: 12.5px; line-height: 1.5; }
+            .hline small { color: var(--m); }
+            .hline .tot { font-weight: 800; color: var(--at); }
+            .hacts { display: flex; flex-wrap: wrap; gap: 8px; }
+
+            /* Rows (lists in a card) */
+            .rows { display: flex; flex-direction: column; }
+            .row { position: relative; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: none; background: none; color: var(--t); text-align: left; width: 100%; }
+            .rows > .row + .row, .rows > .row + .trow, .rows > .trow + .row, .rows > .trow + .trow, .rows > .gift + .gift { border-top: 1px solid var(--b); }
+            .row.go { cursor: pointer; }
+            .row.go:hover { background: color-mix(in srgb, var(--s2) 70%, transparent); }
+            .row > img, .row > .noimg { width: 40px; height: 40px; flex: none; border-radius: 9px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px var(--b); }
+            .rt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+            .rt b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .rt small { font-size: 11.5px; color: var(--m); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .rt .v { align-self: flex-start; padding: 0 7px; border-radius: 99px; background: var(--ag); color: var(--at); font-size: 10.5px; font-weight: 700; line-height: 18px; }
+            .row .new { flex: none; padding: 0 8px; border-radius: 99px; background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); font-size: 10.5px; font-weight: 800; line-height: 20px; white-space: nowrap; }
+            .rm { width: 28px; height: 28px; flex: none; padding: 0; border: none; border-radius: 8px; background: none; color: var(--m); cursor: pointer; font-size: 17px; line-height: 1; }
+            .rm:hover { color: #e5484d; background: var(--s2); }
+            .thumbs { display: flex; align-items: center; gap: 4px; min-height: 28px; }
+            .thumbs img, .thumbs .noimg, .thumbs .gico { width: 28px; height: 28px; flex: none; border-radius: 7px; background: #fff; box-shadow: 0 0 0 1px var(--b); object-fit: contain; }
+            .thumbs .n { font-size: 11px; font-weight: 700; color: var(--m); }
+            .thumbs .none { font-size: 11px; color: var(--m); font-style: italic; }
+            .thumbs .sw { display: grid; flex: none; margin: 0 3px; color: var(--m); }
+            .thumbs .sw svg { width: 14px; height: 14px; }
+            .gico { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--ag) !important; color: var(--at); }
+            .gico svg { width: 15px; height: 15px; }
+
+            /* Trades */
+            .trow { position: relative; display: flex; align-items: flex-start; gap: 8px; padding: 10px 10px 10px 12px; }
+            .trow:hover { background: color-mix(in srgb, var(--s2) 60%, transparent); }
+            .tmain { flex: 1; min-width: 0; padding: 0; border: none; background: none; text-align: left; cursor: pointer; color: var(--t); display: flex; flex-direction: column; gap: 7px; }
+            .ttop { display: flex; align-items: baseline; gap: 6px; }
+            .ttop b { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .when { flex: none; font-size: 11px; color: var(--m); }
+            .chip.st { flex: none; height: 24px; padding: 0 8px; border: none; border-radius: 7px; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; display: inline-flex; align-items: center; gap: 4px; }
+            .chip.st i { font-style: normal; font-size: 8px; opacity: .7; }
+            .s-planned { background: var(--ag) !important; color: var(--at) !important; }
+            .s-pending { background: color-mix(in srgb, var(--nc) 16%, transparent) !important; color: var(--nc) !important; }
+            .s-done { background: color-mix(in srgb, var(--ok) 16%, transparent) !important; color: var(--ok) !important; }
+            .s-off { background: var(--s2) !important; color: var(--m) !important; text-decoration: line-through; }
+            .stmenu { position: absolute; right: 10px; top: 38px; z-index: 5; min-width: 160px; padding: 5px; border-radius: 12px; background: var(--s); border: 1px solid var(--b);
+                box-shadow: 0 12px 30px rgb(0 0 0 / .2); display: flex; flex-direction: column; gap: 1px; }
+            .stmenu button { display: flex; align-items: center; gap: 9px; height: 31px; padding: 0 9px; border: none; border-radius: 8px; background: none; color: var(--t); cursor: pointer; font-size: 12.5px; font-weight: 600; text-align: left; }
+            .stmenu button:hover { background: var(--s2); }
+            .stmenu button.on { color: var(--at); font-weight: 800; }
+            .dot { width: 8px; height: 8px; flex: none; border-radius: 50%; }
+            .dot.s-planned { background: var(--a) !important; } .dot.s-pending { background: var(--nc) !important; } .dot.s-done { background: var(--ok) !important; } .dot.s-off { background: var(--m) !important; }
+            .gift { overflow: hidden; }
+            .gmain { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: none; background: none; cursor: pointer; text-align: left; color: var(--t); }
+            .gmain:hover { background: color-mix(in srgb, var(--s2) 60%, transparent); }
+            .gdir { width: 32px; height: 32px; flex: none; border-radius: 9px; display: grid; place-items: center; background: var(--ag); color: var(--at); }
+            .gdir.in { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+            .gdir svg { width: 16px; height: 16px; }
+            .caret { flex: none; color: var(--m); font-size: 10px; }
+            .gbody { display: flex; flex-direction: column; gap: 7px; padding: 0 12px 12px 54px; }
+            .gi { display: flex; align-items: center; gap: 8px; font-size: 12.5px; cursor: pointer; }
+            .gi img, .gi .noimg { width: 28px; height: 28px; flex: none; border-radius: 6px; background: #fff; box-shadow: 0 0 0 1px var(--b); object-fit: contain; }
+            .gi input { margin: 0; accent-color: var(--a); }
+            .gi .gside { margin-left: auto; flex: none; font-style: normal; font-size: 10px; font-weight: 700; color: var(--ok); }
+            .gi .gside.out { color: var(--nc); }
+            .gsib { margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--m); }
+            .tickall { margin-left: 4px; height: 22px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--b); background: var(--s); color: var(--at); font-size: 10.5px; font-weight: 700; cursor: pointer; }
+            .gdestw { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--m); }
+            .gacts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+            .gnote { font-size: 11px; color: var(--m); }
+            .gst { font-style: normal; font-size: 10px; font-weight: 800; padding: 1px 7px; border-radius: 99px; background: color-mix(in srgb, var(--a) 14%, transparent); color: var(--at); }
+            .gst.part { background: color-mix(in srgb, var(--nc) 16%, transparent); color: var(--nc); }
+            .gst.done { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+            .gst.gift { background: color-mix(in srgb, var(--m) 16%, transparent); color: var(--m); }
+            .gi.done { cursor: default; color: var(--m); }
+            .gdel { margin-left: auto; }
+            .undobar, .seekgot { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; border-radius: var(--r2); font-size: 12px; font-weight: 600; }
+            .undobar { background: var(--s); border: 1px solid var(--b); }
+            .undobar span, .seekgot span { flex: 1; }
+            .seekgot { background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; }
+            .seekoff { flex: none; height: 28px; padding: 0 11px; border-radius: 8px; border: none; background: #f97316; color: #fff; font-size: 11.5px; font-weight: 800; cursor: pointer; }
+
+            /* A page's own bar (a trade, a note, an item): ‹, its title, ↗ */
+            .pbar { display: flex; align-items: center; gap: 8px; }
+            .pbar .ttl { flex: 1; min-width: 0; font-family: var(--hf); font-weight: var(--hw); font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .pbar .ibtn { border-color: var(--b); background: var(--s); color: var(--t); }
+            .pbar .sp { flex: 1; }
+            .crumb { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 9px; border-radius: var(--r2); border: 1px solid var(--b); background: var(--s); color: var(--t); cursor: pointer; font-size: 12.5px; font-weight: 700; }
+            .crumb svg { width: 13px; height: 13px; }
+            .crumb:hover { border-color: var(--a); color: var(--at); }
+            .fld { display: flex; flex-direction: column; gap: 5px; }
+            .fld > span { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--m); }
+            .fields { display: flex; flex-direction: column; gap: 12px; }
+            .seg.st button { font-size: 11.5px; }
+            .seg.st button.on.s-planned { background: var(--a) !important; color: var(--af) !important; }
+            .seg.st button.on.s-pending { background: var(--nc) !important; color: #fff !important; }
+            .seg.st button.on.s-done { background: var(--ok) !important; color: #fff !important; }
+            .seg.st button.on.s-off { background: var(--m) !important; color: var(--s) !important; text-decoration: none; }
+            .seg.st button:not(.on) { background: none !important; color: var(--m) !important; text-decoration: none; }
+            .it { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 8px; }
+            .rows > .it + .it { border-top: 1px solid var(--b); }
+            .it img, .it .noimg, .it .gico { width: 32px; height: 32px; flex: none; border-radius: 7px; background: #fff; box-shadow: 0 0 0 1px var(--b); object-fit: contain; }
+            .it .nm { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--t); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; border: none; padding: 0; text-align: left; cursor: pointer; }
+            .it .nm:hover { color: var(--at); text-decoration: underline; }
+            .it span.nm { cursor: default; } .it span.nm:hover { color: var(--t); text-decoration: none; }
+            .qty { display: inline-flex; align-items: center; flex: none; border: 1px solid var(--b); border-radius: 8px; overflow: hidden; background: var(--s); }
+            .qty button { width: 24px; height: 24px; padding: 0; border: none; background: none; color: var(--m); cursor: pointer; font-size: 15px; line-height: 1; }
+            .qty button:hover:not(:disabled) { color: var(--at); background: var(--s2); }
+            .qty button:disabled { opacity: .35; cursor: default; }
+            .qty b { min-width: 22px; text-align: center; font-size: 12px; }
+            .add { position: relative; }
+            .add .inp { height: 36px; font-size: 12.5px; }
+            .drop { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 6; max-height: 248px; overflow-y: auto; padding: 4px; border-radius: 12px;
+                background: var(--s); border: 1px solid var(--b); box-shadow: 0 12px 30px rgb(0 0 0 / .22); }
+            .opt { width: 100%; display: flex; align-items: center; gap: 8px; padding: 5px 7px; border: none; border-radius: 8px; background: none; color: var(--t); cursor: pointer; text-align: left; font-size: 12.5px; }
+            .opt:hover, .opt.hl { background: var(--s2); }
+            .opt img, .opt .noimg, .opt .gico { width: 30px; height: 30px; flex: none; border-radius: 7px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px var(--b); }
+            .opt > span:not(.noimg):not(.gico) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .quick { display: flex; flex-wrap: wrap; gap: 6px; }
+            .quick button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 99px; border: 1px dashed var(--b); background: var(--s); color: var(--m); cursor: pointer; font-size: 11.5px; font-weight: 700; }
+            .quick button svg { width: 13px; height: 13px; }
+            .quick button:hover { border-style: solid; border-color: var(--at); color: var(--at); }
+            .it .iv { flex: none; padding: 0 7px; border-radius: 99px; background: var(--ag); color: var(--at); font-size: 10.5px; font-weight: 700; line-height: 18px; white-space: nowrap; }
+            .tot { font-size: 12px; color: var(--m); }
+            .tot b { color: var(--t); }
+            .bal { display: flex; flex-direction: column; gap: 2px; padding: 11px 14px; border-radius: var(--r); border: 1px solid var(--b); background: var(--s); }
+            .bal b { font-size: 13.5px; } .bal small { font-size: 11.5px; color: var(--m); }
+            .bal.up { border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: color-mix(in srgb, var(--ok) 9%, var(--s)); }
+            .bal.down { border-color: color-mix(in srgb, var(--nc) 45%, transparent); background: color-mix(in srgb, var(--nc) 9%, var(--s)); }
+            .hrow > .btn.wide { flex: 1; width: auto; }
+            .edfoot { display: flex; align-items: center; gap: 8px; }
+            .edfoot .inp { width: auto; height: 32px; font-size: 12px; }
+            .del { margin-left: auto; height: 32px; padding: 0 11px; border-radius: 9px; border: 1px solid transparent; background: none; color: var(--m); cursor: pointer; font-size: 12px; font-weight: 700; }
+            .del:hover, .del.sure { color: #e5484d; border-color: color-mix(in srgb, #e5484d 40%, var(--b)); }
+            .saved { flex: 1; font-size: 11.5px; color: var(--m); }
+
+            /* One item: its picture on a pet (DTI's layers), what it is, your lists, who's trading it, Seeking, a trade, a note */
+            .ihero { display: grid; grid-template-columns: minmax(150px, 210px) 1fr; gap: 14px; padding: 12px; }
+            @container win (max-width: 500px) { .ihero { grid-template-columns: 1fr; } .stage { max-width: 260px; justify-self: center; width: 100%; } }
+            .stagew { display: flex; flex-direction: column; gap: 7px; }
+            .stage { position: relative; aspect-ratio: 1; border-radius: 12px; background: #fff; overflow: hidden; box-shadow: inset 0 0 0 1px var(--b); }
+            .stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+            .stage img.thumb { inset: 32%; width: 36%; height: 36%; }
+            .stage .snote { position: absolute; left: 8px; right: 8px; bottom: 8px; padding: 4px 8px; border-radius: 8px; background: rgb(0 0 0 / .62); color: #fff; font-size: 11px; font-weight: 600; text-align: center; }
+            .stage .anim { position: absolute; left: 8px; top: 8px; padding: 0 8px; border-radius: 99px; background: rgb(0 0 0 / .55); color: #fff; font-size: 10px; font-weight: 700; line-height: 18px; }
+            .stage.busy::after { content: ''; position: absolute; right: 10px; top: 10px; width: 16px; height: 16px; border-radius: 50%; border: 2.5px solid rgb(0 0 0 / .12); border-top-color: var(--a); animation: spin .8s linear infinite; }
+            @keyframes spin { to { transform: rotate(360deg); } }
+            .stagew .sel { width: 100%; }
+            .iinfo { min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+            .iname { font-family: var(--hf); font-weight: var(--hw); font-size: 17px; line-height: 1.25; letter-spacing: var(--btr); word-break: break-word; }
+            .imeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11.5px; color: var(--m); }
+            .imeta .kind { padding: 0 7px; border-radius: 6px; font-size: 10.5px; font-weight: 800; line-height: 20px; background: var(--s2); color: var(--t); }
+            .imeta .kind.nc { background: color-mix(in srgb, var(--nc) 16%, transparent); color: var(--nc); }
+            .imeta .kind.pb { background: color-mix(in srgb, #8b5cf6 16%, transparent); color: #7c3aed; }
+            .ival { align-self: flex-start; padding: 4px 12px; border-radius: 99px; background: var(--ag); color: var(--at); font-size: 13px; font-weight: 800; line-height: 1.35; }
+            .ival.wait { opacity: .5; font-weight: 600; }
+            .idesc { font-size: 11.5px; line-height: 1.5; color: var(--m); font-style: italic; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+            .ilinks { display: flex; flex-wrap: wrap; gap: 5px; }
+            .ilinks a, .ilinks button { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 9px; border-radius: 99px; border: 1px solid var(--b); background: var(--s); color: var(--t);
+                font-size: 11px; font-weight: 700; text-decoration: none; cursor: pointer; }
+            .ilinks a:hover, .ilinks button:hover { border-color: var(--a); color: var(--at); }
+            .ilinks svg { width: 10px; height: 10px; }
+            .iseek { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; border: 1px solid #fdba74; background: #fff7ed; color: #9a3412; cursor: pointer; text-align: left; }
+            .iseek .skic { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 1px solid #fdba74; color: #ea580c; background: #fff; }
+            .iseek .skic svg { width: 15px; height: 15px; }
             .iseek > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; line-height: 1.35; }
             .iseek b { font-size: 12.5px; } .iseek small { font-size: 11px; opacity: .85; }
             .iseek .sw { position: relative; flex: none; width: 30px; height: 18px; border-radius: 99px; background: #fed7aa; }
-            .iseek .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .15s; }
+            .iseek .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .3); transition: transform .15s; }
             .iseek.on { background: #f97316; border-color: #f97316; color: #fff; }
             .iseek.on .skic { color: #f97316; border-color: #fff; }
-            .iseek.on .sw { background: rgba(255,255,255,.45); } .iseek.on .sw::after { transform: translateX(12px); }
-            .ilists { display: flex; flex-direction: column; gap: 4px; }
-            .lgh { margin: 3px 2px 1px; font-size: 11px; font-weight: 700; color: ${M}; }
-            .lrow { display: flex; align-items: center; gap: 8px; padding: 4px 5px 4px 10px; border-radius: 9px; border: 1px solid ${B}; background: ${S}; font-size: 12.5px; }
+            .iseek.on .sw { background: rgb(255 255 255 / .45); } .iseek.on .sw::after { transform: translateX(12px); }
+            .itr { display: flex; gap: 6px; }
+            .itr button { flex: 1; }
+            .ilists { display: flex; flex-direction: column; gap: 5px; }
+            .lgh { margin: 6px 2px 2px; font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--m); }
+            .lgh:first-child { margin-top: 0; }
+            .lrow { display: flex; align-items: center; gap: 8px; padding: 4px 5px 4px 11px; border-radius: 10px; border: 1px solid var(--b); background: var(--s); font-size: 12.5px; }
             .lrow > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-            .lrow.has { border-color: color-mix(in srgb, ${A} 45%, ${B}); background: color-mix(in srgb, ${A} 5%, ${S}); }
-            .lrow.changed { box-shadow: 0 0 0 2px ${AG}; }
-            .lfoot { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
-            .lmsg { flex: 1; font-size: 11.5px; font-weight: 700; color: ${OK}; } .lmsg.err { color: ${RED}; }
-            .itrades { display: flex; flex-direction: column; gap: 5px; }
-            .itr { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
-            .itr > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-            .itr.new > span { color: ${M}; }
-            .itr .btn { height: 26px; padding: 0 9px; font-size: 11.5px; }
-            .itr .btn.done { border-color: ${OK}; color: ${OK}; }
-            .inotef { margin-top: 14px; }
-            /* Tokens */
-            .seg3, .seg4 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; margin-bottom: 9px; border-radius: 10px; background: ${S2}; }
-            .seg4 { grid-template-columns: repeat(4, 1fr); }
-            .seg3 button, .seg4 button { height: 29px; padding: 0 4px; border: none; border-radius: 7px; background: none; color: ${M}; cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
-            .seg3 button i, .seg4 button i { font-style: normal; font-size: 10.5px; opacity: .75; }
-            .seg3 button:hover, .seg4 button:hover { color: ${T}; }
-            .seg3 button.on, .seg4 button.on { background: ${S}; color: ${AT}; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
-            .tkrow { border-radius: 11px; border: 1px solid ${B}; background: ${S}; overflow: hidden; }
-            .tkrow.open { border-color: ${A}; }
-            .tkmain { width: 100%; display: flex; align-items: center; gap: 9px; padding: 6px 8px 6px 6px; border: none; background: none; cursor: pointer; text-align: left; color: ${T}; font: inherit; }
-            .tkmain img, .tkmain .noimg { width: 38px; height: 38px; flex: none; border-radius: 8px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px ${B}; }
-            .tktxt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
-            .tktxt b { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .tktxt small { font-size: 11px; color: ${M}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .tkmarks { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; max-width: 120px; }
-            .tkmarks i { font-style: normal; padding: 0 6px; border-radius: 99px; font-size: 9.5px; font-weight: 800; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-            .tkmarks .av { background: ${OK}; color: #fff; text-transform: uppercase; letter-spacing: .03em; }
-            .tkmarks .ow { background: ${AG}; color: ${AT}; }
-            .tkmarks .wa { background: color-mix(in srgb, #ec4899 14%, transparent); color: #db2777; }
-            .tkmarks .ll { border: 1px solid var(--lc); color: ${T}; background: color-mix(in srgb, var(--lc) 12%, transparent); }
-            .tkedit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px 10px; border-top: 1px solid ${B}; background: color-mix(in srgb, ${S2} 50%, ${S}); }
-            .tkedit.solo { border: 1px solid ${B}; border-radius: 11px; }
-            .tkstep { display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 0 2px 0 10px; border-radius: 99px; border: 1px solid ${B}; background: ${S}; }
-            .tkstep span { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: ${M}; margin-right: 4px; }
-            .tkstep button { width: 24px; height: 24px; padding: 0; border: none; border-radius: 50%; background: none; color: ${M}; cursor: pointer; font-size: 15px; line-height: 1; }
-            .tkstep button:hover:not(:disabled) { background: ${S2}; color: ${AT}; }
+            .lrow.has { border-color: color-mix(in srgb, var(--a) 45%, var(--b)); background: color-mix(in srgb, var(--a) 5%, var(--s)); }
+            .lrow.changed { box-shadow: 0 0 0 2px var(--ag); }
+            .lfoot { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+            .lmsg { flex: 1; font-size: 11.5px; font-weight: 700; color: var(--ok); } .lmsg.err { color: #e5484d; }
+            .trd { display: flex; flex-direction: column; }
+            .trd .row { padding: 8px 2px; }
+            .trd .row + .row { border-top: 1px solid var(--b); }
+            .trd .who { font-weight: 700; font-size: 12.5px; color: var(--t); text-decoration: none; }
+            .trd .who:hover { color: var(--at); text-decoration: underline; }
+            .trd .act { flex: none; font-size: 11px; color: var(--m); }
+            .trd .lists { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+            .trd .lists a { padding: 0 7px; border-radius: 99px; background: var(--s2); color: var(--m); font-size: 10.5px; font-weight: 700; line-height: 18px; text-decoration: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .trd .lists a:hover { color: var(--at); }
+            .trd .me { padding: 0 6px; border-radius: 99px; background: var(--ag); color: var(--at); font-size: 10px; font-weight: 800; line-height: 17px; }
+            .trd .nf { padding: 0 6px; border-radius: 99px; background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); font-size: 10px; font-weight: 800; line-height: 17px; }
+            .trd .row.avoid { opacity: .5; }
+            .trd .av { padding: 0 6px; border-radius: 99px; background: color-mix(in srgb, #e5484d 13%, transparent); color: #e5484d; font-size: 10px; font-weight: 800; line-height: 17px; }
+
+            /* Tokens: a grid; one opens out under its row */
+            .tkx { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-radius: calc(var(--r) - 3px); border: 1px solid var(--a); background: var(--s); box-shadow: 0 0 0 3px var(--ag); }
+            .tkx .tkn { flex-basis: 100%; display: flex; align-items: baseline; gap: 8px; }
+            .tkx .tkn b { font-size: 13px; }
+            .tkx .tkn small { font-size: 11px; color: var(--m); }
+            .tkx .tkn button { margin-left: auto; }
+            .tile .tkm { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; }
+            .tile .tkm i { font-style: normal; padding: 0 6px; border-radius: 99px; font-size: 9.5px; font-weight: 800; line-height: 16px; white-space: nowrap; }
+            .tkm .av { background: var(--ok); color: #fff; text-transform: uppercase; letter-spacing: .03em; }
+            .tkm .ow { background: var(--ag); color: var(--at); }
+            .tkm .wa { background: color-mix(in srgb, #ec4899 14%, transparent); color: #db2777; }
+            .tkm .uf { background: #0d9488; color: #fff; }
+            .tkm .ll { border: 1px solid var(--lc); color: var(--t); background: color-mix(in srgb, var(--lc) 12%, transparent); max-width: 84px; overflow: hidden; text-overflow: ellipsis; }
+            .tile.open { border-color: var(--a); box-shadow: 0 0 0 3px var(--ag); }
+            .tkedit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+            .tkstep { display: inline-flex; align-items: center; gap: 2px; height: 32px; padding: 0 2px 0 11px; border-radius: 99px; border: 1px solid var(--b); background: var(--s); }
+            .tkstep span { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--m); margin-right: 4px; }
+            .tkstep button { width: 26px; height: 26px; padding: 0; border: none; border-radius: 50%; background: none; color: var(--m); cursor: pointer; font-size: 16px; line-height: 1; }
+            .tkstep button:hover:not(:disabled) { background: var(--s2); color: var(--at); }
             .tkstep button:disabled { opacity: .35; cursor: default; }
-            .tkstep b { min-width: 18px; text-align: center; font-size: 12.5px; }
-            .tklist { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: ${M}; }
-            .tklist select { height: 30px; max-width: 150px; padding: 0 6px; border-radius: 8px; border: 1px solid ${B}; background: ${S}; color: ${T}; font: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
-            .tkfrom { flex-basis: 100%; font-size: 10.5px; color: ${M}; }
-            .tkmarks .uf { background: #0d9488; color: #fff; letter-spacing: .03em; }
-            .tkuft { height: 30px; padding: 0 12px; border-radius: 99px; border: 1px dashed #0d9488; background: ${S}; color: #0d9488; cursor: pointer; font: inherit; font-size: 11px; font-weight: 800; letter-spacing: .04em; }
+            .tkstep b { min-width: 18px; text-align: center; font-size: 13px; }
+            .tklist { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--m); }
+            .tkuft { height: 32px; padding: 0 12px; border-radius: 99px; border: 1px dashed #0d9488; background: var(--s); color: #0d9488; cursor: pointer; font-size: 11px; font-weight: 800; letter-spacing: .04em; }
             .tkuft.on { border-style: solid; background: #0d9488; color: #fff; }
+            .tkfrom { flex-basis: 100%; font-size: 10.5px; color: var(--m); }
+            .tknote { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--r2); font-size: 11.5px; line-height: 1.4; color: var(--m);
+                background: color-mix(in srgb, var(--ok) 8%, var(--s)); border: 1px solid color-mix(in srgb, var(--ok) 28%, var(--b)); }
+            .tknote span { flex: 1; } .tknote a { color: var(--at); font-weight: 700; }
             .ldot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-            .tknote { display: flex; align-items: center; gap: 8px; margin: 0 0 9px; padding: 7px 10px; border-radius: 10px; font-size: 11.5px; line-height: 1.4; color: ${M}; background: color-mix(in srgb, ${OK} 8%, ${S}); border: 1px solid color-mix(in srgb, ${OK} 28%, ${B}); }
-            .tknote span { flex: 1; } .tknote a { color: ${AT}; font-weight: 700; }
-            .tknote button { flex: none; height: 24px; padding: 0 9px; border-radius: 7px; border: 1px solid ${B}; background: ${S}; color: ${T}; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; }
+
             /* Notes */
-            .ntrow { width: 100%; display: flex; align-items: flex-start; gap: 9px; padding: 8px 9px; border-radius: 11px; border: 1px solid ${B}; background: ${S}; cursor: pointer; text-align: left; color: ${T}; font: inherit; }
-            .ntrow:hover { border-color: ${A}; }
-            .ntrow img, .ntrow .noimg, .ntico { width: 32px; height: 32px; flex: none; border-radius: 8px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px ${B}; }
-            .ntico { display: grid; place-items: center; background: ${S2}; color: ${M}; } .ntico svg { width: 15px; height: 15px; }
-            .nttxt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-            .ntt { display: flex; align-items: center; gap: 5px; }
-            .ntt b { flex: 1; min-width: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .ntt .pin { display: grid; color: ${AT}; } .ntt .pin svg { width: 12px; height: 12px; }
-            .ntt em { flex: none; font-style: normal; font-size: 10.5px; color: ${M}; }
-            .nttxt small { font-size: 11.5px; color: ${M}; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-            .nttxt small:empty { display: none; }
-            .ntitem { width: 100%; display: flex; align-items: center; gap: 9px; margin-bottom: 10px; padding: 6px 10px 6px 6px; border-radius: 10px; border: 1px solid ${B}; background: ${S}; cursor: pointer; color: ${T}; font: inherit; font-size: 12.5px; font-weight: 600; text-align: left; }
-            .ntitem img { width: 32px; height: 32px; flex: none; border-radius: 7px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px ${B}; }
+            .ntico { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border-radius: 9px; background: var(--s2); color: var(--m); }
+            .ntico svg { width: 16px; height: 16px; }
+            .row .pinned { display: grid; color: var(--at); } .row .pinned svg { width: 12px; height: 12px; }
+            .row .rt small.two { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+            .ntitem { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r2); border: 1px solid var(--b); background: var(--s); cursor: pointer; color: var(--t); font-size: 12.5px; font-weight: 600; text-align: left; }
+            .ntitem img { width: 34px; height: 34px; flex: none; border-radius: 7px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px var(--b); }
             .ntitem span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .ntitem em { font-style: normal; font-size: 11px; color: ${AT}; font-weight: 700; }
-            .ntitem:hover { border-color: ${A}; }
-            .iconbtn.on { background: ${A}; border-color: ${A}; color: ${AF}; }
-            .ntsaved { flex: 1; font-size: 11px; color: ${M}; }
-        </style>
-        <div class="wrap right">
-            <button type="button" class="fab" title="DTI \u2014 your trades, tokens, notes and item search (drag it up or down to move it)" aria-label="DTI">${LOGO}<i class="cdot" hidden></i><i class="badge" hidden></i></button>
-            <section class="panel" hidden aria-label="DTI">
-                <header class="ph">
-                    <button type="button" class="brand" title="DTI\u2019s pages" aria-label="DTI\u2019s pages" aria-haspopup="true"><i>${LOGO}</i><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5l4 4 4-4"/></svg></button>
-                    <nav class="tabs">${TABS.map(([t, l]) => `<button type="button" data-t="${t}">${l}${t === 'trades' ? '<b class="tbadge" title="New NC gifts"></b>' : ''}</button>`).join('')}</nav>
-                </header>
-                <div class="menu" hidden>${LINKS.map(([l, u, d]) => `<a class="lnk" href="${esc(u)}" target="_blank" rel="noopener"><span><b>${l}</b><small>${d}</small></span>${ICO.ext}</a>`).join('')}
-                    <p class="mhint">Drag the DTI tab up or down to move it \u00b7 turn it off in DTI\u2019s \u2699 \u203a Neopets</p></div>
-                <div class="body"></div>
-                <datalist id="partners"></datalist>
-            </section>
-        </div>`;
-        document.body.appendChild(host);
-        const $ = q => root.querySelector(q);
-        const wrap = $('.wrap'), fab = $('.fab'), panel = $('.panel'), body = $('.body'), menu = $('.menu');
-        const pos = Object.assign({ y: 0.6 }, GM_getValue('dti_np_fab_pos', {}) || {});   // (how far down the right edge, 0–1)
-        const savedTab = GM_getValue('dti_np_panel_tab', 'trades'), savedSeg = GM_getValue('dti_np_tk_seg', 'want');
-        const ui = { tab: TABS.some(([t]) => t === savedTab) ? savedTab : 'trades', view: 'list', key: '', stFor: '', openGift: '', showDone: false, q: '', allAcct: false,
-            draft: null,   // a new trade report's trader, before anything's saved ({ key, partner })
-            item: null, itemTop: 0,   // an item open in the panel (from Search, Seeking, a note, On this page)
+            .ntitem em { font-style: normal; font-size: 11px; color: var(--at); font-weight: 700; }
+            .ntitem:hover { border-color: var(--a); }`;
+
+        // ── Where you are in it (the part is remembered; an open item, trade or note isn't) ──
+        const savedTab = GM_getValue('dti_np_panel_tab', 'home'), savedSeg = GM_getValue('dti_np_tk_seg', 'want');
+        const ui = {
+            tab: VIEWS().some(([v]) => v === savedTab) ? savedTab : savedTab === 'search' ? 'items' : 'home',
+            item: null, itemTop: 0,   // (an item open over the part it was opened from, and where that part was scrolled to)
+            q: '', chip: '', scope: GM_getValue('dti_np_items_scope', 'search') === 'mine' ? 'mine' : 'search', mine: { seg: 'own', q: '', all: {} },
+            view: 'list', key: '', stFor: '', openGift: '', gdel: '', allGifts: false, showDone: false, allAcct: false, undo: null,
+            draft: null,   // (a new trade report's trader, before anything's saved: { key, partner })
             tk: { seg: ['want', 'own', 'studio'].includes(savedSeg) ? savedSeg : 'want', q: '', open: '' },
-            nt: { seg: '', q: '', key: '' } };
+            nt: { seg: '', q: '', key: '' },
+            mallTab: 'new',
+        };
+        let tkCat = null, tkCatState = '', studioFail = false, studioBusy = false;
+        let mallItems = null, mallFail = false, mallBusy = false, mallP = null;
+        let boardRows = null, boardBusy = false, boardAgain = false, hereLast = '', hereT = 0;
+        let win = null, body = null, menu = null;
+
+        // ════ The tab — the only thing made with the page ════
+        let theme = themeOf();
+        const host = document.createElement('div');
+        host.id = 'dti-np-fab';
+        const root = host.attachShadow({ mode: 'open' });
+        root.innerHTML = `<style class="vars">${theme.css}</style><style>${TAB_CSS}</style>
+            <button type="button" class="tab" title="Mini DTI" aria-label="Mini DTI">${GEM}<i class="dot" hidden></i><i class="badge" hidden></i></button>`;
         const hostCss = (k, v) => host.style.setProperty(k, v, 'important');
-        hostCss('position', 'fixed'); hostCss('z-index', '2147483000'); hostCss('margin', '0'); hostCss('padding', '0');
-        hostCss('right', '0px'); hostCss('left', 'auto');
-        const FAB_H = 50;
-        function place(y = pos.y * innerHeight) { hostCss('top', Math.round(Math.min(Math.max(8, y - FAB_H / 2), innerHeight - FAB_H - 8)) + 'px'); }
-        // Opens toward the roomier half of the screen, as tall as fits (up to 640px)
-        function fit() {
-            const r = fab.getBoundingClientRect(), down = r.top + r.height / 2 < innerHeight / 2;
-            wrap.classList.toggle('down', down);
-            panel.style.height = Math.max(280, Math.min(640, down ? innerHeight - r.top - 12 : r.bottom - 12)) + 'px';
+        [['position', 'fixed'], ['top', '0'], ['right', '0'], ['width', '0'], ['height', '0'], ['margin', '0'], ['padding', '0'], ['z-index', '2147483000'], ['display', 'block']].forEach(([k, v]) => hostCss(k, v));
+        document.body.appendChild(host);
+        const tab = root.querySelector('.tab');
+        const pos = Object.assign({ y: 0.18 }, GM_getValue('dti_np_fab_pos', {}) || {});   // (how far down the right edge, 0–1 — to start, near the top (user asked))
+        const TAB_H = 56;
+        function place(y = pos.y * innerHeight) { tab.style.top = Math.round(Math.min(Math.max(8, y - TAB_H / 2), innerHeight - TAB_H - 8)) + 'px'; }
+        // the tab's badge (NC gifts to sort) and dot (this page has something for you), and the bar's
+        function paintBadge() {
+            const n = waitingGifts().length, m = hereNow(), h = m?.n && !hereSeen(m) ? m.n : 0;
+            const b = root.querySelector('.tab .badge');
+            b.hidden = !n; b.textContent = n > 9 ? '9+' : String(n);
+            root.querySelector('.tab .dot').hidden = !h || !!n;
+            tab.title = n ? `Mini DTI — ${plural(n, 'NC gift')} to put in a trade report` : h ? `Mini DTI — on this page: ${m.tip || ''}` : 'Mini DTI — drag it up or down to move it';
+            if (!win) return;
+            const nb = k => win.querySelector(`.links [data-v="${k}"] .nb`);
+            if (nb('trades')) nb('trades').textContent = n ? String(n) : '';
+            if (nb('seeking')) nb('seeking').textContent = skNewCount() ? String(skNewCount()) : '';
+            nb('home')?.classList.toggle('dot', !!h && ui.tab !== 'home');
         }
-        function showMenu(on) { menu.hidden = !on; $('.brand').classList.toggle('on', on); }
-        function openPanel(open) {
-            panel.hidden = !open;
-            wrap.classList.toggle('open', open);
+
+        // ════ The window — built the first time it opens ════
+        function build() {
+            npFonts(theme.font);
+            const css = document.createElement('style');
+            css.textContent = WIN_CSS;
+            root.appendChild(css);
+            win = document.createElement('section');
+            win.className = 'win' + (theme.solid ? ' solid' : '') + (theme.dark ? ' dark' : '');
+            win.hidden = true;
+            win.setAttribute('aria-label', 'Mini DTI');
+            win.innerHTML = `<div class="grip" title="Drag to make it wider or narrower"></div>
+                <header class="nav">
+                    <button type="button" class="brand" data-v="home" title="Home"><i class="gem">${GEM}</i><b>DTI</b></button>
+                    <nav class="links">${VIEWS().map(([v, l]) => `<button type="button" data-v="${v}" title="${l}">${ICO[v]}<span>${l}</span><b class="nb${v === 'seeking' ? ' sk' : ''}"></b></button>`).join('')}</nav>
+                    <button type="button" class="nbtn pages" title="DTI’s pages" aria-haspopup="true" aria-expanded="false">${ICO.grid}</button>
+                    <button type="button" class="nbtn shut" title="Close (Esc)" aria-label="Close">${ICO.x}</button>
+                </header>
+                <div class="menu" hidden></div>
+                <main class="body"></main>
+                <datalist id="partners"></datalist>`;
+            root.appendChild(win);
+            body = win.querySelector('.body'); menu = win.querySelector('.menu');
+            wire();
+        }
+        function showMenu(on) {
+            if (!menu) return;
+            menu.hidden = !on;
+            const b = win.querySelector('.pages');
+            b.classList.toggle('on', on); b.setAttribute('aria-expanded', String(on));
+            if (on) menu.innerHTML = `<div class="mh">DTI’s pages</div>${LINKS().map(([l, u, d]) => `<a class="lnk" href="${esc(u)}" target="_blank" rel="noopener"><span><b>${l}</b><small>${d}</small></span>${ICO.ext}</a>`).join('')}
+                <p class="mhint">Drag the DTI tab up or down to move it, and this window’s left edge to make it wider. Turn it off in DTI’s ⚙ › Neopets.</p>`;
+        }
+        function openWin(open) {
+            if (open && !win) build();
+            if (!win) return;
+            win.hidden = !open;
+            tab.classList.toggle('open', open);
             showMenu(false);
             if (!open) { ui.stFor = ''; return; }
             fit();
             render();
         }
-
-        // ── Drawing ──
-        function paintBadge() {
-            const n = waitingGifts().length, c = ctxCount();
-            const b = $('.badge');
-            b.hidden = !n; b.textContent = n > 9 ? '9+' : String(n);
-            $('.tbadge').textContent = n ? String(n) : '';
-            $('.cdot').hidden = !c || !!n;
-            fab.title = n ? `DTI \u2014 ${n} NC gift${n === 1 ? '' : 's'} to put in a trade report`
-                : c ? `DTI \u2014 on this page: ${ctxModel()?.tip || ''}` : 'DTI \u2014 your trades, tokens, notes and item search (drag it up or down to move it)';
+        // as wide as you made it (and fits), as tall as fits — level with the tab where it can be
+        function fit() {
+            const w = Math.round(Math.min(Math.max(380, +GM_getValue('dti_np_win_w', 560) || 560), innerWidth - 44));
+            const h = Math.round(Math.max(320, Math.min(820, innerHeight - 24)));
+            const r = tab.getBoundingClientRect(), mid = r.top + r.height / 2;
+            win.style.width = w + 'px'; win.style.height = h + 'px';
+            win.style.top = Math.round(Math.max(8, Math.min(mid - h / 2, innerHeight - h - 12))) + 'px';
         }
         function render() {
-            root.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === ui.tab));
+            win.querySelectorAll('.links [data-v]').forEach(b => b.classList.toggle('on', b.dataset.v === ui.tab));
             paintBadge();
-            if (ui.item) return renderItem();
-            if (ui.tab === 'search') renderSearch();
-            else if (ui.tab === 'tokens') renderTokens();
+            if (ui.item) renderItem();
+            else if (ui.tab === 'items') renderItems();
             else if (ui.tab === 'seeking') renderSeeking();
-            else if (ui.tab === 'notes') { if (ui.nt.key) return renderNoteEd(); renderNotes(); }
-            else { if (ui.view === 'edit') return renderEditor(); renderTrades(); }
-            paintCtx();   // (the list views: what this page has for you, on top)
+            else if (ui.tab === 'trades') { if (ui.view === 'edit') renderEditor(); else renderTrades(); }
+            else if (ui.tab === 'tokens') renderTokens();
+            else if (ui.tab === 'notes') { if (ui.nt.key) renderNoteEd(); else renderNotes(); }
+            else renderHome();
+            paintVals(body);
         }
+        function rerender() { const top = body.scrollTop; render(); body.scrollTop = top; }
+        const shown = tabName => !!win && !win.hidden && !ui.item && ui.tab === tabName;
+        // a part from the bar (or a link to it): its start, at the top
+        function goTab(t) {
+            if (!VIEWS().some(([v]) => v === t)) return;
+            if (t === ui.tab && !ui.item) {   // (the part again: back to its start)
+                if (t === 'trades') { ui.view = 'list'; ui.draft = null; }
+                if (t === 'notes') ui.nt.key = '';
+                if (t === 'tokens') ui.tk.open = '';
+            }
+            ui.item = null; itemPage = null;
+            ui.tab = t;
+            GM_setValue('dti_np_panel_tab', t);
+            render();
+            body.scrollTop = 0;
+        }
+
+        // ════ Home: this page, your numbers, what you looked at last, the NC Mall ════
+        function renderHome() {
+            body.innerHTML = `<section class="card hero">
+                    <div class="hero-t"><b>Dress to <span>Impress</span></b></div>
+                    <form class="hrow" data-form="find"><label class="sbox">${ICO.items}<input class="inp" name="q" type="search" placeholder="Find an item on DTI…" autocomplete="off" spellcheck="false" aria-label="Find an item on DTI"></label><button class="btn pri">Search</button></form>
+                    <form class="hrow" data-form="pet"><label class="sbox">${ICO.pet}<input class="inp" name="pet" placeholder="A pet’s name" autocomplete="off" spellcheck="false" aria-label="A pet's name"></label><button class="btn" title="Open the pet on DTI to try things on">Plan a custom ${ICO.ext}</button></form>
+                </section>
+                ${hereCard()}
+                ${glanceHtml()}
+                ${recentCard()}
+                ${mallCard()}`;
+            hereLook();
+            hereLoads();
+            mallLoad();
+        }
+        function glanceHtml() {
+            const open = myTrades().filter(isOpen).length, gw = waitingGifts().length;
+            const sk = seekOn() ? seekMine().length : -1, skn = skNewCount();
+            const want = myTokWant(), st = tokStudioKeys(), inSt = st ? want.filter(i => st.has(i.key)).length : 0;
+            const nts = DTINotes.all().filter(n => n && n.type !== 'trade' && !String(n.key || '').startsWith('trade:')).length;
+            const stat = (go, ico, n, label, small, hot) => `<button type="button" class="stat${n ? '' : ' zero'}" data-go="${go}"><span class="sn">${ico}${n.toLocaleString()}</span><span class="sl">${label}</span>${small ? `<small${hot ? ' class="hot"' : ''}>${small}</small>` : ''}</button>`;
+            return `<div class="glance">
+                ${stat('trades', ICO.trades, open, `Open trade${open === 1 ? '' : 's'}`, gw ? `${plural(gw, 'NC gift')} to sort` : '', gw)}
+                ${sk >= 0 ? stat('seeking', ICO.seeking, sk, 'Seeking now', skn ? plural(skn, 'new offer') : '', skn) : ''}
+                ${stat('tokens', ICO.tokens, want.length, `Token${want.length === 1 ? '' : 's'} wanted`, inSt ? `${inSt} in the Studio now` : '', inSt)}
+                ${stat('notes', ICO.notes, nts, `Note${nts === 1 ? '' : 's'}`, '')}
+            </div>`;
+        }
+        function recentCard() {
+            const r = recent();
+            return r.length ? card(ICO.clock, 'Recently viewed', '', '<button type="button" class="alink" data-recentclear>Clear</button>', `<div class="cb tight"><div class="strip">${r.map(it => tile(it)).join('')}</div></div>`) : '';
+        }
+        const skTiles = n => Array.from({ length: n }, () => '<span class="tile sk-tile"><span class="pic"></span><span class="nm">&nbsp;</span></span>').join('');
+
+        // ── The NC Mall now — the list DTI's NC Mall Guide uses (DTI Remix's) — kept 30 minutes in our store on this site ──
+        function npMallFeed() {
+            return mallP || (mallP = (async () => {
+                const c = await npStoreGet('mall');
+                if (c?.t && Date.now() - c.t < 30 * 60e3 && Array.isArray(c.items)) return c.items;
+                return new Promise(res => {
+                    const fail = () => { mallP = null; res(c?.items || null); };
+                    GM_xmlhttpRequest({ method: 'GET', url: 'https://dtr-itemdb.dti-remix.workers.dev/mall-status', timeout: 20000, anonymous: true,
+                        onload: r => {
+                            let items = null;
+                            try { items = JSON.parse(r.responseText).items; } catch (_) {}
+                            if (!Array.isArray(items) || !items.length) return fail();
+                            const slim = items.map(x => ({ id: String(x.item_id), name: String(x.name || ''), img: x.image || '', price: x.price, dp: x.discountPrice, db: x.discountBegin || '', de: x.discountEnd || '', sb: x.saleBegin || '', se: x.saleEnd || '', add: x.addedAt || '' }));
+                            npStoreSet('mall', { t: Date.now(), items: slim });
+                            res(slim);
+                        },
+                        onerror: fail, ontimeout: fail });
+                });
+            })());
+        }
+        function mallLoad() {
+            if (mallItems || mallBusy || mallFail) return;
+            mallBusy = true;
+            npMallFeed().then(items => { mallBusy = false; mallItems = items; mallFail = !items; paintBadge(); if (shown('home')) rerender(); });
+        }
+        const mallNow = r => (!r.sb || Date.parse(r.sb) <= Date.now()) && (!r.se || Date.parse(r.se) > Date.now());
+        const mallUrg = end => { const ms = end - Date.now(); return ms < 864e5 ? 'day' : ms < 3 * 864e5 ? 'soon' : ms < 7 * 864e5 ? 'week' : ''; };
+        const mallLeft = end => {
+            const ms = end - Date.now();
+            if (ms <= 0) return 'leaving now';
+            const d = Math.floor(ms / 864e5), h = Math.floor(ms % 864e5 / 36e5), m = Math.floor(ms % 36e5 / 6e4);
+            return (d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${Math.max(1, m)}m`) + ' left';
+        };
+        const mallSub = (r, tab) => {   // (its price — leaving within a week: how long, in its urgency's colour; on sale: said so)
+            const end = r.se ? Date.parse(r.se) : 0, urg = end ? mallUrg(end) : '';
+            const sale = r.dp > 0 && r.dp < r.price && (!r.de || Date.parse(r.de) >= Date.now());
+            if (urg && !(sale && tab === 'sale')) return { sub: mallLeft(end), subCls: urg, urg };
+            if (sale) return { sub: `${r.dp} NC · sale`, subCls: 'sale', urg };
+            return { sub: r.price ? `${r.price} NC` : 'Free', urg };
+        };
+        function mallCard() {
+            const rows = mallItems ? npMallRows(mallItems) : null;
+            const act = `<a class="alink" href="${D}/items?q=dti-enhance#mall" target="_blank" rel="noopener">Guide ${ICO.ext}</a>`;
+            if (!rows) return card(ICO.mall, 'NC Mall', '', act, mallFail ? '<div class="msg">Couldn’t reach the NC Mall’s list right now</div>' : `<div class="cb tight"><div class="strip">${skTiles(6)}</div></div>`);
+            const list = rows[ui.mallTab] || [];
+            return card(ICO.mall, 'NC Mall', '', act, `<div class="cb tight" style="display:flex;flex-direction:column;gap:8px">
+                <div class="seg">${[['new', 'New'], ['leaving', 'Leaving'], ['sale', 'On sale']].map(([k, l]) => `<button type="button" data-malltab="${k}" class="${ui.mallTab === k ? 'on' : ''}">${l} <i>${rows[k].length}</i></button>`).join('')}</div>
+                ${list.length ? `<div class="strip">${list.slice(0, 20).map(r => tile({ id: r.id, name: r.name, img: r.img }, mallSub(r, ui.mallTab))).join('')}</div>` : '<div class="msg">Nothing here right now</div>'}</div>`);
+        }
+
+        // ════ On this page: what the Neopets page you're on has for you — Home's first card, and a dot on the tab ════
+        const hereItems = () => ctx?.kind === 'items' && ctx.src !== 'sc'
+            ? [...scrapeNeoItems(ctx.src)].map(([name, x]) => ({ name, img: x.img || '', nc: !!x.nc, qty: x.qty || 1, wear: x.wear, pb: !!x.pb })) : [];
+        const after = x => seekNames().has(String(x.name).toLowerCase()) || !!mineOf(x)?.want;   // (on your Seeking list, or your wishlist)
+        // → { n: things here for you, tip, body } — from what's here already (what it needs is loaded by hereLoads)
+        const hereSeen = m => !!m.sig && (GM_getValue('dti_np_here_seen', []) || []).includes(m.sig);
+        function hereLook() {   // (Home shown, "On this page" on it: what it alerts about is seen)
+            const m = hereNow();
+            if (!m?.n || !m.sig || hereSeen(m)) return;
+            GM_setValue('dti_np_here_seen', [m.sig, ...(GM_getValue('dti_np_here_seen', []) || []).filter(s => s !== m.sig)].slice(0, 60));
+            paintBadge();
+        }
+        function hereNow() {
+            if (!ctx) return null;
+            try { return hereModel(); } catch (_) { return null; }
+        }
+        function hereModel() {
+            if (ctx.kind === 'items') {
+                const all = hereItems(), nc = all.filter(x => x.nc);
+                const show = [...nc, ...all.filter(x => !x.nc && x.wear === true && !x.pb)], hits = show.filter(after);
+                const tokSrc = ['inv', 'sdb', 'gal', 'sc'].includes(ctx.src), capSrc = NEO_SOURCES.some(s => s.key === ctx.src);
+                const cap = tokSrc ? DTITokens.capOf(ctx.src, tkScope()) : null;
+                const line = all.length ? `<div class="hline"><b>${plural(all.length, 'item')}</b> here${nc.length ? ` · <b>${nc.length} NC</b> <span class="tot" data-captot></span>` : ''}${hits.length ? ` · <b>${hits.length}</b> you’re after` : ''}</div>`
+                    : `<div class="hline">${ctx.src === 'sc' ? 'Bring the style tokens here into My Tokens.' : 'No items on this page yet.'}</div>`;
+                return { n: hits.length, sig: `items|${ctx.src}|${hits.map(x => x.name).sort().join(',')}`, tip: hits.length ? `${plural(hits.length, 'item')} you’re after` : '',
+                    body: line + (show.length ? tiles(show.slice(0, 24).map(x => ({ id: '', ...x })), x => ({ qty: x.qty })) + (show.length > 24 ? `<div class="hint">+ ${show.length - 24} more on this page</div>` : '') : '')
+                        + `<div class="hacts">${tokSrc ? `<button type="button" class="btn sm" data-import>${ICO.down} Import tokens${cap ? ` · last ${esc(ago(cap.at))}` : ''}</button>` : ''}${capSrc ? `<button type="button" class="btn sm" data-capture>${ICO.list} Add these to your DTI lists</button>` : ''}</div>` };
+            }
+            if (ctx.kind === 'user') {
+                const w = ctx.who.toLowerCase();
+                const theirs = trades().filter(n => (n.trade?.partner?.name || '').toLowerCase() === w).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+                const open = theirs.filter(isOpen);
+                let toks = [], wish = [];
+                if (ctx.gallery) {
+                    const gal = [...scrapeNeoItems('gal')].map(([name, x]) => ({ id: '', name, img: x.img || '', nc: !!x.nc, qty: x.qty || 1 }));
+                    const want = new Map(myTokWant().map(i => [i.key, i]));
+                    toks = [...new Set(gal.map(x => tokNorm(x.name)))].filter(k => want.has(k)).map(k => want.get(k));
+                    wish = gal.filter(after);
+                }
+                const nf = Object.values((GM_getValue('dti_neofriends', null) || {}).friends || {}).find(f => f && String(f.np || '').toLowerCase() === w);
+                const n = open.length + toks.length + wish.length;
+                return { n, sig: `user|${w}|${open.map(o => o.key).sort().join(',')}|${wish.map(x => x.name).sort().join(',')}|${toks.map(i => i.key).sort().join(',')}`,
+                    tip: [open.length ? `${plural(open.length, 'open trade')} with ${ctx.who}` : '', wish.length ? `they have ${wish.length} you’re after` : '', toks.length ? `they have ${plural(toks.length, 'token')} you want` : ''].filter(Boolean).join(' · '),
+                    body: (nf ? `<div class="hline"><b>${esc(nf.nick || nf.name || ctx.who)}</b> is one of your Neofriends · <a class="alink" href="${D}/user/${esc(nf.slug || nf.id)}/closet" target="_blank" rel="noopener">Their DTI lists ${ICO.ext}</a></div>` : '')
+                        + (wish.length ? `<div class="hline">They have <b>${wish.length}</b> you’re after</div>${tiles(wish.slice(0, 12))}` : '')
+                        + (toks.length ? `<div class="hline">They have <b>${plural(toks.length, 'token')}</b> you want</div><div class="grid">${toks.map(i => tokTile(i)).join('')}</div>` : '')
+                        + (open.length ? `<div class="hline">Open trade${open.length === 1 ? '' : 's'} with ${esc(ctx.who)}</div><div class="card"><div class="rows">${open.map(tradeRow).join('')}</div></div>`
+                            : `<div class="hline">${theirs.length ? `${plural(theirs.length, 'finished trade')} with ${esc(ctx.who)} — none open.` : `No trade reports with ${esc(ctx.who)} yet.`}</div>`)
+                        + `<div class="hacts"><button type="button" class="btn pri sm" data-newwith>${ICO.plus} Trade report with ${esc(ctx.who)}</button>${location.pathname === '/neomessages.phtml' ? '' : `<a class="btn sm" href="https://www.neopets.com/neomessages.phtml?type=send&recipient=${encodeURIComponent(ctx.who)}">${ICO.mail} Neomail</a>`}</div>` };
+            }
+            if (ctx.kind === 'mall') {
+                if (!mallItems) return { n: 0, body: mallFail ? '<div class="hline">Couldn’t check the NC Mall right now.</div>' : '<div class="msg">Checking the NC Mall…</div>' };
+                const live = new Map(mallItems.filter(mallNow).map(r => [r.id, r]));
+                const sk = seekMine().filter(e => live.has(String(e.id))).map(e => ({ e, r: live.get(String(e.id)) }));
+                const wish = mineIx ? [...live.values()].filter(r => mineIx.byId.get(r.id)?.want && !sk.some(x => x.r.id === r.id)) : [];
+                const n = sk.length + wish.length;
+                return { n, sig: `mall|${[...sk.map(x => x.r.id), ...wish.map(r => r.id)].sort().join(',')}`, tip: n ? `${plural(n, 'item')} you want ${n === 1 ? 'is' : 'are'} in the NC Mall` : '',
+                    body: (sk.length ? `<div class="hline"><b>${sk.length}</b> you’re seeking ${sk.length === 1 ? 'is' : 'are'} in the NC Mall now</div>${tiles(sk.map(({ e, r }) => ({ id: e.id, name: e.name || r.name, img: e.img || r.img })), it => mallSub(live.get(String(it.id))))}` : '')
+                        + (wish.length ? `<div class="hline"><b>${wish.length}</b> from your wishlist ${wish.length === 1 ? 'is' : 'are'} in the NC Mall now</div>${tiles(wish.map(r => ({ id: r.id, name: r.name, img: r.img })), it => mallSub(live.get(String(it.id))))}` : '')
+                        + (n ? '' : `<div class="hline">Nothing you’re seeking${mineIx ? ' or on your wishlist' : ''} is in the NC Mall right now.</div>`) };
+            }
+            if (ctx.kind === 'studio') {
+                const st = tokStudioKeys();
+                if (!st) return { n: 0, body: studioBusy ? '<div class="msg">Reading the Studio’s rotation…</div>'
+                    : `<div class="hline">${studioFail ? 'Couldn’t reach itemdb for the rotation.' : 'See which of the tokens you want are in the Studio’s rotation (read from itemdb).'}</div><div class="hacts"><button type="button" class="btn pri sm" data-studioread>${studioFail ? 'Try again' : 'Check the rotation'}</button></div>` };
+                const want = myTokWant().filter(i => st.has(i.key));
+                return { n: want.length, sig: `studio|${want.map(i => i.key).sort().join(',')}`, tip: want.length ? `${plural(want.length, 'token')} you want ${want.length === 1 ? 'is' : 'are'} in the Styling Studio` : '',
+                    body: (want.length ? `<div class="hline"><b>${want.length}</b> token${want.length === 1 ? '' : 's'} you want ${want.length === 1 ? 'is' : 'are'} in this rotation</div><div class="grid">${want.map(i => tokTile(i, st)).join('')}</div>`
+                        : '<div class="hline">None of the tokens you want are in this rotation.</div>')
+                        + `<div class="hacts"><button type="button" class="btn sm" data-tkgo="studio">See the whole rotation (${st.size})</button></div>` };
+            }
+            if (ctx.kind === 'pet') {
+                const pet = ctx.pet;
+                return { n: 0, body: `<div class="hline">${pet ? `Dress <b>${esc(pet)}</b> up on DTI — try anything on, and save it as a custom.` : 'Open a pet on DTI to try anything on it.'}</div>`
+                    + (pet ? `<div class="hacts"><a class="btn pri sm" href="${D}/outfits/new?name=${encodeURIComponent(pet)}" target="_blank" rel="noopener">${ICO.tryon} Plan a custom with ${esc(pet)} ${ICO.ext}</a></div>` : '') };
+            }
+            if (ctx.kind === 'board') {
+                if (!boardRows) return { n: 0, body: '<div class="msg">Looking at the DTI lists linked here…</div>' };
+                if (!boardRows.length) return { n: 0, body: '<div class="hline">No DTI lists looked at in this topic yet — Seeking’s symbol by a DTI link looks at that person’s.</div>' };
+                const n = boardRows.filter(r => r.seek || r.want).length;
+                return { n, sig: `board|${ctx.topic}|${boardRows.filter(r => r.seek || r.want).map(r => `${r.slug}:${r.seek}:${r.want}`).sort().join(',')}`, tip: n ? `${plural(n, 'person')} here ${n === 1 ? 'has' : 'have'} things you’re after` : '',
+                    body: `<div class="hline">The DTI lists linked in this topic — what they have for you</div><div class="card"><div class="rows">${boardRows.map(r => `<div class="row">
+                        <span class="rt"><b>${esc(r.who)}</b><small>${r.seek} Seeking · ${r.want ?? '?'} Wanted · ${r.they ?? '?'} They want</small></span>
+                        ${r.np ? `<a class="ibtn" href="https://www.neopets.com/neomessages.phtml?type=send&recipient=${encodeURIComponent(r.np)}" title="Neomail ${esc(r.np)}">${ICO.mail}</a>` : ''}
+                        <a class="btn sm" href="${D}/user/${encodeURIComponent(r.slug)}/closet" target="_blank" rel="noopener">Their lists ${ICO.ext}</a></div>`).join('')}</div></div>` };
+            }
+            return null;
+        }
+        const hereKey = m => m ? `${m.n}|${m.sig || ''}|${m.body}` : '';
+        function hereCard() {
+            const m = hereNow();
+            hereLast = hereKey(m);
+            if (!m) return '';
+            const fold = !!(GM_getValue('dti_np_ctx_fold', {}) || {})[ctx.kind];
+            return `<section class="card here${fold ? ' fold' : ''}">
+                <button type="button" class="ch" data-ctxfold aria-expanded="${!fold}" title="${fold ? 'Show' : 'Hide'} what this page has for you"><span class="ci">${ICO.here}</span><span class="ct">On this page</span><span class="hl">${esc(ctx.label)}</span>${m.n ? `<span class="cn hot">${m.n}</span>` : ''}<span class="caret">${fold ? '▾' : '▴'}</span></button>
+                ${fold ? '' : `<div class="cb">${m.body}</div>`}</section>`;
+        }
+        // what the card needs, once: your lists (for ✓ / ♥), the NC Mall's, the page's NC total, the Studio's rotation when it's old, the topic's lists
+        function hereLoads() {
+            if (!ctx) return;
+            const again = () => { paintBadge(); if (shown('home')) rerender(); };
+            if (['items', 'mall', 'board'].includes(ctx.kind) || (ctx.kind === 'user' && ctx.gallery)) if (!mineIx && slug()) mineLoad().then(m => { if (m) again(); });
+            if (ctx.kind === 'mall') mallLoad();
+            if (ctx.kind === 'items') hereTotal();
+            if (ctx.kind === 'studio' && tokStudio() && Date.now() - tokStudio().at > TOK_STUDIO_AGE && !studioFail) studioRead();
+            if (ctx.kind === 'board' && !boardRows) boardRefresh();
+        }
+        function hereTotal() {   // (what the NC items here add up to)
+            const nc = hereItems().filter(x => x.nc);
+            if (nc.length) capSum(nc).then(t => { const el = body?.querySelector('[data-captot]'); if (el && t) el.textContent = t; });
+        }
+        // ("On this page" as the page changes (user asked: no reload) — its items coming in or paging in place, someone's lists looked at
+        // on the boards: the tab's dot, and the card when Home shows, drawn again once what it says has changed. Just the card)
+        function hereRepaint() {
+            const m = hereNow(), key = hereKey(m);
+            if (key === hereLast) return;
+            hereLast = key;
+            paintBadge();
+            const el = shown('home') ? body.querySelector(':scope > .card.here') : null;
+            if (!el) return;
+            const t = document.createElement('template');
+            t.innerHTML = hereCard().trim();
+            const fresh = t.content.firstElementChild;
+            if (!fresh) return el.remove();
+            el.replaceWith(fresh);
+            paintVals(fresh);
+            hereLook();
+            if (ctx.kind === 'items') hereTotal();
+        }
+        const hereSoon = () => { clearTimeout(hereT); hereT = setTimeout(hereRepaint, 350); };
+        function boardRefresh() {   // (the topic's people read again — one more looked at)
+            if (ctx?.kind !== 'board') return;
+            if (boardBusy) { boardAgain = true; return; }
+            boardBusy = true; boardAgain = false;
+            boardLoad().then(rows => { boardBusy = false; boardRows = rows; hereRepaint(); if (boardAgain) boardRefresh(); });
+        }
+        // (a topic: the people whose DTI lists are linked and were looked at already — the Neoboards' Seeking kept them)
+        async function boardLoad() {
+            const slugs = [...new Set([...document.querySelectorAll('a[href*="impress.openneo.net"]')].map(a => (a.href.match(/impress\.openneo\.net(?::443)?\/user\/([^/?#\s"'<>]+)\/closet/i) || [])[1]).filter(Boolean))].slice(0, 30);
+            const ids = new Set(seekOn() ? seekMine().map(e => String(e.id)) : []), me = await (slug() ? mineLoad() : null);
+            const out = [];
+            for (const s of slugs) {
+                const c = await npStoreGet('nb:' + s);
+                if (!c?.have) continue;
+                out.push({ slug: s, who: c.name || s.replace(/^\d+-/, ''), np: c.np || '', seek: c.have.filter(x => ids.has(String(x.id))).length,
+                    want: me ? c.have.filter(x => me.byId.get(String(x.id))?.want && !ids.has(String(x.id))).length : null, they: me ? c.want.filter(x => me.byId.get(String(x.id))?.own).length : null });
+            }
+            return out.sort((a, b) => (b.seek + (b.want || 0)) - (a.seek + (a.want || 0)));
+        }
+
+        // ════ Items: DTI's search (a grid, DTI's filters), and your own lists ════
+        const CHIPS = [['', 'All'], ['is:nc', 'NC'], ['is:np', 'NP'], ['is:pb', 'Paint brush'], ['user:owns', 'You own'], ['user:wants', 'You want']];
+        const lastSearch = { key: '', items: null, page: 0, pages: 0 };
+        let searchGen = 0, searchT = 0, mineBusy = false, mineErr = false;
+        function renderItems() {
+            body.innerHTML = `<div class="seg">${[['search', 'Search DTI'], ['mine', 'Your items']].map(([k, l]) => `<button type="button" data-scope="${k}" class="${ui.scope === k ? 'on' : ''}">${l}</button>`).join('')}</div>`
+                + (ui.scope === 'mine' ? '<div class="mres"></div>' : `<section class="card"><div class="cb" style="display:flex;flex-direction:column;gap:10px">
+                    <label class="sbox">${ICO.items}<input class="inp sq" type="search" placeholder="Search items… e.g. hat, is:nc, species:shoyru" value="${esc(ui.q)}" autocomplete="off" spellcheck="false" aria-label="Search items on DTI"></label>
+                    <div class="chips">${CHIPS.map(([k, l]) => `<button type="button" class="chip${ui.chip === k ? ' on' : ''}" data-chip="${k}">${l}</button>`).join('')}</div></div></section>
+                <div class="sres"></div>`);
+            if (ui.scope === 'mine') return paintMine();
+            const inp = body.querySelector('.sq');
+            inp.addEventListener('input', () => { ui.q = inp.value; clearTimeout(searchT); searchT = setTimeout(runSearch, 320); });
+            inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(searchT); runSearch(); } });
+            runSearch();
+        }
+        const searchKey = () => [ui.q.trim(), ui.chip].filter(Boolean).join(' ');
+        async function runSearch() {
+            const res = body.querySelector('.sres');
+            if (!res) return;
+            const key = searchKey();
+            if (ui.q.trim().length < 2 && !ui.chip) { searchGen++; return paintSearchEmpty(res); }
+            if (lastSearch.key === key && lastSearch.items) return paintSearch(res);
+            const my = ++searchGen;
+            res.innerHTML = `<div class="grid">${skTiles(12)}</div>`;
+            const d = await dtiJSON('/items.json?q=' + encodeURIComponent(key));
+            if (my !== searchGen || !res.isConnected) return;
+            if (!d) { res.innerHTML = '<div class="msg err">Couldn’t reach DTI — try again</div>'; return; }
+            Object.assign(lastSearch, { key, items: (d.items || []).map(asItem), page: 1, pages: d.total_pages || 1 });
+            paintSearch(res);
+        }
+        function paintSearch(res) {
+            const { items, page, pages } = lastSearch;
+            if (!items.length) { res.innerHTML = emptyBox(ICO.items, 'No items found', /user:/.test(lastSearch.key) ? 'Your own lists are searched with your DTI login — is this browser logged in to DTI?' : 'Try fewer words, or another filter.'); return; }
+            res.innerHTML = tiles(items, { skt: true }) + (page < pages ? `<button type="button" class="more" data-smore style="margin-top:10px">Show more <small>page ${page} of ${pages}</small></button>` : '');
+            paintVals(res);
+        }
+        function paintSearchEmpty(res) {
+            const r = recent();
+            res.innerHTML = (r.length ? card(ICO.clock, 'Recently viewed', '', '<button type="button" class="alink" data-recentclear>Clear</button>', `<div class="cb tight">${tiles(r)}</div>`) : '')
+                + '<p class="hint" style="margin-top:12px">Search any item on DTI — a click opens it here: its picture on a pet, its value, your lists and who’s trading it. DTI’s filters work too: is:nc, species:shoyru, occupies:hat.</p>';
+            paintVals(res);
+        }
+        async function searchMore(b) {
+            const res = b.closest('.sres'), { key, page } = lastSearch, my = searchGen;
+            b.disabled = true; b.textContent = 'Loading…';
+            const d = await dtiJSON(`/items.json?q=${encodeURIComponent(key)}&page=${page + 1}`);
+            if (my !== searchGen || lastSearch.key !== key || !res?.isConnected) return;
+            if (!d) { b.disabled = false; b.textContent = 'Couldn’t reach DTI — try again'; return; }
+            const have = new Set(lastSearch.items.map(it => it.id));
+            Object.assign(lastSearch, { items: [...lastSearch.items, ...(d.items || []).map(asItem).filter(it => !have.has(it.id))], page: page + 1, pages: d.total_pages || lastSearch.pages });
+            const top = body.scrollTop;   // (the grid grows below — nothing moves)
+            paintSearch(res);
+            body.scrollTop = top;
+        }
+        // ── Your items: your DTI lists — You own / You want, by list — filtered as you type ──
+        function paintMine(force) {
+            const res = body.querySelector('.mres');
+            if (!res) return;
+            if (!slug()) { res.innerHTML = emptyBox(ICO.list, 'Your DTI lists show here', 'Open DTI once in this browser, logged in.'); return; }
+            if (force || (!mineIx && !mineBusy && !mineErr)) {
+                mineBusy = true; mineErr = false;
+                mineLoad(force).then(m => { mineBusy = false; mineErr = !m; if (shown('items') && ui.scope === 'mine') paintMine(); });
+            }
+            if (!mineIx || (force && mineBusy)) {
+                res.innerHTML = mineErr && !mineBusy ? '<div class="msg err">Couldn’t read your lists from DTI — <button type="button" class="alink" data-minere>try again</button></div>' : `<div class="grid">${skTiles(12)}</div>`;
+                return;
+            }
+            const seg = ui.mine.seg, src = seg === 'own' ? mineIx.have : mineIx.want, q = ui.mine.q.trim().toLowerCase();
+            const groups = new Map();
+            src.forEach(it => {
+                if (q && !String(it.name).toLowerCase().includes(q)) return;
+                String(it.list || 'Not in a list').split(', ').forEach(l => { if (!groups.has(l)) groups.set(l, []); groups.get(l).push(it); });
+            });
+            res.innerHTML = `<section class="card"><div class="cb" style="display:flex;flex-direction:column;gap:10px">
+                    <div class="hrow"><label class="sbox">${ICO.items}<input class="inp mq" type="search" placeholder="Filter your items…" value="${esc(ui.mine.q)}" autocomplete="off" spellcheck="false" aria-label="Filter your items"></label>
+                        <button type="button" class="ibtn" data-minere title="Read your lists from DTI again (last: ${esc(ago(mineIx.at))})">${ICO.again}</button>
+                        <a class="ibtn" href="${D}/user/${esc(slug())}/closet" target="_blank" rel="noopener" title="Your items on DTI">${ICO.ext}</a></div>
+                    <div class="seg">${[['own', 'You own', mineIx.have.length], ['want', 'You want', mineIx.want.length]].map(([k, l, n]) => `<button type="button" data-mseg="${k}" class="${seg === k ? 'on' : ''}">${l} <i>${n.toLocaleString()}</i></button>`).join('')}</div>
+                </div></section>`
+                + (groups.size ? [...groups].map(([l, list]) => {
+                    const all = q || ui.mine.all[seg + '|' + l], show = all ? list : list.slice(0, 30);
+                    return card(ICO.list, esc(l), list.length, '', `<div class="cb tight">${tiles(show.map(it => ({ ...it, id: String(it.id) })), it => ({ qty: it.qty, marks: false }))}${list.length > show.length ? `<button type="button" class="more" data-mineall="${esc(seg + '|' + l)}" style="margin-top:8px">Show all ${list.length}</button>` : ''}</div>`);
+                }).join('') : emptyBox(ICO.list, q ? 'Nothing matches' : seg === 'own' ? 'No items you own on DTI yet' : 'No items you want on DTI yet', ''));
+            const mq = res.querySelector('.mq');
+            mq.addEventListener('input', () => {
+                ui.mine.q = mq.value;
+                clearTimeout(searchT);
+                searchT = setTimeout(() => { const p = mq.selectionStart; paintMine(); const n = body.querySelector('.mq'); if (n) { n.focus(); n.setSelectionRange(p, p); } }, 200);
+            });
+            paintVals(res);
+        }
+
+        // ════ One item, here: its picture on a pet, what it is and its value, who's trading it on DTI, your lists, Seeking, a trade, a
+        // note — a style token: own / want (DTI doesn't have tokens). Its DTI page is read once (the lists form, the picture's layers,
+        // the trade counts); another species reads it again for that species ════
+        let itemPage = null;   // { id, data: npItemPage(…), form, rows: [{ key, label, want, orig, cur }], failed, saving, msg, err, tr, trRows, trAll }
+        function openItem(it) {
+            ui.itemTop = body.scrollTop;
+            itemPage = null;
+            if (!isDtiId(it.id) && !it.tok && it.name) {   // (one from this Neopets page: found on DTI by its name first)
+                ui.item = { ...it, finding: true };
+                render(); body.scrollTop = 0;
+                dtiByName(it.name, it.img).then(hit => {
+                    if (ui.item?.name !== it.name || !ui.item.finding) return;
+                    ui.item = hit ? { ...hit, nc: hit.nc || !!it.nc } : { ...it, id: '' };
+                    addRecent(ui.item);
+                    if (!win.hidden) render();
+                });
+                return;
+            }
+            ui.item = it;
+            addRecent(it);
+            render(); body.scrollTop = 0;
+        }
+        const listRowsOf = form => [...form.querySelectorAll('.closet-hangers-ownership-groups > div')].flatMap(g => {
+            const want = /want/i.test(g.querySelector('h4')?.textContent || '');
+            return [...g.querySelectorAll('li')].map(li => {
+                const inp = li.querySelector('input[type="number"]');
+                if (!inp) return null;
+                const orig = Math.max(0, parseInt(inp.value, 10) || 0);
+                return { key: inp.name, orig, cur: orig, want, label: /^quantity\[(true|false)\]$/.test(inp.name) ? 'Not in a list' : (li.querySelector('label')?.textContent.trim() || 'List') };
+            }).filter(r => r && !(r.label === 'Tokens · DTI Enhance' && !r.orig));   // (the token list DTI Enhance keeps on DTI: not for items)
+        });
+        async function loadItemPage(id, species) {
+            let doc = null;
+            try {
+                const q = species ? '?' + new URLSearchParams({ 'preview[species_id]': species, ...(itemPage?.data?.color ? { 'preview[color_id]': itemPage.data.color } : {}) }) : '';
+                doc = new DOMParser().parseFromString(await dtiGetText(`/items/${id}${q}`, 20000), 'text/html');
+            } catch (_) {}
+            if (String(ui.item?.id) !== id) return;
+            const data = doc?.querySelector('.item-name') ? npItemPage(doc) : null, prev = itemPage?.id === id ? itemPage : null;
+            const form = doc?.querySelector('form.user-lists-form') || null;
+            itemPage = { id, data: data || prev?.data || null, failed: !data && !prev?.data, saving: false, msg: '', err: false,
+                form: prev?.form || form, rows: prev?.rows || (form ? listRowsOf(form) : null), tr: prev?.tr || '', trRows: prev?.trRows || {}, trAll: false };
+            if (!win.hidden) rerender();
+        }
+        // its picture: DTI's still layers for the species shown — an item that only moves (DTI draws those itself): itemdb's picture of it
+        function stageHtml(it, data) {
+            const thumb = it.img ? `<img class="thumb" src="${esc(it.img)}" alt="">` : '';
+            const base = String(it.img || '').split(/[?#]/)[0].split('/').pop().replace(/\.\w+$/, '');
+            if (it.tok) return base ? `<img src="https://cdn.itemdb.com.br/preview/${esc(base)}.png" alt="" data-fb="${esc(it.img || '')}">` : thumb;
+            if (!data) return thumb;
+            if (!data.layers.length) return thumb + '<span class="snote">No picture on a pet</span>';
+            const occ = new Set(data.zones.occ.map(z => z.toLowerCase()));
+            const its = data.layers.filter(l => occ.has(l.zone.toLowerCase()));
+            const pics = data.layers.filter(l => l.src && !l.anim).map(l => `<img src="${esc(l.src)}" alt="" loading="lazy">`).join('');
+            if (its.length && !its.some(l => l.src && !l.anim)) {
+                return base ? `<img src="https://cdn.itemdb.com.br/preview/${esc(base)}.png" alt="" data-fb="${esc(it.img || '')}"><span class="anim" title="It moves on DTI — this is itemdb’s picture of it">Animated</span>` : thumb;
+            }
+            return pics + (occ.size && !its.length ? `<span class="snote">Not for this species — pick another</span>` : '');
+        }
+        function itemLinks(it, data) {
+            const L = [];
+            if (/^\/[^/]/.test(data?.customize || '')) L.push(`<a href="${esc(D + data.customize)}" target="_blank" rel="noopener" title="Try it on in DTI’s editor">${ICO.tryon} Try it on</a>`);
+            (data?.links || []).filter(l => !/impress-2020/.test(l.href)).forEach(l => L.push(`<a href="${esc(l.href)}" target="_blank" rel="noopener">${esc(l.label)} ${ICO.ext}</a>`));
+            if (!(data?.links || []).some(l => /jellyneo/.test(l.href))) L.push(`<a href="https://items.jellyneo.net/search/?name_type=3&name=${encodeURIComponent(it.name)}" target="_blank" rel="noopener">JN Items ${ICO.ext}</a>`);
+            L.push(`<a href="${esc(itemdbHref(it.name))}" target="_blank" rel="noopener">itemdb ${ICO.ext}</a>`);
+            if (it.nc || data?.kind === 'nc') L.push(`<a href="${esc(ncMallSearchHref(it.name))}" target="_blank" rel="noopener">NC Mall ${ICO.ext}</a>`);
+            return L.join('');
+        }
+        const seekBtn = on => `<button type="button" class="iseek${on ? ' on' : ''}" data-iseek aria-pressed="${on}"><span class="skic">${ICO.seeking}</span><span><b>Seeking now</b><small>${on ? 'On your Seeking list' : 'Your short list of items you want ASAP'}</small></span><i class="sw"></i></button>`;
+        function listsHtml(P) {
+            if (!P) return '<div class="msg">Loading your lists…</div>';
+            if (!P.rows) return `<div class="msg${P.failed ? ' err' : ''}">${P.failed ? 'Couldn’t reach DTI — try again in a moment' : 'Log in to DTI in this browser to keep lists of your items.'}</div>`;
+            if (!P.rows.length) return '<div class="msg">You don’t have any lists on DTI yet.</div>';
+            const changed = P.rows.filter(r => r.cur !== r.orig).length;
+            const group = want => {
+                const rs = P.rows.map((r, i) => [r, i]).filter(([r]) => r.want === want);
+                return rs.length ? `<div class="lgh">${want ? 'Items you want' : 'Items you own'}</div>` + rs.map(([r, i]) => `<div class="lrow${r.cur ? ' has' : ''}${r.cur !== r.orig ? ' changed' : ''}">
+                    <span title="${esc(r.label)}">${esc(r.label)}</span><span class="qty"><button type="button" data-lq="-1" data-li="${i}"${r.cur ? '' : ' disabled'} aria-label="One less">−</button><b>${r.cur}</b><button type="button" data-lq="1" data-li="${i}" aria-label="One more">+</button></span></div>`).join('') : '';
+            };
+            return group(false) + group(true) + `<div class="lfoot"><span class="lmsg${P.err ? ' err' : ''}" aria-live="polite">${esc(P.msg)}</span><button type="button" class="btn pri sm" data-lsave${changed && !P.saving ? '' : ' disabled'}>${P.saving ? 'Saving…' : 'Save'}</button></div>`;
+        }
+        const paintLists = () => { const el = body.querySelector('.ilists'); if (el && itemPage && String(ui.item?.id) === itemPage.id) el.innerHTML = listsHtml(itemPage); };
+        // who's trading it on DTI: their names (their lists, a new tab), when they were last active, and the lists it's on
+        function tradesHtml(P) {
+            const k = P.tr, rows = P.trRows[k];
+            if (!rows) return '<div class="msg">Loading…</div>';
+            if (rows === 'err') return '<div class="msg err">Couldn’t reach DTI — try again</div>';
+            if (!rows.length) return '<div class="msg">No one right now</div>';
+            const avoid = GM_getValue('dti_avoid', {}) || {}, me = String(slug()).toLowerCase();
+            const friends = new Set(Object.values((GM_getValue('dti_neofriends', null) || {}).friends || {}).filter(Boolean).map(f => String(f.id)));
+            const rel = h => /^\/[^/]/.test(h || '') ? D + h : '';
+            const show = P.trAll ? rows : rows.slice(0, 40);
+            return `<div class="trd">${show.map(r => {
+                const id = (r.closet.match(/\/user\/(\d+)/) || [])[1] || '', self = !!me && r.closet.toLowerCase().includes('/user/' + me + '/'), av = !!(id && avoid[id]);
+                return `<div class="row${av ? ' avoid' : ''}"><span class="rt"><span>${rel(r.closet) ? `<a class="who" href="${esc(rel(r.closet))}" target="_blank" rel="noopener">${esc(r.who)}</a>` : `<b class="who">${esc(r.who)}</b>`}
+                    ${self ? ' <i class="me">You</i>' : ''}${id && friends.has(id) ? ' <i class="nf">Neofriend</i>' : ''}${av ? ' <i class="av">Avoided</i>' : ''}</span>
+                    <span class="lists">${r.lists.filter(l => rel(l.href)).map(l => `<a href="${esc(rel(l.href))}" target="_blank" rel="noopener" title="${esc(l.name)}">${esc(l.name)}</a>`).join('')}</span></span>
+                    <span class="act">${esc(r.active)}</span></div>`;
+            }).join('')}</div>${rows.length > show.length ? `<button type="button" class="more" data-trall style="margin-top:8px">Show all ${rows.length}</button>` : ''}`;
+        }
+        async function loadTrades(k) {
+            const P = itemPage, id = P.id;
+            P.tr = k;
+            rerender();
+            if (P.trRows[k] && P.trRows[k] !== 'err') return;
+            delete P.trRows[k];
+            let rows = 'err';
+            try { rows = npTradeRows(new DOMParser().parseFromString(await dtiGetText(`/items/${id}/trades/${k}`, 20000), 'text/html')); } catch (_) {}
+            if (itemPage !== P) return;
+            P.trRows[k] = rows;
+            if (shown(ui.tab) || ui.item) { const el = body.querySelector('.trdw'); if (el && P.tr === k) el.innerHTML = tradesHtml(P); }
+        }
+        function renderItem() {
+            const it = ui.item, onDti = isDtiId(it.id), tkKey = tokNorm(it.name);
+            const isTok = !!it.tok || TOK_ESSENCE_RE.test(tkKey) || !!tkCat?.byKey.has(tkKey) || !!DTITokens.read(tkScope()).mine[tkKey] || !!tokStudioKeys()?.has(tkKey);
+            if (isTok) tkLoadCat();
+            const ti = isTok ? tkInfoOf(tkKey, { name: it.name, img: it.img || '' }) : null;
+            const P = itemPage?.id === String(it.id) ? itemPage : null, data = P?.data || null;
+            const kind = data?.kind || (it.nc ? 'nc' : it.tok ? 'nc' : '');
+            const open = myTrades().filter(isOpen).slice(0, 4), note = onDti ? DTINotes.get('item:' + it.id) : null;
+            const from = (VIEWS().find(([v]) => v === ui.tab) || [, 'Home'])[1];
+            const pbar = `<div class="pbar"><button type="button" class="crumb" data-iback>${ICO.back}Back to ${esc(from)}</button><span class="sp"></span>
+                ${onDti ? `<a class="btn sm" href="${D}/items/${esc(it.id)}" target="_blank" rel="noopener" title="Open its page on DTI">On DTI ${ICO.ext}</a>` : ''}</div>`;
+            if (it.finding) { body.innerHTML = pbar + `<section class="card"><div class="ihero"><div class="stagew"><div class="stage busy">${stageHtml(it, null)}</div></div><div class="iinfo"><div class="iname">${esc(it.name)}</div><div class="msg" style="text-align:left;padding:0">Finding it on DTI…</div></div></div></section>`; return; }
+            const tradeBtn = (k, n) => `<button type="button" class="btn sm${P?.tr === k ? ' pri' : ''}" data-itrades="${k}"${n == null ? ' disabled' : ''} title="${n == null ? '' : k === 'offering' ? `${plural(n, 'person')} on DTI ${n === 1 ? 'has' : 'have'} it up for trade` : `${plural(n, 'person')} on DTI ${n === 1 ? 'wants' : 'want'} it`}">${k === 'offering' ? 'Offering' : 'Seeking'}${n != null ? ` <b>${n}</b>` : ''}</button>`;
+            body.innerHTML = pbar + `<section class="card"><div class="ihero">
+                    <div class="stagew"><div class="stage${onDti && !P ? ' busy' : ''}">${stageHtml(it, data)}</div>${data?.species.length > 1 ? `<select class="sel" data-isp aria-label="Show it on">${data.species.map(s => `<option value="${esc(s.id)}"${s.id === data.speciesId ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : ''}</div>
+                    <div class="iinfo">
+                        <div class="iname">${esc(it.name)}</div>
+                        <div class="imeta">${kind ? `<span class="kind ${esc(kind)}">${esc(kind.toUpperCase())}</span>` : ''}${it.tok ? '<span>Style token</span>' : ''}${data?.first ? `<span title="First seen on DTI">${esc(data.first)}</span>` : ''}${data?.zones.occ.length ? `<span>· ${esc(data.zones.occ.join(', '))}</span>` : ''}</div>
+                        ${kind === 'nc' || !onDti ? '<span class="ival wait" data-ival>Value…</span>' : ''}
+                        ${data?.desc ? `<div class="idesc" title="${esc(data.desc)}">${esc(data.desc)}</div>` : ''}
+                        ${onDti && seekOn() ? seekBtn(seekHas(it.id)) : ''}
+                        ${onDti ? `<div class="itr">${tradeBtn('offering', data?.trades.offering)}${tradeBtn('seeking', data?.trades.seeking)}</div>` : ''}
+                        <div class="ilinks">${it.tok ? '' : itemLinks(it, data)}</div>
+                    </div></div></section>
+                ${P?.tr ? card(ICO.user, P.tr === 'offering' ? 'Offering it on DTI' : 'Seeking it on DTI', Array.isArray(P.trRows[P.tr]) ? P.trRows[P.tr].length : '',
+                    `<a class="alink" href="${D}/items/${esc(P.id)}/trades/${P.tr}" target="_blank" rel="noopener">On DTI ${ICO.ext}</a><button type="button" class="ibtn" data-itrades="" title="Close" aria-label="Close">${ICO.x}</button>`,
+                    `<div class="cb tight trdw">${tradesHtml(P)}</div>`) : ''}
+                ${ti ? card(ICO.tokens, 'Style token', '', '', `<div class="cb">${tkEditHtml(ti, true)}</div>`) : ''}
+                ${onDti ? card(ICO.list, 'Your lists', '', slug() ? `<a class="alink" href="${D}/user/${esc(slug())}/closet" target="_blank" rel="noopener">My Items ${ICO.ext}</a>` : '', `<div class="cb"><div class="ilists">${listsHtml(P)}</div></div>`) : ''}
+                ${card(ICO.trades, 'Add to a trade report', '', '', `<div class="rows">${open.map(n => `<div class="row"><span class="rt"><b>${esc(titleOf(n))}</b><small>${esc(tradeSummary(cleanTrade(n.trade)))}</small></span><button type="button" class="btn sm" data-itrade="${esc(n.key)}" data-side="give">You give</button><button type="button" class="btn sm" data-itrade="${esc(n.key)}" data-side="get">You get</button></div>`).join('')}
+                    <div class="row"><span class="rt"><b>${open.length ? 'A new trade report' : 'Start a trade report'}</b></span><button type="button" class="btn sm" data-inew="give">You give</button><button type="button" class="btn sm" data-inew="get">You get</button></div></div>`)}
+                ${onDti ? card(ICO.notes, 'Your note', '', '', `<div class="cb"><textarea class="inp inote" rows="3" placeholder="Anything to remember about this item — the same note as on DTI">${esc(note?.text || '')}</textarea></div>`) : ''}
+                ${!onDti && !ti ? '<p class="hint">DTI doesn’t have this one, so it can’t go on your lists — it can still go in a trade report.</p>' : ''}`;
+            const iv = body.querySelector('[data-ival]');
+            if (iv) npNcValue(it.name).then(v => { const t = valTxt(v); if (!iv.isConnected) return; if (t) { iv.textContent = t; iv.title = String(v); iv.classList.remove('wait'); } else iv.remove(); }).catch(() => iv.remove());
+            const ta = body.querySelector('.inote');
+            if (ta) {
+                let t = 0;
+                const save = () => {
+                    clearTimeout(t);
+                    if ((DTINotes.get('item:' + it.id)?.text || '') === ta.value) return;
+                    DTINotes.save('item:' + it.id, { text: ta.value, ref: { id: String(it.id), name: it.name, img: it.img || '' } });
+                };
+                ta.addEventListener('input', () => { clearTimeout(t); t = setTimeout(save, 600); });
+                ta.addEventListener('change', save);
+            }
+            if (onDti && !P) loadItemPage(String(it.id));
+        }
+        // Your lists saved the way DTI's own "Track this" form saves them: only the lists you changed (DTI sets the quantities)
+        async function saveItemLists() {
+            const L = itemPage, changed = L?.rows ? L.rows.filter(r => r.cur !== r.orig) : [];
+            if (!changed.length || L.saving) return;
+            L.saving = true; L.msg = ''; paintLists();
+            const token = L.form.querySelector('input[name="authenticity_token"]')?.value || '';
+            const fd = new URLSearchParams({ _method: 'put', authenticity_token: token });
+            changed.forEach(r => fd.set(r.key, String(r.cur)));
+            const ok = await new Promise(res => GM_xmlhttpRequest({
+                method: 'POST', url: new URL(L.form.getAttribute('action') || '', D).href, data: fd.toString(), timeout: 20000,
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': token },
+                onload: r => res(r.status >= 200 && r.status < 400 && !/sign_in|\/login/.test(r.finalUrl || '')),
+                onerror: () => res(false), ontimeout: () => res(false),
+            }));
+            L.saving = false;
+            if (ok) { changed.forEach(r => { r.orig = r.cur; }); L.msg = 'Saved ✓'; L.err = false; mineStale(); }
+            else { L.msg = 'Couldn’t save — try again'; L.err = true; }
+            paintLists();
+        }
+
+        // ── An "add an item" box: DTI's search as you type — for trades also style tokens, GBCs and the name as typed ──
+        function attachSearch(inp, o, onPick) {
+            const drop = inp.nextElementSibling;
+            let timer = 0, gen = 0, results = [], hl = 0;
+            const show = html => { drop.innerHTML = html; drop.hidden = !html; };
+            const paint = () => show(results.map((it, i) => `<button type="button" class="opt${i === hl ? ' hl' : ''}" data-pick="${i}">
+                ${itemPic(it)}<span>${esc(it.name)}</span>${it.nc ? '<i class="tag">NC</i>' : ''}${it.tok ? '<i class="tag typed">Token</i>' : ''}${it.typed ? '<i class="tag typed">as typed</i>' : ''}</button>`).join(''));
+            inp.addEventListener('input', () => {
+                clearTimeout(timer);
+                const q = inp.value.trim();
+                if (q.length < 2) { gen++; return show(''); }
+                show('<div class="msg">Searching DTI…</div>');
+                timer = setTimeout(async () => {
+                    const my = ++gen, d = await dtiJSON('/items.json?q=' + encodeURIComponent(q));
+                    if (my !== gen || !inp.isConnected) return;
+                    results = (d?.items || []).slice(0, 8).map(asItem);
+                    if (o.tokens) {   // (style tokens too — DTI has none: a name that's just that, or starts with it, above DTI's items; the rest after)
+                        const cat = tkCat || tokenCatalogIfCached();
+                        if (!cat) loadTokenCatalog().then(c => { tkCat = c; if (inp.isConnected && inp.value.trim() === q) inp.dispatchEvent(new Event('input')); }).catch(() => {});
+                        const toks = cat ? tokSearch(cat, q, 5).map(({ t, rank }) => ({ ...tokTradeItem(t), tok: true, rank })) : [];
+                        results = [...toks.filter(x => x.rank < 2), ...results, ...toks.filter(x => x.rank === 2)];
+                    }
+                    if (o.gbc && /\b(bf)?gbcs?\b|gift ?box|black friday/i.test(q)) results.unshift(...Object.entries(GBC_KINDS).map(([id, g]) => ({ id, name: `${g.name} — ${g.full.replace(/ — .*$/, '')}`, img: '' })));   // (any GBC, as Notes has it)
+                    if (o.typed && !results.some(it => it.name.toLowerCase() === q.toLowerCase())) results.push({ id: npId(q), name: q, img: '', typed: true });
+                    hl = 0;
+                    if (!results.length) return show(d ? '<div class="msg">No items found</div>' : '<div class="msg err">Couldn’t reach DTI — try again</div>');
+                    paint();
+                }, 280);
+            });
+            inp.addEventListener('keydown', e => {
+                if (drop.hidden || !results.length) return;
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); hl = (hl + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length; paint(); }
+                else if (e.key === 'Enter') { e.preventDefault(); onPick(results[hl]); }
+                else if (e.key === 'Escape') { e.stopPropagation(); show(''); }
+            });
+            inp.addEventListener('blur', () => setTimeout(() => { if (inp.isConnected) show(''); }, 150));
+            drop.addEventListener('mousedown', e => e.preventDefault());   // (keeps the box focused while you pick)
+            drop.addEventListener('click', e => { const b = e.target.closest('[data-pick]'); if (b && results[+b.dataset.pick]) onPick(results[+b.dataset.pick]); });
+        }
+
+        // ════ Seeking: your short list (DTI's Seeking page) — by how much you want each, their values and new offers; who had them on
+        // the boards. Looking here counts as having seen the new offers ════
+        function renderSeeking() {
+            const list = seekSorted(), fresh = skNew();
+            const t = GM_getValue('dti_sk_new', {}) || {};
+            if (t.at && t.at > (GM_getValue('dti_sk_new_seen', 0) || 0)) GM_setValue('dti_sk_new_seen', t.at);
+            const row = e => {
+                const offers = fresh[e.id] || null;
+                return `<div class="row go" role="button" tabindex="0" data-item="${itemAttr({ id: e.id, name: e.name || 'Item', img: e.img })}" title="${esc(e.name || 'Item')} — its page here">
+                    ${e.img ? `<img src="${esc(e.img)}" alt="" loading="lazy">` : '<span class="noimg"></span>'}
+                    <span class="rt"><b>${esc(e.name || 'Item')}</b>${e.note ? `<small>${esc(e.note)}</small>` : ''}<span class="v" data-val="${esc(e.name || '')}" hidden></span></span>
+                    ${offers ? `<span class="new" title="New on DTI: ${esc(offers.join(', '))}">New · ${offers.length} offering</span>` : ''}
+                    <button type="button" class="rm" data-skrm="${esc(e.id)}" title="Take it off your Seeking list" aria-label="Take it off">×</button>
+                </div>`;
+            };
+            const sought = new Set(seekMine().map(e => String(e.id)));
+            const seen = (GM_getValue('dti_nb_seen', []) || []).filter(x => x && x.slug).map(x => ({ ...x, items: (x.items || []).filter(it => sought.has(String(it.id))) })).filter(x => x.items.length).slice(0, 8);
+            const npHref = h => /^https:\/\/www\.neopets\.com\//.test(h || '') ? h : '';
+            body.innerHTML = acctBar(' is seeking') + card(ICO.seeking, 'Seeking now', list.length,
+                `<span class="tot" data-sktot></span>${list.length ? `<button type="button" class="ibtn" data-skcopy title="Copy the list as text">${ICO.copy}</button>` : ''}<a class="ibtn" href="${D}/items?q=dti-enhance#seeking" target="_blank" rel="noopener" title="Your Seeking list on DTI">${ICO.ext}</a>`,
+                `<div class="cb" style="padding-bottom:${list.length ? 4 : 12}px"><div class="add"><input class="inp" data-skadd placeholder="＋ Add an item you want now…" autocomplete="off" spellcheck="false" aria-label="Add an item to your Seeking list"><div class="drop" hidden></div></div></div>`
+                + (list.length ? [[0, 'Must have'], [1, 'Want'], [2, 'Maybe']].map(([n, l]) => { const g = list.filter(e => tierOf(e) === n); return g.length ? `<div class="sub" style="margin:10px 12px 4px">${l} <b>${g.length}</b></div><div class="rows">${g.map(row).join('')}</div>` : ''; }).join('')
+                    : emptyBox(ICO.seeking, 'Nothing on your Seeking list', 'The items you want now — add them above, from an item’s page here, or on DTI.')), 'sk')
+                + (seen.length ? card(ICO.eye, 'Seen on the boards', seen.length, '<button type="button" class="alink" data-seenclr title="Forget them all">Clear</button>', `<div class="rows">${seen.map(x => `<div class="row">
+                    <span class="rt"><b>${esc(x.who || x.slug)}</b><small>${esc(ago(x.at))} · ${x.mail ? 'in a Neomail' : 'on the Neoboards'}</small>
+                        <span class="thumbs">${x.items.slice(0, 7).map(it => `<button type="button" class="tbtn" data-item="${itemAttr({ id: it.id, name: it.name || 'Item', img: it.img })}" title="${esc(it.name || '')}" style="padding:0;border:none;background:none;cursor:pointer">${it.img ? `<img src="${esc(it.img)}" alt="">` : '<span class="noimg"></span>'}</button>`).join('')}${x.items.length > 7 ? `<span class="n">+${x.items.length - 7}</span>` : ''}</span></span>
+                    ${npHref(x.where) ? `<a class="btn sm" href="${esc(npHref(x.where))}">Topic</a>` : ''}
+                    ${x.np ? `<a class="ibtn" href="https://www.neopets.com/neomessages.phtml?type=send&recipient=${encodeURIComponent(x.np)}" title="Neomail ${esc(x.np)}">${ICO.mail}</a>` : ''}
+                    <a class="ibtn" href="${D}/user/${encodeURIComponent(x.slug)}/closet" target="_blank" rel="noopener" title="Their lists on DTI">${ICO.ext}</a>
+                    <button type="button" class="rm" data-seenrm="${esc(x.slug)}" title="Forget this one" aria-label="Forget this one">×</button></div>`).join('')}</div>`) : '');
+            const add = body.querySelector('[data-skadd]');
+            attachSearch(add, {}, it => {
+                if (!isDtiId(it.id)) return;
+                seekSave(items => { items[it.id] = seekEntry(it); });
+                rerender();
+                body.querySelector('[data-skadd]')?.focus();
+            });
+            if (list.length) capSum(list.map(e => ({ name: e.name || '' }))).then(tx => { const el = body.querySelector('[data-sktot]'); if (el && tx) el.textContent = tx; });
+        }
+
+        // ════ Trades: your trade reports (the same ones as DTI's Notes) and the NC gifts waiting to go in one ════
         const thumbs = list => !list.length ? '<span class="none">nothing yet</span>'
             : list.slice(0, 3).map(x => itemPic(x, x.name + (x.qty > 1 ? ' ×' + x.qty : ''))).join('')
                 + (list.length > 3 ? `<span class="n">+${list.length - 3}</span>` : '');
@@ -34157,83 +35516,134 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             return `<div class="trow">
                 <button type="button" class="tmain" data-open="${esc(n.key)}" title="Open this trade report">
                     <span class="ttop"><b>${esc(titleOf(n))}</b><span class="when">${esc(ago(n.updated))}</span></span>
-                    <span class="thumbs" title="What you give ⇄ what you get">${thumbs(t.give)}<span class="sw">${ICO.swap}</span>${thumbs(t.get)}</span>
+                    <span class="thumbs" title="What you give ⇄ what you get">${thumbs(t.give)}<span class="sw">${ICO.trades}</span>${thumbs(t.get)}</span>
                 </button>
-                <button type="button" class="chip s-${t.status}" data-st="${esc(n.key)}" title="Change the status">${stLabel(t.status)}<i>▾</i></button>
+                <button type="button" class="chip st s-${t.status}" data-st="${esc(n.key)}" title="Change the status">${stLabel(t.status)}<i>▾</i></button>
                 ${ui.stFor === n.key ? `<div class="stmenu">${STATUS.map(([v, l]) => `<button type="button" data-set="${v}"${v === t.status ? ' class="on"' : ''}><i class="dot s-${v}"></i>${l}</button>`).join('')}</div>` : ''}
             </div>`;
         }
-        function giftRow(g) {
-            const left = giftLeft(g), open = ui.openGift === g.uid;
+        // (a gift's state, as DTI's Notes says it)
+        const GIFT_ST = { new: 'New', part: 'Partly in a report', done: 'In a report', gift: 'Just a gift' };
+        const giftSt = g => g.gift ? 'gift' : !(g.used || []).length ? 'new' : (g.used || []).length >= (g.items || []).length ? 'done' : 'part';
+        // (full: in Notes (user asked) — every gift recorded, whatever became of it: its state, what's in a report already, the reports
+        // it's in, Just a gift and back, Remove)
+        function giftRow(g, full = false) {
+            const left = giftLeft(g), open = ui.openGift === g.uid, st = giftSt(g), sort = !g.gift && left.length > 0;
             // (open: the reports with them it can go into, and their other gifts that may be from the same trade)
-            const targets = open ? giftTargets(trades(), g.who, g.at).slice(0, 4) : [];
-            const dest0 = open ? giftDefaultTarget(targets, g) : 'new';
-            const sibs = open ? giftSiblings(gifts().filter(o => inMine(acctOfNp(o.np))), g) : [];
-            const gi = (x, i, attrs, side) => `<label class="gi"><input type="checkbox" ${attrs}>${x.items[i].img ? `<img src="${esc(x.items[i].img)}" alt="">` : '<span class="noimg"></span>'}<span>${esc(x.items[i].name)}</span>${side || ''}</label>`;
+            const targets = open && sort ? giftTargets(trades(), g.who, g.at).slice(0, 4) : [];
+            const dest0 = open && sort ? giftDefaultTarget(targets, g) : 'new';
+            const sibs = open && sort ? giftSiblings(gifts().filter(o => inMine(acctOfNp(o.np))), g) : [];
+            const pic = it => it.img ? `<img src="${esc(it.img)}" alt="">` : '<span class="noimg"></span>';
+            const gi = (x, i, attrs, side) => `<label class="gi"><input type="checkbox" ${attrs}>${pic(x.items[i])}<span>${esc(x.items[i].name)}</span>${side || ''}</label>`;
+            const reports = full && open ? [...new Set(g.notes || (g.note ? [g.note] : []))].filter(k => tradeOf(k)) : [];
+            const named = full ? (g.items || []).map((_, i) => i) : left;
             return `<div class="gift">
                 <button type="button" class="gmain" data-g="${esc(g.uid)}" aria-expanded="${open}">
                     <span class="gdir ${g.dir === 'in' ? 'in' : 'out'}">${ICO.gift}</span>
-                    <span class="gtxt"><b>${g.dir === 'in' ? 'Received from' : 'Sent to'} ${esc(g.who || 'someone')}</b><small>${esc(left.map(i => g.items[i].name).join(', '))} · ${esc(ago(g.at))}</small></span>
+                    <span class="rt"><b>${g.dir === 'in' ? 'Received from' : 'Sent to'} ${esc(g.who || 'someone')}</b><small>${full ? `<i class="gst ${st}">${GIFT_ST[st]}</i> ` : ''}${esc(named.map(i => g.items[i].name).join(', '))} · ${esc(ago(g.at))}</small></span>
                     <span class="caret">${open ? '▴' : '▾'}</span>
                 </button>
                 ${open ? `<div class="gbody">
-                    ${left.map(i => gi(g, i, `data-gi="${i}" checked`)).join('')}
-                    ${sibs.length ? `<div class="gsib">Also with ${esc(g.who)} \u2014 tick the ones from this same trade <button type="button" class="tickall" data-gtickall>Tick all</button></div>${sibs.map(({ g: x }) => giftLeft(x).map(i => gi(x, i, `data-gs="${esc(x.uid)}" data-gi="${i}"`, `<i class="gside ${x.dir === 'in' ? 'in' : 'out'}">${x.dir === 'in' ? '\u2193 got' : '\u2191 sent'} ${esc(ago(x.at))}</i>`)).join('')).join('')}` : ''}
-                    <label class="gdestw"><span>Put them in</span><select class="txt gdest">${targets.map(n => `<option value="${esc(n.key)}"${n.key === dest0 ? ' selected' : ''}>${esc(titleOf(n))} \u2014 ${esc(tradeSummary(cleanTrade(n.trade)))} \u00b7 ${esc(stLabel(cleanTrade(n.trade).status))}</option>`).join('')}<option value="new"${dest0 === 'new' ? ' selected' : ''}>A new trade report</option></select></label>
+                    ${sort ? left.map(i => gi(g, i, `data-gi="${i}" checked`)).join('') : ''}
+                    ${full ? (g.items || []).map((it, i) => sort && left.includes(i) ? '' : `<div class="gi done">${pic(it)}<span>${esc(it.name)}</span>${(g.used || []).includes(i) ? '<i class="gside">In a report</i>' : ''}</div>`).join('') : ''}
+                    ${sibs.length ? `<div class="gsib">Also with ${esc(g.who)} — tick the ones from this same trade <button type="button" class="tickall" data-gtickall>Tick all</button></div>${sibs.map(({ g: x }) => giftLeft(x).map(i => gi(x, i, `data-gs="${esc(x.uid)}" data-gi="${i}"`, `<i class="gside ${x.dir === 'in' ? 'in' : 'out'}">${x.dir === 'in' ? '↓ got' : '↑ sent'} ${esc(ago(x.at))}</i>`)).join('')).join('')}` : ''}
+                    ${sort ? `<label class="gdestw"><span>Put them in</span><select class="sel gdest">${targets.map(n => `<option value="${esc(n.key)}"${n.key === dest0 ? ' selected' : ''}>${esc(titleOf(n))} — ${esc(tradeSummary(cleanTrade(n.trade)))} · ${esc(stLabel(cleanTrade(n.trade).status))}</option>`).join('')}<option value="new"${dest0 === 'new' ? ' selected' : ''}>A new trade report</option></select></label>` : ''}
                     <div class="gacts">
-                        <button type="button" class="btn pri" data-gact="put">Put them in</button>
-                        ${(g.used || []).length ? '' : '<button type="button" class="btn" data-gact="gift" title="It wasn’t part of a trade">Just a gift</button>'}
+                        ${sort ? '<button type="button" class="btn pri sm" data-gact="put">Put them in</button>' : ''}
+                        ${sort && !(g.used || []).length ? '<button type="button" class="btn sm" data-gact="gift" title="It wasn’t part of a trade">Just a gift</button>' : ''}
+                        ${full && g.gift ? '<button type="button" class="btn sm" data-gact="ungift">It was part of a trade after all</button>' : ''}
+                        ${reports.map(k => `<button type="button" class="btn sm" data-open="${esc(k)}">Open “${esc(titleOf(tradeOf(k)))}”</button>`).join('')}
+                        ${full ? `<button type="button" class="btn sm gdel" data-gact="del">${ui.gdel === g.uid ? 'Click again to remove it' : 'Remove from this list'}</button>` : ''}
                     </div>
-                    <span class="gnote">Ticked items go on “You get” when you received them and “You give” when you sent them${g.who ? `, with ${esc(g.who)} as the trader` : ''}.</span>
+                    <span class="gnote">${g.gift ? 'Marked as just a gift — not part of a trade.' : sort ? `Ticked items go on “You get” when you received them and “You give” when you sent them${g.who ? `, with ${esc(g.who)} as the trader` : ''}.` : 'All of its items are in a trade report.'}</span>
                 </div>` : ''}
             </div>`;
         }
         function renderTrades() {
-            const all = trades().filter(n => inMine(acctOfTrade(n.trade))).sort((a, b) => (b.updated || 0) - (a.updated || 0));
-            const open = all.filter(isOpen), closed = all.filter(n => !isOpen(n)), waiting = waitingGifts();
-            const ma = acctMany() ? acctGet(meAcct()) : null;
-            body.innerHTML = `${ma ? `<div class="acctbar"><i style="background:${esc(ma.color)}"></i><span>${ui.allAcct ? 'All your accounts' : `${esc(acctName(ma))}\u2019s trades`}</span><button type="button" class="acctall">${ui.allAcct ? `Just ${esc(acctName(ma))}` : 'All accounts'}</button></div>` : ''}
-                <button type="button" class="newbtn">${ICO.plus}Trade Report</button>
-                ${waiting.length ? `<div class="sec">NC gifts to sort <b>${waiting.length}</b></div><div class="list">${waiting.map(giftRow).join('')}</div>` : ''}
-                ${all.length ? `<div class="sec">Open trades <b>${open.length}</b></div>
-                    <div class="list">${open.map(tradeRow).join('') || '<div class="msg">Nothing open right now</div>'}</div>
-                    ${closed.length ? `<button type="button" class="morebtn">${ui.showDone ? 'Hide' : 'Show'} finished trades (${closed.length})</button>
-                        ${ui.showDone ? `<div class="list" style="margin-top:6px">${closed.map(tradeRow).join('')}</div>` : ''}` : ''}`
-                : `<div class="empty"><b>No trade reports yet</b>Start one with ＋ Trade Report: who it’s with and what goes each way. They’re the same trade reports as in DTI’s Notes.</div>`}
-                <a class="alllink" href="${D}/items?q=dti-enhance#notes" target="_blank" rel="noopener">All your notes on DTI ${ICO.ext}</a>
-                ${giftsOn() ? '' : '<p class="hint">Tip: turn on NC gift tracking in DTI’s ⚙ › Neopets, and the NC gifts you send and accept show up here, ready to put in a trade report.</p>'}`;
+            const all = myTrades(), open = all.filter(isOpen), closed = all.filter(n => !isOpen(n)), waiting = waitingGifts();
+            // (NC gifts: the ones to sort — or all of them (user asked), each with what became of it: in a report, just a gift…)
+            const gl = gifts().filter(g => inMine(acctOfNp(g.np))).sort((a, b) => (b.at || 0) - (a.at || 0)), allGifts = ui.allGifts && gl.length > 0;
+            body.innerHTML = acctBar('’s trades') + `<button type="button" class="btn pri wide newbtn">${ICO.plus}Trade Report</button>`
+                + (allGifts ? card(ICO.gift, 'All NC gifts', gl.length, `<button type="button" class="alink" data-gview>${waiting.length ? 'Just the ones to sort' : 'Hide'}</button>`, `<div class="rows">${gl.map(g => giftRow(g, true)).join('')}</div>`)
+                    : waiting.length ? card(ICO.gift, 'NC gifts to sort', waiting.length, `<button type="button" class="alink" data-gview>All ${gl.length}</button>`, `<div class="rows">${waiting.map(g => giftRow(g)).join('')}</div>`) : '')
+                + card(ICO.trades, 'Open trades', open.length, `<a class="alink" href="${D}/items?q=dti-enhance#notes" target="_blank" rel="noopener">All on DTI ${ICO.ext}</a>`,
+                    open.length ? `<div class="rows">${open.map(tradeRow).join('')}</div>` : all.length ? '<div class="msg">Nothing open right now</div>'
+                        : emptyBox(ICO.trades, 'No trade reports yet', 'Start one with ＋ Trade Report: who it’s with and what goes each way. They’re the same trade reports as in DTI’s Notes.'))
+                + (closed.length ? `<button type="button" class="more morebtn">${ui.showDone ? 'Hide' : 'Show'} finished trades (${closed.length})</button>`
+                    + (ui.showDone ? card(ICO.clock, 'Finished', closed.length, '', `<div class="rows">${closed.map(tradeRow).join('')}</div>`) : '') : '')
+                + (!allGifts && !waiting.length && gl.length ? `<button type="button" class="more" data-gview>Show all NC gifts (${gl.length})</button>` : '')
+                + (giftsOn() ? '' : '<p class="hint">Tip: turn on NC gift tracking (here, or DTI’s ⚙ › Neopets), and the NC gifts you send and accept show up here, ready to put in a trade report. <button type="button" class="alink" data-gifton>Turn it on</button></p>');
         }
         // the trade being edited (a new one exists only once something's been filled in)
         const cur = () => tradeOf(ui.key) || { key: ui.key, title: '', text: '', trade: { partner: ui.draft?.key === ui.key ? { name: ui.draft.partner } : null, give: [], get: [], status: 'planned', date: today() } };
         function patchTrade(fn) { const t = cleanTrade(cur().trade); fn(t); saveNote(ui.key, { trade: t }); }
+        const SIDE_ICO = { give: svg('<path d="M8 13.5v-10M4.5 7 8 3.5 11.5 7"/>', 1.8), get: svg('<path d="M8 2.5v10M4.5 9 8 12.5 11.5 9"/>', 1.8) };
         const itemRow = (it, side, i) => `<div class="it">
                 ${itemPic(it)}
-                ${/^\d+$/.test(it.id) ? `<a class="nm" href="${D}/items/${esc(it.id)}" target="_blank" rel="noopener" title="${esc(it.name)} on DTI">${esc(it.name)}</a>` : `<span class="nm" title="${esc(GBC_KINDS[it.id] ? `${GBC_KINDS[it.id].full} \u00b7 ${gbcCaps(it.id)}` : it.name)}">${esc(it.name)}</span>`}
+                ${isDtiId(it.id) ? `<button type="button" class="nm" data-item="${itemAttr(it)}" title="${esc(it.name)} — its page here">${esc(it.name)}</button>` : isTokTrade(it) ? `<button type="button" class="nm" data-item="${itemAttr({ ...it, tok: 1 })}" title="${esc(it.name)} — a style token">${esc(it.name)}</button>` : `<span class="nm" title="${esc(GBC_KINDS[it.id] ? `${GBC_KINDS[it.id].full} · ${gbcCaps(it.id)}` : it.name)}">${esc(it.name)}</span>`}
+                <span class="iv" data-iv="${side}:${i}" title="Cap value each" hidden></span>
                 <span class="qty"><button type="button" data-q="-1" data-side="${side}" data-i="${i}" title="One fewer"${it.qty <= 1 ? ' disabled' : ''}>−</button><b>${it.qty}</b><button type="button" data-q="1" data-side="${side}" data-i="${i}" title="One more">+</button></span>
                 <button type="button" class="rm" data-rm="${i}" data-side="${side}" title="Take it off" aria-label="Take ${esc(it.name)} off">×</button>
             </div>`;
         function renderEditor() {
             const n = cur(), t = cleanTrade(n.trade), saved = !!tradeOf(ui.key);
-            body.innerHTML = `<div class="edhead">
-                    <button type="button" class="iconbtn back" title="Back to your trades" aria-label="Back">${ICO.back}</button>
-                    <b class="edtitle">${esc(saved ? titleOf(n) : 'New trade report')}</b>
-                    ${saved ? `<a class="iconbtn" href="${D}/items?q=dti-enhance#notes/${esc(ui.key)}" target="_blank" rel="noopener" title="Open it in DTI’s Notes">${ICO.ext}</a>` : ''}
-                </div>
-                ${ui.undo?.key === ui.key && Date.now() - ui.undo.at < 120e3 ? `<div class="undobar"><span>${ui.undo.n} item${ui.undo.n === 1 ? '' : 's'} put in from your NC gifts</span><button type="button" class="btn" data-undo>Undo</button></div>` : ''}
-                ${(() => { const got = t.status === 'done' ? t.get.filter(it => seekHas(it.id)) : []; return got.length ? `<div class="seekgot"><span>\u25ce You got ${esc(got.map(it => it.name).join(', '))} \u2014 still on your Seeking list.</span><button type="button" class="seekoff" data-ids="${esc(got.map(it => it.id).join(','))}">Take ${got.length === 1 ? 'it' : 'them'} off</button></div>` : ''; })()}
-                <label class="fld"><span>Trading with</span><input class="txt partner" list="partners" placeholder="Their Neopets username" autocomplete="off" spellcheck="false" value="${esc(t.partner?.name || '')}"></label>
-                <div class="seg">${STATUS.map(([v, l]) => `<button type="button" data-seg="${v}" class="${v === t.status ? 'on s-' + v : ''}">${l}</button>`).join('')}</div>
-                ${['give', 'get'].map(side => `<div class="side">
-                    <div class="shd">${side === 'give' ? 'You give' : 'You get'}<b>${t[side].reduce((s, it) => s + it.qty, 0) || ''}</b></div>
-                    ${t[side].map((it, i) => itemRow(it, side, i)).join('')}
-                    <div class="add"><input class="txt" data-add="${side}" placeholder="＋ Add an item or style token…" autocomplete="off" spellcheck="false"><div class="drop" hidden></div></div>
-                    <div class="quick">${Object.entries(GBC_KINDS).map(([id, g]) => `<button type="button" data-gbc="${id}" data-side="${side}" title="Add a ${g.name} (${esc(g.full)}) \u2014 ${gbcCaps(id)}">${ICO.gift}+ ${g.name}</button>`).join('')}</div>
-                </div>`).join('')}
-                <label class="fld"><span>Notes</span><textarea class="txt text" placeholder="Anything to remember about this trade">${esc(n.text || '')}</textarea></label>
-                <div class="edfoot"><input type="date" class="txt date" value="${esc(t.date)}" title="When it happened" aria-label="Date">
-                    ${saved ? '<button type="button" class="del">Delete</button>' : ''}</div>`;
-            $('#partners').innerHTML = partnerNames().map(p => `<option value="${esc(p)}"></option>`).join('');
+            const got = t.status === 'done' ? t.get.filter(it => seekHas(it.id)) : [];
+            body.innerHTML = `<div class="pbar"><button type="button" class="ibtn back" title="Back to your ${ui.tab === 'notes' ? 'notes' : 'trades'}" aria-label="Back">${ICO.back}</button><span class="ttl edtitle">${esc(saved ? titleOf(n) : 'New trade report')}</span>
+                    <button type="button" class="ibtn${n.pinned ? ' on' : ''}" data-trpin title="${n.pinned ? 'Unpin it' : 'Pin it to the top of your notes'}" aria-pressed="${!!n.pinned}">${ICO.pin}</button>
+                    ${saved ? `<a class="ibtn" href="${D}/items?q=dti-enhance#notes/${esc(ui.key)}" target="_blank" rel="noopener" title="Open it in DTI’s Notes">${ICO.ext}</a>` : ''}</div>
+                ${ui.undo?.key === ui.key && Date.now() - ui.undo.at < 120e3 ? `<div class="undobar"><span>${plural(ui.undo.n, 'item')} put in from your NC gifts</span><button type="button" class="btn sm" data-undo>Undo</button></div>` : ''}
+                ${got.length ? `<div class="seekgot"><span>◎ You got ${esc(got.map(it => it.name).join(', '))} — still on your Seeking list.</span><button type="button" class="seekoff" data-ids="${esc(got.map(it => it.id).join(','))}">Take ${got.length === 1 ? 'it' : 'them'} off</button></div>` : ''}
+                <section class="card"><div class="cb fields">
+                    <label class="fld"><span>Trading with</span><input class="inp partner" list="partners" placeholder="Their Neopets username" autocomplete="off" spellcheck="false" value="${esc(t.partner?.name || '')}"></label>
+                    <div class="hrow"><label class="fld" style="flex:1;min-width:0"><span>Title <i style="font-style:normal;text-transform:none;letter-spacing:0;font-weight:600">(if you like)</i></span><input class="inp ttitle" maxlength="120" placeholder="${esc(t.partner?.name ? `Trade with ${t.partner.name}` : 'Trade')}" value="${esc(n.title || '')}" autocomplete="off"></label>
+                        ${acctMany() ? `<label class="fld"><span>Account</span><select class="sel tacct" style="height:38px">${acctAll().map(a => `<option value="${esc(a.id)}"${acctOfTrade(t) === a.id ? ' selected' : ''}>${esc(acctName(a))}</option>`).join('')}</select></label>` : ''}</div>
+                    <div class="seg st">${STATUS.map(([v, l]) => `<button type="button" data-seg="${v}" class="${v === t.status ? 'on s-' + v : ''}">${l}</button>`).join('')}</div>
+                </div></section>
+                ${['give', 'get'].map(side => card(SIDE_ICO[side], side === 'give' ? 'You give' : 'You get', t[side].reduce((s, it) => s + it.qty, 0) || '', '',
+                    (t[side].length ? `<div class="rows">${t[side].map((it, i) => itemRow(it, side, i)).join('')}</div>` : '')
+                    + `<div class="cb" style="display:flex;flex-direction:column;gap:8px${t[side].length ? ';border-top:1px solid var(--b)' : ''}"><div class="tot" data-tot="${side}" hidden></div><div class="add"><input class="inp" data-add="${side}" placeholder="＋ Add an item or style token…" autocomplete="off" spellcheck="false"><div class="drop" hidden></div></div>
+                        <div class="quick">${Object.entries(GBC_KINDS).map(([id, g]) => `<button type="button" data-gbc="${id}" data-side="${side}" title="Add a ${g.name} (${esc(g.full)}) — ${gbcCaps(id)}">${ICO.gift}+ ${g.name}</button>`).join('')}</div></div>`)).join('')}
+                <div class="bal" hidden></div>
+                <section class="card"><div class="cb fields">
+                    <label class="fld"><span>Notes</span><textarea class="inp text" placeholder="Anything to remember about this trade">${esc(n.text || '')}</textarea></label>
+                    <div class="edfoot"><input type="date" class="inp date" value="${esc(t.date)}" title="When it happened" aria-label="Date">${saved ? '<button type="button" class="del">Delete</button>' : ''}</div>
+                </div></section>`;
+            win.querySelector('#partners').innerHTML = partnerNames().map(p => `<option value="${esc(p)}"></option>`).join('');
             wireEditor();
+            paintTradeVals(t);
+        }
+        // (cap values, as DTI's trade report has them: each entry's, each side's total, and how the two sides compare — GBCs at their
+        // fixed caps, everything else by name from the value lists)
+        let tvGen = 0;
+        const fmtN = x => String(Math.round(x * 10) / 10);
+        const fmtCaps = ([a, b]) => a === b ? `${fmtN(a)} cap${a === 1 ? '' : 's'}` : `${fmtN(a)}–${fmtN(b)} caps`;
+        function paintTradeVals(t) {
+            const gen = ++tvGen, totals = {};
+            ['give', 'get'].forEach(side => {
+                const list = t[side], acc = { min: 0, max: 0, unknown: 0, n: list.length };
+                Promise.all(list.map(x => GBC_KINDS[x.id] ? [GBC_KINDS[x.id].caps, GBC_KINDS[x.id].caps] : npNcValue(x.name).then(capNums).catch(() => null))).then(vals => {
+                    if (gen !== tvGen) return;
+                    vals.forEach((v, i) => {
+                        const x = list[i], tag = body.querySelector(`[data-iv="${side}:${i}"]`);
+                        if (v) { acc.min += v[0] * x.qty; acc.max += v[1] * x.qty; if (tag) { tag.textContent = fmtCaps(v); tag.hidden = false; } }
+                        else acc.unknown += x.qty;
+                    });
+                    totals[side] = acc;
+                    const el = body.querySelector(`[data-tot="${side}"]`);
+                    if (el) { el.hidden = !acc.n; el.innerHTML = !acc.n ? '' : (acc.max ? `Total <b>≈ ${fmtCaps([acc.min, acc.max])}</b>` : '<b>No cap values</b>') + (acc.unknown ? ` · ${acc.unknown} without a value` : ''); }
+                    if (totals.give && totals.get) paintBal(totals);
+                });
+            });
+        }
+        function paintBal({ give, get }) {
+            const el = body.querySelector('.bal');
+            if (!el) return;
+            if (!give.max && !get.max) { el.hidden = true; return; }
+            const diff = (get.min + get.max) / 2 - (give.min + give.max) / 2, even = Math.abs(diff) < 0.25;
+            el.hidden = false;
+            el.className = 'bal ' + (even ? 'even' : diff > 0 ? 'up' : 'down');
+            el.innerHTML = `<b>${even ? 'About even by cap value' : `You ${diff > 0 ? 'get' : 'give'} ≈ ${fmtN(Math.abs(diff))} cap${Math.abs(diff) === 1 ? '' : 's'} more`}</b>`
+                + `<small>${give.max ? fmtCaps([give.min, give.max]) : '0 caps'} ⇄ ${get.max ? fmtCaps([get.min, get.max]) : '0 caps'}${give.unknown || get.unknown ? ' · some items have no value' : ''}</small>`;
         }
         function rerenderEditor(focusSide) {
             const top = body.scrollTop;
@@ -34251,582 +35661,45 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 body.querySelector('.edtitle').textContent = titleOf(cur());
             };
             const saveText = () => { if ((cur().text || '') !== text.value) saveNote(ui.key, { text: text.value, trade: cur().trade }); };
+            const title = body.querySelector('.ttitle'), acct = body.querySelector('.tacct');
+            const saveTitle = () => {
+                const v = title.value.trim();
+                if ((cur().title || '') === v) return;
+                saveNote(ui.key, { title: v, trade: cur().trade });
+                body.querySelector('.edtitle').textContent = titleOf(cur());
+            };
+            let iT = 0;
+            title.addEventListener('input', () => { clearTimeout(iT); iT = setTimeout(saveTitle, 500); });
+            title.addEventListener('change', () => { clearTimeout(iT); saveTitle(); });
+            acct?.addEventListener('change', () => patchTrade(t => { t.acct = acct.value; }));
             let pT = 0, tT = 0;
             partner.addEventListener('input', () => { clearTimeout(pT); pT = setTimeout(savePartner, 400); });
             partner.addEventListener('change', () => { clearTimeout(pT); savePartner(); });
             text.addEventListener('input', () => { clearTimeout(tT); tT = setTimeout(saveText, 500); });
             text.addEventListener('change', () => { clearTimeout(tT); saveText(); });
             date.addEventListener('change', () => patchTrade(t => { t.date = date.value; }));
-            // add items: DTI's search, or the name as typed
+            // add items: DTI's search (style tokens and GBCs too), or the name as typed
             body.querySelectorAll('[data-add]').forEach(inp => {
-                const drop = inp.nextElementSibling, side = inp.dataset.add;
-                let timer = 0, gen = 0, results = [], hl = 0;
-                const show = html => { drop.innerHTML = html; drop.hidden = !html; };
-                const paint = () => show(results.map((it, i) => `<button type="button" class="opt${i === hl ? ' hl' : ''}" data-pick="${i}">
-                    ${itemPic(it)}<span>${esc(it.name)}</span>${it.nc ? '<i class="tag">NC</i>' : ''}${it.tok ? '<i class="tag typed">Token</i>' : ''}${it.typed ? '<i class="tag typed">as typed</i>' : ''}</button>`).join(''));
-                const pick = it => {
+                const side = inp.dataset.add;
+                attachSearch(inp, { tokens: true, gbc: true, typed: true }, it => {
                     if (!it) return;
                     patchTrade(t => { const ex = t[side].find(o => o.id === it.id); if (ex) ex.qty++; else t[side].push({ id: it.id, name: GBC_KINDS[it.id]?.name || it.name, img: it.img, qty: 1 }); });
                     rerenderEditor(side);
-                };
-                inp.addEventListener('input', () => {
-                    clearTimeout(timer);
-                    const q = inp.value.trim();
-                    if (q.length < 2) { gen++; return show(''); }
-                    show('<div class="msg">Searching DTI…</div>');
-                    timer = setTimeout(async () => {
-                        const my = ++gen, d = await dtiJSON('/items.json?q=' + encodeURIComponent(q));
-                        if (my !== gen || !inp.isConnected) return;
-                        results = (d?.items || []).slice(0, 8).map(it => ({ id: String(it.id), name: it.name, img: it.thumbnail_url || '', nc: !!it['nc?'] }));
-                        // style tokens too (DTI has none): a name that's just that, or starts with it, above DTI's items; the rest after
-                        const cat = tkCat || tokenCatalogIfCached();
-                        if (!cat) loadTokenCatalog().then(c => { tkCat = c; if (inp.isConnected && inp.value.trim() === q) inp.dispatchEvent(new Event('input')); }).catch(() => {});
-                        const toks = tokSearch(cat, q, 5).map(({ t, rank }) => ({ ...tokTradeItem(t), tok: true, rank }));
-                        results = [...toks.filter(x => x.rank < 2), ...results, ...toks.filter(x => x.rank === 2)];
-                        if (/\b(bf)?gbcs?\b|gift ?box|black friday/i.test(q)) results.unshift(...Object.entries(GBC_KINDS).map(([id, g]) => ({ id, name: `${g.name} \u2014 ${g.full.replace(/ \u2014 .*$/, '')}`, img: '' })));   // (any GBC, as Notes has it)
-                        if (!results.some(it => it.name.toLowerCase() === q.toLowerCase())) results.push({ id: npId(q), name: q, img: '', typed: true });
-                        hl = 0;
-                        paint();
-                    }, 280);
                 });
-                inp.addEventListener('keydown', e => {
-                    if (drop.hidden || !results.length) return;
-                    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); hl = (hl + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length; paint(); }
-                    else if (e.key === 'Enter') { e.preventDefault(); pick(results[hl]); }
-                    else if (e.key === 'Escape') { e.stopPropagation(); show(''); }
-                });
-                inp.addEventListener('blur', () => setTimeout(() => { if (inp.isConnected) show(''); }, 150));
-                drop.addEventListener('mousedown', e => e.preventDefault());   // (keeps the box focused while you pick)
-                drop.addEventListener('click', e => { const b = e.target.closest('[data-pick]'); if (b) pick(results[+b.dataset.pick]); });
             });
         }
-        // Search: any item on DTI, with its NC value
-        const lastSearch = { q: '', items: null, page: 0, pages: 0 };
-        function renderSearch() {
-            body.innerHTML = `<label class="sbox">${ICO.search}<input class="txt sq" type="search" placeholder="Search items on DTI…" autocomplete="off" spellcheck="false" value="${esc(ui.q)}"></label><div class="sres"></div>`;
-            const inp = body.querySelector('.sq'), res = body.querySelector('.sres');
-            res.addEventListener('click', e => {   // (◎: on / off your Seeking list — not the link around it)
-                const sk = e.target.closest('[data-skadd]');
-                if (!sk) return;
-                e.preventDefault(); e.stopPropagation();
-                const it = JSON.parse(sk.dataset.skadd);
-                const on = !seekHas(it.id);
-                seekSave(items => { if (on) items[it.id] = { name: it.name, img: it.img, at: Date.now(), note: '', acct: acctMany() ? meAcct() : '', ord: -Date.now() }; else delete items[it.id]; });
-                sk.classList.toggle('on', on);
-                sk.title = on ? 'On your Seeking list \u2014 click to take it off' : 'Seeking now: add it to your Seeking list';
-            }, true);
-            let timer = 0, gen = 0;
-            const empty = () => { res.innerHTML = '<div class="empty"><b>Find any item</b>Search DTI by name. NC items show what they’re worth. A click opens it here: your lists, Seeking, a note or a trade.</div>'; };
-            const paint = () => {
-                const { items, page, pages } = lastSearch;
-                if (!items.length) { res.innerHTML = '<div class="msg">No items found</div>'; return; }
-                res.innerHTML = items.map(it => `<div class="sr" role="button" tabindex="0" data-item="${esc(JSON.stringify({ id: String(it.id), name: it.name, img: it.thumbnail_url || '', nc: !!it['nc?'] }))}" title="${esc(it.name)} \u2014 your lists, Seeking, a note, a trade">
-                    <img src="${esc(it.thumbnail_url || '')}" alt="" loading="lazy"><span class="nm">${esc(it.name)}</span>${it['nc?'] ? '<i class="tag">NC</i><span class="val"></span>' : ''}${seekOn() ? `<span class="sk${seekHas(it.id) ? ' on' : ''}" role="button" data-skadd="${esc(JSON.stringify({ id: String(it.id), name: it.name, img: it.thumbnail_url || '' }))}" title="${seekHas(it.id) ? 'On your Seeking list \u2014 click to take it off' : 'Seeking now: add it to your Seeking list'}">\u25ce</span>` : ''}<a class="go" href="${D}/items/${esc(it.id)}" target="_blank" rel="noopener" title="Open it on DTI">${ICO.ext}</a></div>`).join('');
-                if (page < pages) res.insertAdjacentHTML('beforeend', `<button type="button" class="smore">Show more <small>page ${page} of ${pages}</small></button>`);
-                res.querySelectorAll('.sr').forEach((a, i) => {
-                    if (!items[i]['nc?']) return;
-                    npNcValue(items[i].name).then(v => { const el = a.querySelector('.val'); if (el && v) { el.textContent = capNums(v) ? String(v).replace(/\*$/, '') + ' caps' : v; el.title = String(v); } });
-                });
-            };
-            const run = async q => {
-                if (lastSearch.q === q && lastSearch.items) return paint();
-                const my = ++gen;
-                res.innerHTML = '<div class="msg">Searching DTI…</div>';
-                const d = await dtiJSON('/items.json?q=' + encodeURIComponent(q));
-                if (my !== gen || !res.isConnected) return;
-                if (!d) { res.innerHTML = '<div class="msg">Couldn’t reach DTI — try again</div>'; return; }
-                Object.assign(lastSearch, { q, items: d.items || [], page: 1, pages: d.total_pages || 1 });
-                paint();
-            };
-            res.addEventListener('click', async e => {   // the next page, under what's shown
-                const b = e.target.closest('.smore');
-                if (!b || b.disabled) return;
-                const { q, page } = lastSearch, my = gen;
-                b.disabled = true; b.textContent = 'Loading…';
-                const d = await dtiJSON(`/items.json?q=${encodeURIComponent(q)}&page=${page + 1}`);
-                if (my !== gen || lastSearch.q !== q || !res.isConnected) return;
-                if (!d) { b.disabled = false; b.textContent = 'Couldn’t reach DTI — try again'; return; }
-                const have = new Set(lastSearch.items.map(it => it.id));
-                Object.assign(lastSearch, { items: [...lastSearch.items, ...(d.items || []).filter(it => !have.has(it.id))], page: page + 1, pages: d.total_pages || lastSearch.pages });
-                const top = res.parentElement?.scrollTop;   // (the list grows below — nothing moves)
-                paint();
-                if (top != null) res.parentElement.scrollTop = top;
-            });
-            inp.addEventListener('input', () => {
-                clearTimeout(timer);
-                ui.q = inp.value;
-                const q = inp.value.trim();
-                if (q.length < 2) { gen++; return empty(); }
-                timer = setTimeout(() => run(q), 300);
-            });
-            if (ui.q.trim().length >= 2) run(ui.q.trim()); else empty();
-        }
-        // ── Seeking: your short list of items you want now (DTI's Seeking page), for the account you're logged into ──
-        const seekAll = () => Object.entries((GM_getValue('dti_seeking', null) || {}).items || {}).map(([id, e]) => ({ ...e, id }));
-        const seekAcct = e => e.acct && acctGet(e.acct) ? e.acct : 'main';
-        const seekSave = mut => { const d = GM_getValue('dti_seeking', null) || { v: 1, items: {} }; d.items = d.items || {}; mut(d.items); GM_setValue('dti_seeking', d); };
-        const seekHas = id => seekOn() && !!((GM_getValue('dti_seeking', null) || {}).items || {})[String(id)];
-        function renderSeeking() {
-            const tierOf = e => (e.tier === 0 || e.tier === 2 ? e.tier : 1);   // (Must have, Want, Maybe)
-            const list = seekAll().filter(e => inMine(seekAcct(e))).sort((a, b) => tierOf(a) - tierOf(b) || (a.ord ?? 0) - (b.ord ?? 0) || (b.at || 0) - (a.at || 0));
-            const ma = acctMany() ? acctGet(meAcct()) : null;
-            body.innerHTML = `${ma ? `<div class="acctbar"><i style="background:${esc(ma.color)}"></i><span>${ui.allAcct ? 'All your accounts' : `${esc(acctName(ma))} is seeking`}</span><button type="button" class="acctall">${ui.allAcct ? `Just ${esc(acctName(ma))}` : 'All accounts'}</button></div>` : ''}
-                ${list.length ? `<div class="sec">Seeking now <b>${list.length}</b></div>
-                    <div class="list">${list.map(e => `<div class="skrow" data-sk="${esc(e.id)}" role="button" tabindex="0" data-item="${esc(JSON.stringify({ id: String(e.id), name: e.name || '', img: e.img || '' }))}" title="${esc(e.name || 'Item')} \u2014 your lists, a note, a trade">
-                        ${e.img ? `<img src="${esc(e.img)}" alt="" loading="lazy">` : '<span class="noimg"></span>'}
-                        <span class="sktxt"><b>${esc(e.name || 'Item')}</b><span class="skval" hidden></span>${e.note ? `<small>${esc(e.note)}</small>` : ''}</span>
-                        <button type="button" class="rm" data-skrm="${esc(e.id)}" title="Take it off your Seeking list" aria-label="Remove">\u00d7</button>
-                    </div>`).join('')}</div>
-                    <button type="button" class="morebtn skcopy">Copy as text</button>`
-                : '<div class="empty"><b>Nothing on your Seeking list</b>The items you want now \u2014 add them on DTI (an item\u2019s \u201cAdd to your lists\u201d \u203a Seeking now), or from the Search tab here.</div>'}
-                <a class="alllink" href="${D}/items?q=dti-enhance#seeking" target="_blank" rel="noopener">Your Seeking list on DTI ${ICO.ext}</a>`;
-            body.querySelectorAll('.skrow').forEach(row => {
-                const e = list.find(x => x.id === row.dataset.sk);
-                npNcValue(e.name).then(v => { const el = row.querySelector('.skval'); if (el && capNums(v)) { el.textContent = String(v).replace(/\*$/, '') + ' caps'; el.hidden = false; } });
-            });
-        }
-        // ════ On this page: what the Neopets page you're on has for you (a card at the top of the panel, a dot on the tab) ════
-        const ctx = (() => {
-            const path = location.pathname, qs = new URLSearchParams(location.search), me = npWhoAmI();
-            if (/^\/mall\/stylingstudio/i.test(path)) return { kind: 'studio', label: 'Styling Studio' };
-            if (/^ncmall\./i.test(location.hostname)) return { kind: 'mall', label: 'NC Mall' };
-            const gal = /^\/gallery\//i.test(path);
-            const who = (path === '/userlookup.phtml' && qs.get('user')) || (path === '/neomessages.phtml' && qs.get('recipient')) || (gal && qs.get('gu')) || '';
-            if (who && who.toLowerCase() !== me) return { kind: 'user', who, gallery: gal, label: gal ? `${who}’s gallery` : who };
-            const src = path === '/inventory.phtml' ? 'inv' : path === '/safetydeposit.phtml' ? 'sdb' : gal ? 'gal' : /^\/stylingchamber/i.test(path) ? 'sc' : '';
-            return src ? { kind: 'import', src, label: `Your ${TOK_SOURCES.find(s => s.key === src)?.label || 'items'}` } : null;
-        })();
-        let ctxBusy = '', mallFail = false, studioFail = false;
-        // The NC Mall now — the list DTI's NC Mall Guide uses — kept 30 minutes in this site's storage
-        let mallP = null;
-        const mallCached = () => { try { const c = JSON.parse(localStorage.getItem('dti_np_mall') || 'null'); return c?.t && Date.now() - c.t < 30 * 60e3 && Array.isArray(c.items) ? c.items : null; } catch (_) { return null; } };
-        function npMallFeed() {
-            return mallP || (mallP = new Promise(res => {
-                const c = mallCached();
-                if (c) return res(c);
-                GM_xmlhttpRequest({ method: 'GET', url: 'https://dtr-itemdb.dti-remix.workers.dev/mall-status', timeout: 20000, anonymous: true,
-                    onload: r => {
-                        let items = null;
-                        try { items = JSON.parse(r.responseText).items; } catch (_) {}
-                        if (!Array.isArray(items) || !items.length) { mallP = null; return res(null); }
-                        const slim = items.map(x => ({ id: String(x.item_id), name: x.name, img: x.image || '', price: x.price, dp: x.discountPrice, de: x.discountEnd || '', sb: x.saleBegin || '', se: x.saleEnd || '' }));
-                        try { localStorage.setItem('dti_np_mall', JSON.stringify({ t: Date.now(), items: slim })); } catch (_) {}
-                        res(slim);
-                    },
-                    onerror: () => { mallP = null; res(null); }, ontimeout: () => { mallP = null; res(null); } });
-            }));
-        }
-        const mallNow = r => { const now = Date.now(); return (!r.sb || Date.parse(r.sb) <= now) && (!r.se || Date.parse(r.se) > now); };
-        const mallTag = r => {
-            const now = Date.now();
-            if (r.dp != null && r.de && Date.parse(r.de) > now) return `<em class="sale">${esc(r.dp)} NC · sale</em>`;
-            const left = r.se ? Math.ceil((Date.parse(r.se) - now) / 864e5) : 99;
-            if (left <= 7) return `<em class="soon">leaves in ${left} day${left === 1 ? '' : 's'}</em>`;
-            return `<em>${r.price ? esc(r.price) + ' NC' : 'Free'}</em>`;
-        };
-        // The tokens you want (no catalog needed: the names and pictures My Tokens keeps)
-        const myTokWant = () => { const mine = DTITokens.read(tkScope()).mine; return Object.keys(mine).filter(k => (mine[k].want || 0) > 0).map(k => tokInfo(k, tkCat, mine, new Map())); };
-        const tokPic = i => i.img ? `<img src="${esc(i.img)}" alt="" loading="lazy">` : '<span class="noimg"></span>';
-        const ctxTokRow = (i, seg = 'want') => `<button type="button" class="crow" data-tkgo="${seg}" data-tkkey="${esc(i.key)}" title="Open it in Tokens">${tokPic(i)}<span>${esc(i.name)}</span><em>${i.want ? 'Wanted' : i.own ? 'Owned' : ''}</em></button>`;
-        // → { n: things here for you, tip, body } — from what's already here (the loads it needs start in ctxLoads)
-        function ctxModel() {
-            if (!ctx) return null;
-            if (ctx.kind === 'studio') {
-                const st = tokStudioKeys();
-                if (!st) return { n: 0, body: ctxBusy === 'studio' ? '<div class="msg">Reading the Studio’s rotation…</div>'
-                    : `<div class="cline">${studioFail ? 'Couldn’t reach itemdb for the rotation.' : 'See which of the tokens you want are in the Studio’s rotation (read from itemdb).'}</div><button type="button" class="btn pri" data-studioread>${studioFail ? 'Try again' : 'Check the rotation'}</button>` };
-                const want = myTokWant().filter(i => st.has(i.key));
-                return { n: want.length, tip: `${want.length} token${want.length === 1 ? '' : 's'} you want ${want.length === 1 ? 'is' : 'are'} in the Styling Studio`,
-                    body: (want.length ? `<div class="cline"><b>${want.length}</b> token${want.length === 1 ? '' : 's'} you want ${want.length === 1 ? 'is' : 'are'} in this rotation</div>${want.map(i => ctxTokRow(i, 'studio')).join('')}`
-                        : `<div class="cline">None of the tokens you want are in this rotation.</div>`)
-                        + `<button type="button" class="lnkbtn" data-tkgo="studio">See the whole rotation (${st.size}) ›</button>` };
-            }
-            if (ctx.kind === 'mall') {
-                const seek = seekAll().filter(e => inMine(seekAcct(e)));
-                if (!seek.length) return { n: 0, body: '<div class="cline">Your Seeking list is empty — items on it show here when they’re in the NC Mall.</div>' };
-                const feed = mallCached();
-                if (!feed) return { n: 0, body: mallFail ? '<div class="cline">Couldn’t check the NC Mall right now.</div>' : '<div class="msg">Checking the NC Mall…</div>' };
-                const hits = seek.map(e => ({ e, r: feed.find(r => r.id === String(e.id) && mallNow(r)) })).filter(x => x.r);
-                return { n: hits.length, tip: `${hits.length} item${hits.length === 1 ? '' : 's'} you’re seeking ${hits.length === 1 ? 'is' : 'are'} in the NC Mall`,
-                    body: hits.length ? `<div class="cline"><b>${hits.length}</b> item${hits.length === 1 ? '' : 's'} you’re seeking ${hits.length === 1 ? 'is' : 'are'} in the NC Mall now</div>`
-                        + hits.map(({ e, r }) => `<button type="button" class="crow" data-item="${esc(JSON.stringify({ id: String(e.id), name: e.name || r.name, img: e.img || r.img, nc: true }))}">${(e.img || r.img) ? `<img src="${esc(e.img || r.img)}" alt="">` : '<span class="noimg"></span>'}<span>${esc(e.name || r.name)}</span>${mallTag(r)}</button>`).join('')
-                        : `<div class="cline">Nothing you’re seeking is in the NC Mall right now <small>(${seek.length} on your list)</small>.</div>` };
-            }
-            if (ctx.kind === 'user') {
-                const w = ctx.who.toLowerCase();
-                const theirs = trades().filter(n => (n.trade?.partner?.name || '').toLowerCase() === w).sort((a, b) => (b.updated || 0) - (a.updated || 0));
-                const open = theirs.filter(isOpen);
-                let has = [];
-                if (ctx.gallery) {
-                    const want = new Map(myTokWant().map(i => [i.key, i]));
-                    has = [...new Set([...scrapeNeoItems('gal').keys()].map(tokNorm))].filter(k => want.has(k)).map(k => want.get(k));
-                }
-                const n = open.length + has.length;
-                return { n, tip: [open.length ? `${open.length} open trade${open.length === 1 ? '' : 's'} with ${ctx.who}` : '', has.length ? `they have ${has.length} token${has.length === 1 ? '' : 's'} you want` : ''].filter(Boolean).join(' · '),
-                    body: (has.length ? `<div class="cline">They have <b>${has.length}</b> token${has.length === 1 ? '' : 's'} you want</div>${has.map(i => ctxTokRow(i)).join('')}` : '')
-                        + (open.length ? `<div class="cline">Open trade${open.length === 1 ? '' : 's'} with ${esc(ctx.who)}</div><div class="list">${open.map(tradeRow).join('')}</div>`
-                            : `<div class="cline">${theirs.length ? `${theirs.length} finished trade${theirs.length === 1 ? '' : 's'} with ${esc(ctx.who)} — none open.` : `No trade reports with ${esc(ctx.who)} yet.`}</div>`)
-                        + `<button type="button" class="btn pri" data-newwith>${ICO.plus.replace('<svg ', '<svg width="11" height="11" ')} Trade report with ${esc(ctx.who)}</button>` };
-            }
-            if (ctx.kind === 'import') {
-                const ask = GM_getValue('dti_tok_capture', 0);
-                if (ask && ask.src === ctx.src && Date.now() - ask.at < 30 * 60e3) return { n: 0, body: '<div class="cline">Importing your tokens from this page — the import panel is on the page.</div>' };
-                const cap = DTITokens.capOf(ctx.src, tkScope());
-                return { n: 0, body: `<div class="cline">${cap ? `Last import from here: ${esc(ago(cap.at))}.` : 'Bring the style tokens on this page into My Tokens.'}${ctx.src === 'sdb' ? ' <small>(the SDB’s NC side)</small>' : ctx.src === 'sc' ? ' <small>(with “Show All” on)</small>' : ''}</div>
-                    <button type="button" class="btn pri" data-import>${ICO.down.replace('<svg ', '<svg width="12" height="12" ')} Import tokens from this page</button>` };
-            }
-            return null;
-        }
-        const ctxCount = () => { try { return ctxModel()?.n || 0; } catch (_) { return 0; } };
-        function paintCtx() {
-            const m = ctx && ctxModel();
-            if (!m) return;
-            const fold = !!(GM_getValue('dti_np_ctx_fold', {}) || {})[ctx.kind];
-            body.insertAdjacentHTML('afterbegin', `<section class="ctx${fold ? ' fold' : ''}">
-                <button type="button" class="ctxhd" data-ctxfold aria-expanded="${!fold}" title="${fold ? 'Show' : 'Hide'} what this page has for you">${ICO.here}<b>On this page</b><span>${esc(ctx.label)}</span>${m.n ? `<i>${m.n}</i>` : ''}<em>${fold ? '▾' : '▴'}</em></button>
-                ${fold ? '' : `<div class="ctxbody">${m.body}</div>`}</section>`);
-            ctxLoads();
-        }
-        function ctxLoads() {   // what the card needs, once: the NC Mall list; the Studio's rotation when it's old (you've used it)
-            if (ctxBusy) return;
-            if (ctx?.kind === 'mall' && !mallCached() && !mallFail && seekAll().length) {
-                ctxBusy = 'mall';
-                npMallFeed().then(items => { ctxBusy = ''; mallFail = !items; paintBadge(); if (!panel.hidden && !ui.item) rerender(); });
-            }
-            if (ctx?.kind === 'studio' && tokStudio() && Date.now() - tokStudio().at > TOK_STUDIO_AGE && !studioFail) studioRead();
-        }
-        function studioRead() {
-            if (ctxBusy) return;
-            ctxBusy = 'studio'; studioFail = false;
-            tokStudioRefresh().then(() => { studioFail = false; }).catch(() => { studioFail = true; })
-                .finally(() => { ctxBusy = ''; paintBadge(); if (!panel.hidden && !ui.item) rerender(); });
-        }
-        function rerender() { const top = body.scrollTop; render(); body.scrollTop = top; }
-
-        // ════ Tokens: My Tokens' own data — for the account you're logged into here (or all of yours) ════
-        let tkCat = null, tkCatState = '', tkT = 0;
-        const tkScope = () => acctMany() && !ui.allAcct ? meAcct() : 'all';
-        function tkLoadCat() {   // DTI's token list: this site's own copy (a week), else read from DTI — only once Tokens is used
-            if (tkCatState) return;
-            tkCatState = 'loading';
-            tkCat = tokenCatalogIfCached();
-            loadTokenCatalog().then(c => { tkCat = c; tkCatState = 'ok'; }).catch(() => { tkCatState = tkCat ? 'ok' : 'error'; })
-                .finally(() => { if (!panel.hidden && (ui.tab === 'tokens' || ui.item)) rerender(); });
-        }
-        // One token's info: yours, or one from the Studio's rotation / an item open here that DTI doesn't list (its name and picture)
-        function tkInfoOf(key, also) {
-            const scope = tkScope(), mine = DTITokens.read(scope).mine, imported = tokImported(tkCat, scope);
-            const r = tokStudioKeys()?.get(key);
-            if (!tkCat?.byKey.has(key) && !imported.has(key) && (r || also)) imported.set(key, r ? { name: r[0], img: r[1] ? r[1] + '.gif' : '' } : also);
-            return tokInfo(key, tkCat, mine, imported);
-        }
-        const tkEditHtml = (i, solo) => {
-            const lists = TokLists.raw(), l = TokLists.listOf(lists, i.key);
-            return `<div class="tkedit${solo ? ' solo' : ''}" data-tk="${esc(i.key)}"${solo ? ` data-tkname="${esc(i.name)}" data-tkimg="${esc(i.img || '')}"` : ''}>
-                <div class="tkstep"><span>Own</span><button type="button" data-tkstep="own" data-d="-1"${i.own ? '' : ' disabled'} aria-label="One less">−</button><b>${i.own}</b><button type="button" data-tkstep="own" data-d="1" aria-label="One more">+</button></div>
-                <div class="tkstep"><span>Want</span><button type="button" data-tkstep="want" data-d="-1"${i.want ? '' : ' disabled'} aria-label="One less">−</button><b>${i.want}</b><button type="button" data-tkstep="want" data-d="1" aria-label="One more">+</button></div>
-                ${i.own ? `<button type="button" class="tkuft${i.uft ? ' on' : ''}" data-tkuft aria-pressed="${!!i.uft}" title="${i.uft ? 'Up for trade \u2014 click if it isn\u2019t any more' : 'Mark it up for trade \u2014 people you share your tokens with see it'}">${i.uft ? 'UFT' : '+ UFT'}</button>` : ''}
-                ${i.want ? `<label class="tklist"><span>List</span><select data-tklist>${['<option value="">No list</option>', ...lists.lists.map(x => `<option value="${esc(x.id)}"${l?.id === x.id ? ' selected' : ''}>${esc(x.name)}</option>`)].join('')}</select></label>` : ''}
-                ${i.from || i.gone ? `<small class="tkfrom">${esc(tokOwnTitle(i))}</small>` : ''}
-            </div>`;
-        };
-        const tkRow = (i, st, lists) => {
-            const l = i.want ? TokLists.listOf(lists, i.key) : null, open = ui.tk.open === i.key;
-            const meta = [i.series || (i.essence ? 'Essence' : ''), i.species || (i.anyPet ? 'any pet' : '')].filter(Boolean).join(' · ');
-            return `<div class="tkrow${open ? ' open' : ''}" data-tkrow="${esc(i.key)}">
-                <button type="button" class="tkmain" data-tkopen="${esc(i.key)}" aria-expanded="${open}" title="${open ? 'Close' : 'Own, want, its list'}">
-                    ${tokPic(i)}<span class="tktxt"><b>${esc(i.name)}</b>${meta ? `<small>${esc(meta)}</small>` : ''}</span>
-                    <span class="tkmarks">${st?.has(i.key) ? '<i class="av" title="In the Styling Studio right now">Available</i>' : ''}${l ? `<i class="ll" style="--lc:${esc(l.color)}">${esc(l.name)}</i>` : ''}${i.own ? `<i class="ow">Owned${i.own > 1 ? ' ×' + i.own : ''}</i>` : ''}${i.uft ? '<i class="uf" title="Up for trade">UFT</i>' : ''}${i.want && !l ? '<i class="wa">Wanted</i>' : ''}</span>
-                </button>
-                ${open ? tkEditHtml(i) : ''}
-            </div>`;
-        };
-        function renderTokens() {
-            tkLoadCat();
-            const scope = tkScope(), mine = DTITokens.read(scope).mine, imported = tokImported(tkCat, scope), st = tokStudioKeys();
-            const yourKeys = new Set([...Object.keys(mine), ...imported.keys()]);
-            if (st) st.forEach((r, k) => { if (!tkCat?.byKey.has(k) && !imported.has(k)) imported.set(k, { name: r[0], img: r[1] ? r[1] + '.gif' : '' }); });
-            const info = k => tokInfo(k, tkCat, mine, imported);
-            const yours = [...yourKeys].map(info), byKey = new Map(yours.map(i => [i.key, i]));
-            const own = yours.filter(i => i.own).sort((a, b) => a.name.localeCompare(b.name)), want = yours.filter(i => i.want).sort((a, b) => a.name.localeCompare(b.name));
-            const studio = st ? [...st.keys()].map(k => byKey.get(k) || info(k)) : [];
-            const seg = ui.tk.seg, q = ui.tk.q.trim().toLowerCase(), lists = TokLists.raw();
-            const hit = i => !q || `${i.name} ${i.series} ${i.species}`.toLowerCase().includes(q);
-            const list = (seg === 'own' ? own : seg === 'studio' ? studio : want).filter(hit);
-            // a search also looks through every token (to mark one you just saw)
-            const shown = new Set(list.map(i => i.key));
-            const more = q.length >= 2 && tkCat && seg !== 'studio' ? [...tkCat.byKey.keys()].filter(k => !shown.has(k) && k.includes(q)).slice(0, 40).map(k => byKey.get(k) || info(k)) : [];
-            const rows = arr => `<div class="list">${arr.map(i => tkRow(i, st, lists)).join('')}</div>`;
-            let main;
-            if (seg === 'want' && !q && lists.lists.length && list.length) {   // by your want lists
-                const by = new Map(lists.lists.map(l => [l.id, []])), none = [];
-                list.forEach(i => { const l = TokLists.listOf(lists, i.key); (l ? by.get(l.id) : none).push(i); });
-                main = lists.lists.filter(l => by.get(l.id).length).map(l => `<div class="sec"><i class="ldot" style="background:${esc(l.color)}"></i>${esc(l.name)} <b>${by.get(l.id).length}</b></div>${rows(by.get(l.id))}`).join('')
-                    + (none.length ? `<div class="sec">Not in a list <b>${none.length}</b></div>${rows(none)}` : '');
-            } else main = list.length ? rows(list) : '';
-            const empty = q ? (more.length ? '' : '<div class="msg">No tokens match</div>')
-                : seg === 'want' ? '<div class="empty"><b>No tokens wanted yet</b>Search any token above and press Want on it — the same Want list as My Tokens.</div>'
-                : seg === 'own' ? '<div class="empty"><b>No tokens owned yet</b>Open your Inventory, SDB, Gallery or Styling Chamber on Neopets — “On this page” up top has an Import button there.</div>'
-                : '';
-            const sd = tokStudio();
-            const studioHead = seg !== 'studio' ? '' : st
-                ? `<div class="tknote"><span>The Styling Studio’s rotation · from <a href="${esc(TOK_STUDIO_URL)}" target="_blank" rel="noopener">itemdb</a>, ${ctxBusy === 'studio' ? 'checking…' : 'checked ' + esc(ago(sd.at))}</span><button type="button" data-studioread${ctxBusy === 'studio' ? ' disabled' : ''}>Check again</button></div>`
-                : `<div class="empty"><b>The Styling Studio’s rotation</b>Which style tokens you can get on Neopets right now — read from itemdb (the same list as “Available now” in My Tokens).<br><br>${ctxBusy === 'studio' ? '<span class="msg">Reading it…</span>' : `<button type="button" class="btn pri" data-studioread>${studioFail ? 'Couldn’t reach itemdb — try again' : 'Read the rotation'}</button>`}</div>`;
-            const ma = acctMany() ? acctGet(meAcct()) : null;
-            body.innerHTML = `${ma ? `<div class="acctbar"><i style="background:${esc(ma.color)}"></i><span>${ui.allAcct ? 'All your accounts' : `${esc(acctName(ma))}’s tokens`}</span><button type="button" class="acctall">${ui.allAcct ? `Just ${esc(acctName(ma))}` : 'All accounts'}</button></div>` : ''}
-                <div class="seg3">${[['want', 'Wanted', want.length], ['own', 'Owned', own.length], ['studio', 'In Studio', st ? st.size : '']].map(([v, l, n]) => `<button type="button" data-tkseg="${v}" class="${seg === v ? 'on' : ''}">${l}${n !== '' ? ` <i>${n}</i>` : ''}</button>`).join('')}</div>
-                ${seg !== 'studio' || st ? `<label class="sbox">${ICO.search}<input class="txt tkq" type="search" placeholder="${seg === 'studio' ? 'Search the rotation…' : 'Search your tokens — or any token'}" value="${esc(ui.tk.q)}" autocomplete="off" spellcheck="false"></label>` : ''}
-                ${studioHead}
-                ${tkCatState === 'loading' && !tkCat ? '<div class="msg">Loading DTI’s token list… (the first time takes a moment)</div>' : tkCatState === 'error' ? '<div class="msg">Couldn’t load DTI’s token list — names and pictures only for now.</div>' : ''}
-                ${main || empty}
-                ${more.length ? `<div class="sec">${list.length ? 'More tokens' : 'Tokens'} <b>${more.length}</b></div>${rows(more)}` : ''}
-                <a class="alllink" href="${D}/items?q=dti-enhance#tokens" target="_blank" rel="noopener">My Tokens on DTI ${ICO.ext}</a>`;
-            const qi = body.querySelector('.tkq');
-            qi?.addEventListener('input', () => {
-                ui.tk.q = qi.value;
-                clearTimeout(tkT);
-                tkT = setTimeout(() => { const p = qi.selectionStart; rerender(); const n = body.querySelector('.tkq'); if (n) { n.focus(); n.setSelectionRange(p, p); } }, 160);
-            });
-        }
-        // after a token changed: its row (Tokens) or its box (an item open here) drawn again — nothing else moves
-        function tkRefresh(key) {
-            if (ui.item) {
-                const box = body.querySelector('.tkedit.solo');
-                if (box) box.outerHTML = tkEditHtml(tkInfoOf(key, { name: box.dataset.tkname, img: box.dataset.tkimg }), true);
-                return;
-            }
-            rerender();
-        }
-
-        // ════ Notes: your notes on items, people and anything — DTI's Notes (trade reports are in Trades) ════
-        let ntT = 0;
-        const noteTitle = n => n.type === 'general' ? (n.title || String(n.text || '').split('\n')[0].slice(0, 70) || 'Untitled note') : (n.ref?.name || (n.type === 'user' ? 'A trader' : 'An item'));
-        const ntRow = n => `<button type="button" class="ntrow" data-ntkey="${esc(n.key)}">
-                ${n.type === 'item' ? (n.ref?.img ? `<img src="${esc(n.ref.img)}" alt="" loading="lazy">` : '<span class="noimg"></span>') : `<span class="ntico">${n.type === 'user' ? ICO.user : ICO.note}</span>`}
-                <span class="nttxt"><span class="ntt"><b>${esc(noteTitle(n))}</b>${n.pinned ? `<i class="pin" title="Pinned">${ICO.pin}</i>` : ''}<em>${esc(ago(n.updated))}</em></span>
-                <small>${esc(String(n.type === 'general' && !n.title ? String(n.text || '').split('\n').slice(1).join(' ') : (n.text || '')).replace(/\s+/g, ' ').slice(0, 120))}</small></span>
-            </button>`;
-        function renderNotes() {
-            const q = ui.nt.q.trim().toLowerCase(), seg = ui.nt.seg;
-            const all = DTINotes.all().filter(n => n && n.type !== 'trade' && !String(n.key || '').startsWith('trade:'));
-            const cnt = t => all.filter(n => !t || n.type === t).length;
-            const list = all.filter(n => (!seg || n.type === seg) && (!q || `${noteTitle(n)} ${n.text || ''}`.toLowerCase().includes(q)))
-                .sort((a, b) => (!!b.pinned - !!a.pinned) || (b.updated || 0) - (a.updated || 0));
-            body.innerHTML = `<button type="button" class="addbtn" data-ntnew>${ICO.plus}Note</button>
-                ${all.length ? `<div class="seg4">${[['', 'All'], ['item', 'Items'], ['user', 'People'], ['general', 'Notes']].map(([v, l]) => `<button type="button" data-ntseg="${v}" class="${seg === v ? 'on' : ''}">${l} <i>${cnt(v)}</i></button>`).join('')}</div>
-                    <label class="sbox">${ICO.search}<input class="txt ntq" type="search" placeholder="Search your notes…" value="${esc(ui.nt.q)}" autocomplete="off" spellcheck="false"></label>` : ''}
-                <div class="list">${list.map(ntRow).join('') || (all.length ? '<div class="msg">No notes match</div>'
-                    : '<div class="empty"><b>No notes yet</b>Write anything down with ＋ Note — or open an item (Search, Seeking) and add a note to it. They’re the same notes as DTI’s Notes.</div>')}</div>
-                <a class="alllink" href="${D}/items?q=dti-enhance#notes" target="_blank" rel="noopener">All your notes on DTI ${ICO.ext}</a>`;
-            const qi = body.querySelector('.ntq');
-            qi?.addEventListener('input', () => {
-                ui.nt.q = qi.value;
-                clearTimeout(ntT);
-                ntT = setTimeout(() => { const p = qi.selectionStart; rerender(); const n = body.querySelector('.ntq'); if (n) { n.focus(); n.setSelectionRange(p, p); } }, 160);
-            });
-        }
-        function renderNoteEd() {
-            const key = ui.nt.key, saved = DTINotes.get(key);
-            const n = saved || { key, type: DTINotes.typeOf(key), title: '', text: '', pinned: false };
-            body.innerHTML = `<div class="edhead">
-                    <button type="button" class="iconbtn" data-ntback title="Back to your notes" aria-label="Back">${ICO.back}</button>
-                    <b class="edtitle">${esc(n.type === 'general' ? (saved ? 'Note' : 'New note') : noteTitle(n))}</b>
-                    <button type="button" class="iconbtn${n.pinned ? ' on' : ''}" data-ntpin title="${n.pinned ? 'Unpin it' : 'Pin it to the top'}" aria-pressed="${!!n.pinned}">${ICO.pin}</button>
-                    <a class="iconbtn" href="${D}/items?q=dti-enhance#notes/${esc(key)}" target="_blank" rel="noopener" title="Open it in DTI’s Notes">${ICO.ext}</a>
-                </div>
-                ${n.type === 'item' && n.ref?.id ? `<button type="button" class="ntitem" data-item="${esc(JSON.stringify({ id: String(n.ref.id), name: n.ref.name || '', img: n.ref.img || '' }))}">${n.ref.img ? `<img src="${esc(n.ref.img)}" alt="">` : ''}<span>${esc(n.ref.name || 'Item')}</span><em>Open ›</em></button>` : ''}
-                ${n.type === 'general' ? `<label class="fld"><span>Title</span><input class="txt ntitle" placeholder="A title (if you like)" maxlength="120" value="${esc(n.title || '')}"></label>` : ''}
-                <label class="fld"><span>${n.type === 'general' ? 'Note' : 'Your note'}</span><textarea class="txt ntext" rows="9" placeholder="Write anything…">${esc(n.text || '')}</textarea></label>
-                <div class="edfoot"><span class="ntsaved">${saved ? 'Saved ' + esc(ago(n.updated)) : 'Saved as you type'}</span><button type="button" class="ndel" data-ntdel${saved ? '' : ' hidden'}>Delete</button></div>`;
-            const ta = body.querySelector('.ntext'), ti = body.querySelector('.ntitle'), msg = body.querySelector('.ntsaved');
-            let t = 0;
-            const save = () => {
-                clearTimeout(t);
-                const cur = DTINotes.get(key), patch = { text: ta.value };
-                if (ti) patch.title = ti.value.trim();
-                if (!cur && !patch.text.trim() && !patch.title) return;
-                if (cur && (cur.text || '') === patch.text && (!ti || (cur.title || '') === patch.title)) return;
-                DTINotes.save(key, patch);
-                const now = DTINotes.get(key);
-                msg.textContent = now ? 'Saved ✓' : 'Empty — removed';
-                body.querySelector('.ndel').hidden = !now;
-            };
-            [ta, ti].filter(Boolean).forEach(el => { el.addEventListener('input', () => { clearTimeout(t); t = setTimeout(save, 600); }); el.addEventListener('change', save); });
-        }
-
-        // ════ One item, here in the panel: Seeking, your lists, a trade, its note — and Own / Want when it's a style token ════
-        let itemLists = null;   // the open item's lists: { id, form, rows: [{ key, label, want, orig, cur }], saving, msg, err }
-        function renderItem() {
-            const it = ui.item, onDti = /^\d+$/.test(String(it.id)), seek = onDti && seekHas(it.id);
-            const note = onDti ? DTINotes.get('item:' + it.id) : null;
-            const tkKey = tokNorm(it.name);
-            const isTok = TOK_ESSENCE_RE.test(tkKey) || !!tkCat?.byKey.has(tkKey) || !!DTITokens.read(tkScope()).mine[tkKey] || !!tokStudioKeys()?.has(tkKey);
-            const ti = isTok ? tkInfoOf(tkKey, { name: it.name, img: it.img || '' }) : null;
-            const open = trades().filter(n => isOpen(n) && inMine(acctOfTrade(n.trade))).sort((a, b) => (b.updated || 0) - (a.updated || 0)).slice(0, 4);
-            body.innerHTML = `<div class="edhead">
-                    <button type="button" class="iconbtn" data-iback title="Back" aria-label="Back">${ICO.back}</button>
-                    <span class="edtitle"></span>
-                    ${onDti ? `<a class="iconbtn" href="${D}/items/${esc(it.id)}" target="_blank" rel="noopener" title="Open it on DTI">${ICO.ext}</a>` : ''}
-                </div>
-                <div class="ihero">${it.img ? `<img src="${esc(it.img)}" alt="">` : '<span class="noimg"></span>'}<div class="ihtxt"><b>${esc(it.name)}</b><span class="imeta">${it.nc ? '<i class="tag">NC</i>' : ''}<span class="val ival"></span></span></div></div>
-                ${onDti && seekOn() ? `<button type="button" class="iseek${seek ? ' on' : ''}" data-iseek aria-pressed="${seek}"><span class="skic">◎</span><span><b>Seeking now</b><small>${seek ? 'On your Seeking list' : 'Your short list of items you want ASAP'}</small></span><i class="sw"></i></button>` : ''}
-                ${ti ? `<div class="sec">Style token</div>${tkEditHtml(ti, true)}` : ''}
-                <div class="sec">Your lists</div>
-                <div class="ilists">${onDti ? '<div class="msg">Loading your lists…</div>' : '<div class="msg">This one isn’t on DTI, so it can’t go on your lists.</div>'}</div>
-                <div class="sec">Add to a trade</div>
-                <div class="itrades">${open.map(n => `<div class="itr"><span title="${esc(titleOf(n))}">${esc(titleOf(n))}</span><button type="button" class="btn" data-itrade="${esc(n.key)}" data-side="give">You give</button><button type="button" class="btn" data-itrade="${esc(n.key)}" data-side="get">You get</button></div>`).join('')}
-                    <div class="itr new"><span>${open.length ? 'A new trade report' : 'Start a trade report'}</span><button type="button" class="btn" data-inew="give">You give</button><button type="button" class="btn" data-inew="get">You get</button></div></div>
-                ${onDti ? `<label class="fld inotef"><span>Your note</span><textarea class="txt inote" placeholder="Anything to remember about this item — the same note as on DTI">${esc(note?.text || '')}</textarea></label>` : ''}`;
-            npNcValue(it.name).then(v => { const el = body.querySelector('.ival'); if (el && v && ui.item === it) el.textContent = capNums(v) ? String(v).replace(/\*$/, '') + ' caps' : v; }).catch(() => {});
-            const ta = body.querySelector('.inote');
-            if (ta) {
-                let t = 0;
-                const save = () => {
-                    clearTimeout(t);
-                    if ((DTINotes.get('item:' + it.id)?.text || '') === ta.value) return;
-                    DTINotes.save('item:' + it.id, { text: ta.value, ref: { id: String(it.id), name: it.name, img: it.img || '' } });
-                };
-                ta.addEventListener('input', () => { clearTimeout(t); t = setTimeout(save, 600); });
-                ta.addEventListener('change', save);
-            }
-            if (onDti) loadItemLists(String(it.id));
-        }
-        // Your DTI lists with this item in them — read from the item's page on DTI (its own "Track this" form) and saved the
-        // way that form saves: only the lists you changed (DTI sets quantities)
-        async function loadItemLists(id) {
-            if (itemLists?.id === id) return paintItemLists();
-            let form = null, failed = false;
-            try { form = new DOMParser().parseFromString(await dtiGetText('/items/' + id, 20000), 'text/html').querySelector('form.user-lists-form'); } catch (_) { failed = true; }
-            const el = body.querySelector('.ilists');
-            if (!el || String(ui.item?.id) !== id) return;
-            if (!form) { el.innerHTML = `<div class="msg">${failed ? 'Couldn’t reach DTI — try again in a moment.' : 'Log in to DTI in this browser to keep lists of your items.'}</div>`; return; }
-            const rows = [...form.querySelectorAll('.closet-hangers-ownership-groups > div')].flatMap(g => {
-                const want = /want/i.test(g.querySelector('h4')?.textContent || '');
-                return [...g.querySelectorAll('li')].map(li => {
-                    const inp = li.querySelector('input[type="number"]');
-                    if (!inp) return null;
-                    const orig = Math.max(0, parseInt(inp.value, 10) || 0);
-                    return { key: inp.name, orig, cur: orig, want, label: /^quantity\[(true|false)\]$/.test(inp.name) ? 'Not in a list' : (li.querySelector('label')?.textContent.trim() || 'List') };
-                }).filter(r => r && !(r.label === 'Tokens \u00b7 DTI Enhance' && !r.orig));   // (the token list DTI Enhance keeps on DTI: not for items)
-            });
-            itemLists = { id, form, rows, saving: false, msg: '', err: false };
-            paintItemLists();
-        }
-        function paintItemLists() {
-            const L = itemLists, el = body.querySelector('.ilists');
-            if (!L || !el || String(ui.item?.id) !== L.id) return;
-            if (!L.rows.length) { el.innerHTML = '<div class="msg">You don’t have any lists on DTI yet.</div>'; return; }
-            const changed = L.rows.filter(r => r.cur !== r.orig).length;
-            const group = want => {
-                const rs = L.rows.map((r, i) => [r, i]).filter(([r]) => r.want === want);
-                return rs.length ? `<div class="lgh">${want ? 'Items you want' : 'Items you own'}</div>` + rs.map(([r, i]) => `<div class="lrow${r.cur ? ' has' : ''}${r.cur !== r.orig ? ' changed' : ''}">
-                    <span title="${esc(r.label)}">${esc(r.label)}</span><span class="qty"><button type="button" data-lq="-1" data-li="${i}"${r.cur ? '' : ' disabled'} aria-label="One less">−</button><b>${r.cur}</b><button type="button" data-lq="1" data-li="${i}" aria-label="One more">+</button></span></div>`).join('') : '';
-            };
-            el.innerHTML = group(true) + group(false)
-                + `<div class="lfoot"><span class="lmsg${L.err ? ' err' : ''}" aria-live="polite">${esc(L.msg)}</span><button type="button" class="btn pri" data-lsave${changed && !L.saving ? '' : ' disabled'}>${L.saving ? 'Saving…' : 'Save'}</button></div>`;
-        }
-        async function saveItemLists() {
-            const L = itemLists, changed = L ? L.rows.filter(r => r.cur !== r.orig) : [];
-            if (!changed.length || L.saving) return;
-            L.saving = true; L.msg = ''; paintItemLists();
-            const token = L.form.querySelector('input[name="authenticity_token"]')?.value || '';
-            const fd = new URLSearchParams({ _method: 'put', authenticity_token: token });
-            changed.forEach(r => fd.set(r.key, String(r.cur)));
-            const ok = await new Promise(res => GM_xmlhttpRequest({
-                method: 'POST', url: new URL(L.form.getAttribute('action') || '', D).href, data: fd.toString(), timeout: 20000,
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': token },
-                onload: r => res(r.status >= 200 && r.status < 400 && !/sign_in|\/login/.test(r.finalUrl || '')),
-                onerror: () => res(false), ontimeout: () => res(false),
-            }));
-            L.saving = false;
-            if (ok) { changed.forEach(r => { r.orig = r.cur; }); L.msg = 'Saved ✓'; L.err = false; }
-            else { L.msg = 'Couldn’t save — try again'; L.err = true; }
-            paintItemLists();
-        }
-
-        // ── Clicks in the panel ──
-        $('.tabs').addEventListener('click', e => {
-            const b = e.target.closest('button[data-t]');
-            if (!b) return;
-            if (b.dataset.t === ui.tab && !ui.item) {   // (the tab again: back to its start)
-                if (ui.tab === 'trades') { ui.view = 'list'; ui.draft = null; }
-                if (ui.tab === 'notes') ui.nt.key = '';
-                if (ui.tab === 'tokens') ui.tk.open = '';
-            }
-            ui.item = null; itemLists = null;
-            ui.tab = b.dataset.t;
-            GM_setValue('dti_np_panel_tab', ui.tab);
-            render();
-            body.scrollTop = 0;
-            if (ui.tab === 'search') body.querySelector('.sq')?.focus();
-        });
-        $('.brand').addEventListener('click', () => showMenu(menu.hidden));
-        panel.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.menu, .brand')) showMenu(false); });
-        body.addEventListener('click', async e => {
-            const b = e.target.closest('[data-open], [data-st], [data-set], [data-g], [data-gact], [data-seg], [data-q], [data-gbc], [data-rm], [data-skrm], [data-gtickall], [data-undo], .newbtn, .morebtn, .acctall, .seekoff, .back, .del');
-            if (ui.stFor && !e.target.closest('.stmenu, [data-st]')) { ui.stFor = ''; if (!b) render(); }
-            if (!b) return;
-            const d = b.dataset;
-            if ('gtickall' in d) {   // (a gift's other gifts with them: tick or untick them all)
-                const boxes = [...body.querySelectorAll('.gift .gbody input[data-gs]')], all = boxes.every(c => c.checked);
-                boxes.forEach(c => { c.checked = !all; });
-                b.textContent = all ? 'Tick all' : 'Untick all';
-                return;
-            }
-            if ('undo' in d) {   // (gifts put in the wrong report: everything back as it was, and the gift open again)
-                const u = ui.undo;
-                ui.undo = null;
-                if (u) {
-                    if (u.trade) saveNote(u.key, { trade: u.trade }); else removeNote(u.key);
-                    GM_setValue('dti_np_gifts', u.gifts);
-                    ui.view = 'list'; ui.key = ''; ui.openGift = u.uid;
-                }
-                render();
-                return;
-            }
-            if (b.matches('.newbtn')) { ui.view = 'edit'; ui.key = newKey(); ui.draft = null; render(); body.querySelector('.partner')?.focus(); return; }
-            if (d.open) { ui.tab = 'trades'; ui.item = null; ui.view = 'edit'; ui.key = d.open; render(); body.scrollTop = 0; return; }   // (from Trades, or On this page)
-            if (d.st) { ui.stFor = ui.stFor === d.st ? '' : d.st; render(); return; }
-            if (d.set) {
-                const key = ui.stFor, n = tradeOf(key);
-                ui.stFor = '';
-                if (n) saveNote(key, { trade: Object.assign(cleanTrade(n.trade), { status: d.set }) });
-                render();
-                return;
-            }
-            if (b.matches('.morebtn')) { ui.showDone = !ui.showDone; render(); return; }
-            if (b.matches('.acctall')) { ui.allAcct = !ui.allAcct; render(); return; }
-            if (b.matches('[data-skrm]')) { seekSave(items => { delete items[b.dataset.skrm]; }); render(); return; }
-            if (b.matches('.skcopy')) {
-                const tierOf = e => (e.tier === 0 || e.tier === 2 ? e.tier : 1);
-                const list = seekAll().filter(e => inMine(seekAcct(e))).sort((x, y) => tierOf(x) - tierOf(y) || (x.ord ?? 0) - (y.ord ?? 0) || (y.at || 0) - (x.at || 0));
-                Promise.all(list.map(e => npNcValue(e.name).catch(() => null))).then(vals => {
-                    const text = 'Seeking: ' + list.map((e, i) => e.name + (capNums(vals[i]) ? ` (${String(vals[i]).replace(/\*$/, '')} caps)` : '')).join(', ');
-                    navigator.clipboard.writeText(text).then(() => { b.textContent = 'Copied \u2713'; setTimeout(() => { if (b.isConnected) b.textContent = 'Copy as text'; }, 1600); }).catch(() => {});
-                });
-                return;
-            }
-            if (b.matches('.seekoff')) { const ids = (b.dataset.ids || '').split(','); seekSave(items => ids.forEach(id => delete items[id])); render(); return; }
-            if (d.g) { ui.openGift = ui.openGift === d.g ? '' : d.g; render(); return; }
-            if (d.gact) return giftAct(b);
-            if (b.matches('.back')) { ui.view = 'list'; ui.key = ''; render(); return; }
-            if (d.seg) { patchTrade(t => { t.status = d.seg; }); rerenderEditor(); return; }
-            if (d.q) { patchTrade(t => { const it = t[d.side][+d.i]; if (it) it.qty = Math.max(1, it.qty + +d.q); }); rerenderEditor(); return; }
-            if (d.rm) { patchTrade(t => { t[d.side].splice(+d.rm, 1); }); rerenderEditor(); return; }
-            if (d.gbc) { patchTrade(t => { const ex = t[d.side].find(o => o.id === d.gbc); if (ex) ex.qty++; else t[d.side].push({ id: d.gbc, name: GBC_KINDS[d.gbc].name, img: '', qty: 1 }); }); rerenderEditor(); return; }
-            if (b.matches('.del')) {
-                if (!b.classList.contains('sure')) { b.classList.add('sure'); b.textContent = 'Delete it for good?'; return; }
-                removeNote(ui.key);
-                ui.view = 'list'; ui.key = '';
-                render();
-            }
-        });
         // A gift's ticked items — and its other gifts' with them — into a trade report: one with them (open, or completed in
         // the last week), or a new one
         async function giftAct(b) {
-            const uid = ui.openGift, g = gifts().find(o => o.uid === uid);
+            const uid = ui.openGift, g = gifts().find(o => o.uid === uid), a = b.dataset.gact;
             if (!g) return render();
-            if (b.dataset.gact === 'gift') { saveGift(uid, { gift: true }); ui.openGift = ''; return render(); }
+            if (a === 'gift' || a === 'ungift') { saveGift(uid, { gift: a === 'gift' }); if (a === 'gift') ui.openGift = ''; return rerender(); }
+            if (a === 'del') {   // (from All NC gifts — twice, to be sure)
+                if (ui.gdel !== uid) { ui.gdel = uid; return rerender(); }
+                ui.gdel = ''; ui.openGift = '';
+                GM_setValue('dti_np_gifts', gifts().filter(o => o.uid !== uid));
+                return rerender();
+            }
             const byUid = new Map(gifts().map(o => [o.uid, o]));
             const picks = [...body.querySelectorAll('.gift .gbody input[data-gi]:checked')].map(c => ({ uid: c.dataset.gs || uid, i: +c.dataset.gi }))
                 .map(p => ({ ...p, gift: byUid.get(p.uid) })).filter(p => p.gift?.items?.[p.i]);
@@ -34850,63 +35723,404 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 const now = gifts().find(o => o.uid === u);
                 if (now) saveGift(u, { used: [...new Set([...(now.used || []), ...idx])], notes: [...new Set([...(now.notes || []), key])], gift: false });
             });
-            ui.openGift = ''; ui.view = 'edit'; ui.key = key; ui.undo = undo;
-            if (!panel.hidden) render();
+            ui.openGift = ''; ui.tab = 'trades'; ui.view = 'edit'; ui.key = key; ui.undo = undo;
+            if (!win.hidden) { render(); body.scrollTop = 0; }
         }
 
-        // ── The newer parts' clicks: an item, tokens, notes, On this page ──
-        body.addEventListener('click', e => {
+        // ════ Tokens: My Tokens' own data — for the account you're logged into here (or all of yours). A grid; a click opens a
+        // token's own / want / up for trade / list under its row ════
+        let tkT = 0;
+        const tkScope = () => acctMany() && !ui.allAcct ? meAcct() : 'all';
+        function tkLoadCat() {   // DTI's token list: our own copy on this site (a week), else read from DTI — only once tokens are looked at
+            if (tkCatState) return;
+            tkCatState = 'loading';
+            tkCat = tokenCatalogIfCached();
+            loadTokenCatalog().then(c => { tkCat = c; tkCatState = 'ok'; }).catch(() => { tkCatState = tkCat ? 'ok' : 'error'; })
+                .finally(() => { if (win && !win.hidden && (ui.tab === 'tokens' || ui.item)) rerender(); });
+        }
+        // The tokens you want (no catalog needed: the names and pictures My Tokens keeps)
+        const myTokWant = () => { const mine = DTITokens.read(tkScope()).mine; return Object.keys(mine).filter(k => (mine[k].want || 0) > 0).map(k => tokInfo(k, tkCat, mine, new Map())); };
+        // One token's info: yours, or one from the Studio's rotation / an item open here that DTI doesn't list (its name and picture)
+        function tkInfoOf(key, also) {
+            const scope = tkScope(), mine = DTITokens.read(scope).mine, imported = tokImported(tkCat, scope);
+            const r = tokStudioKeys()?.get(key);
+            if (!tkCat?.byKey.has(key) && !imported.has(key) && (r || also)) imported.set(key, r ? { name: r[0], img: r[1] ? r[1] + '.gif' : '' } : also);
+            return tokInfo(key, tkCat, mine, imported);
+        }
+        const tokItem = i => ({ id: TOK_TRADE_ID + i.key, name: i.name, img: i.img || '', tok: 1 });
+        const tokMeta = i => [i.series || (i.essence ? 'Essence' : ''), i.species || (i.anyPet ? 'any pet' : '')].filter(Boolean).join(' · ');
+        const tkEditHtml = (i, solo) => {
+            const lists = TokLists.raw(), l = TokLists.listOf(lists, i.key);
+            return `<div class="tkedit${solo ? ' solo' : ''}" data-tk="${esc(i.key)}"${solo ? ` data-tkname="${esc(i.name)}" data-tkimg="${esc(i.img || '')}"` : ''}>
+                <div class="tkstep"><span>Own</span><button type="button" data-tkstep="own" data-d="-1"${i.own ? '' : ' disabled'} aria-label="One less">−</button><b>${i.own}</b><button type="button" data-tkstep="own" data-d="1" aria-label="One more">+</button></div>
+                <div class="tkstep"><span>Want</span><button type="button" data-tkstep="want" data-d="-1"${i.want ? '' : ' disabled'} aria-label="One less">−</button><b>${i.want}</b><button type="button" data-tkstep="want" data-d="1" aria-label="One more">+</button></div>
+                ${i.own ? `<button type="button" class="tkuft${i.uft ? ' on' : ''}" data-tkuft aria-pressed="${!!i.uft}" title="${i.uft ? 'Up for trade — click if it isn’t any more' : 'Mark it up for trade — people you share your tokens with see it'}">${i.uft ? 'UFT' : '+ UFT'}</button>` : ''}
+                ${i.want ? `<label class="tklist"><span>List</span><select class="sel" data-tklist>${['<option value="">No list</option>', ...lists.lists.map(x => `<option value="${esc(x.id)}"${l?.id === x.id ? ' selected' : ''}>${esc(x.name)}</option>`)].join('')}</select></label>` : ''}
+                ${i.from || i.gone ? `<small class="tkfrom">${esc(tokOwnTitle(i))}</small>` : ''}
+            </div>`;
+        };
+        // a token's tile: in Tokens it opens out (inline); anywhere else it opens its page here
+        function tokTile(i, st = tokStudioKeys(), lists = TokLists.raw(), inline = false) {
+            const l = i.want ? TokLists.listOf(lists, i.key) : null, open = inline && ui.tk.open === i.key, meta = tokMeta(i);
+            const marks = (st?.has(i.key) ? '<i class="av" title="In the Styling Studio right now">In Studio</i>' : '') + (l ? `<i class="ll" style="--lc:${esc(l.color)}">${esc(l.name)}</i>` : '')
+                + (i.own ? `<i class="ow">Owned${i.own > 1 ? ' ×' + i.own : ''}</i>` : '') + (i.uft ? '<i class="uf" title="Up for trade">UFT</i>' : '') + (i.want && !l ? '<i class="wa">Wanted</i>' : '');
+            return `<button type="button" class="tile${open ? ' open' : ''}" ${inline ? `data-tkopen="${esc(i.key)}" aria-expanded="${open}"` : `data-item="${itemAttr(tokItem(i))}"`} title="${esc(i.name)}${meta ? ' — ' + esc(meta) : ''}">
+                ${i.img ? `<img class="pic" src="${esc(i.img)}" alt="" loading="lazy">` : '<span class="pic none"></span>'}<span class="nm">${esc(i.name)}</span>${marks ? `<span class="tkm">${marks}</span>` : ''}</button>`;
+        }
+        const tkPanel = i => `<div class="tkx"><div class="tkn"><b>${esc(i.name)}</b>${tokMeta(i) ? `<small>${esc(tokMeta(i))}</small>` : ''}<button type="button" class="btn sm" data-item="${itemAttr(tokItem(i))}">Its page</button></div>${tkEditHtml(i)}</div>`;
+        function renderTokens() {
+            tkLoadCat();
+            const scope = tkScope(), mine = DTITokens.read(scope).mine, imported = tokImported(tkCat, scope), st = tokStudioKeys();
+            const yourKeys = new Set([...Object.keys(mine), ...imported.keys()]);
+            if (st) st.forEach((r, k) => { if (!tkCat?.byKey.has(k) && !imported.has(k)) imported.set(k, { name: r[0], img: r[1] ? r[1] + '.gif' : '' }); });
+            const info = k => tokInfo(k, tkCat, mine, imported);
+            const yours = [...yourKeys].map(info), byKey = new Map(yours.map(i => [i.key, i]));
+            const own = yours.filter(i => i.own).sort((a, b) => a.name.localeCompare(b.name)), want = yours.filter(i => i.want).sort((a, b) => a.name.localeCompare(b.name));
+            const studio = st ? [...st.keys()].map(k => byKey.get(k) || info(k)) : [];
+            const seg = ui.tk.seg, q = ui.tk.q.trim().toLowerCase(), lists = TokLists.raw();
+            const hit = i => !q || `${i.name} ${i.series} ${i.species}`.toLowerCase().includes(q);
+            const list = (seg === 'own' ? own : seg === 'studio' ? studio : want).filter(hit);
+            // a search also looks through every token (to mark one you just saw)
+            const listed = new Set(list.map(i => i.key));
+            const more = q.length >= 2 && tkCat && seg !== 'studio' ? [...tkCat.byKey.keys()].filter(k => !listed.has(k) && k.includes(q)).slice(0, 40).map(k => byKey.get(k) || info(k)) : [];
+            const grid = arr => `<div class="grid">${arr.map(i => tokTile(i, st, lists, true) + (ui.tk.open === i.key ? tkPanel(i) : '')).join('')}</div>`;
+            let main = '';
+            if (seg === 'want' && !q && lists.lists.length && list.length) {   // (by your want lists)
+                const by = new Map(lists.lists.map(l => [l.id, []])), none = [];
+                list.forEach(i => { const l = TokLists.listOf(lists, i.key); (l ? by.get(l.id) : none).push(i); });
+                main = lists.lists.filter(l => by.get(l.id).length).map(l => card(`<i class="ldot" style="background:${esc(l.color)}"></i>`, esc(l.name), by.get(l.id).length, '', `<div class="cb tight">${grid(by.get(l.id))}</div>`)).join('')
+                    + (none.length ? card(ICO.tokens, 'Not in a list', none.length, '', `<div class="cb tight">${grid(none)}</div>`) : '');
+            } else if (list.length) main = grid(list);
+            const empty = q ? (more.length ? '' : '<div class="msg">No tokens match</div>')
+                : seg === 'want' ? emptyBox(ICO.tokens, 'No tokens wanted yet', 'Search any token above and press Want on it — the same Want list as My Tokens.')
+                : seg === 'own' ? emptyBox(ICO.tokens, 'No tokens owned yet', 'Open your Inventory, SDB, Gallery or Styling Chamber on Neopets — Home’s “On this page” has an Import button there.')
+                : '';
+            const sd = tokStudio();
+            const studioHead = seg !== 'studio' ? '' : st
+                ? `<div class="tknote"><span>The Styling Studio’s rotation · from <a href="${esc(TOK_STUDIO_URL)}" target="_blank" rel="noopener">itemdb</a>, ${studioBusy ? 'checking…' : 'checked ' + esc(ago(sd.at))}</span><button type="button" class="btn sm" data-studioread${studioBusy ? ' disabled' : ''}>Check again</button></div>`
+                : emptyBox(ICO.tokens, 'The Styling Studio’s rotation', 'Which style tokens you can get on Neopets right now — read from itemdb (the same list as “Available now” in My Tokens).')
+                    + `<div style="text-align:center">${studioBusy ? '<span class="msg">Reading it…</span>' : `<button type="button" class="btn pri" data-studioread>${studioFail ? 'Couldn’t reach itemdb — try again' : 'Read the rotation'}</button>`}</div>`;
+            body.innerHTML = acctBar('’s tokens')
+                + `<div class="seg">${[['want', 'Wanted', want.length], ['own', 'Owned', own.length], ['studio', 'In Studio', st ? st.size : '']].map(([v, l, n]) => `<button type="button" data-tkseg="${v}" class="${seg === v ? 'on' : ''}">${l}${n !== '' ? ` <i>${n}</i>` : ''}</button>`).join('')}</div>`
+                + (seg !== 'studio' || st ? `<label class="sbox">${ICO.items}<input class="inp tkq" type="search" placeholder="${seg === 'studio' ? 'Search the rotation…' : 'Search your tokens — or any token'}" value="${esc(ui.tk.q)}" autocomplete="off" spellcheck="false" aria-label="Search tokens"></label>` : '')
+                + studioHead
+                + (tkCatState === 'loading' && !tkCat ? '<div class="msg">Loading DTI’s token list… (the first time takes a moment)</div>' : tkCatState === 'error' ? '<div class="msg">Couldn’t load DTI’s token list — names and pictures only for now.</div>' : '')
+                + (main || empty)
+                + (more.length ? card(ICO.items, list.length ? 'More tokens' : 'Tokens', more.length, '', `<div class="cb tight">${grid(more)}</div>`) : '')
+                + `<a class="alink" style="align-self:center" href="${D}/items?q=dti-enhance#tokens" target="_blank" rel="noopener">My Tokens on DTI ${ICO.ext}</a>`;
+            const qi = body.querySelector('.tkq');
+            qi?.addEventListener('input', () => {
+                ui.tk.q = qi.value;
+                clearTimeout(tkT);
+                tkT = setTimeout(() => { const p = qi.selectionStart; rerender(); const n = body.querySelector('.tkq'); if (n) { n.focus(); n.setSelectionRange(p, p); } }, 160);
+            });
+        }
+        // after a token changed: its box (an item's page) or Tokens drawn again — nothing else moves
+        function tkRefresh(key) {
+            if (ui.item) {
+                const box = body.querySelector('.tkedit.solo');
+                if (box) box.outerHTML = tkEditHtml(tkInfoOf(key, { name: box.dataset.tkname, img: box.dataset.tkimg }), true);
+                return;
+            }
+            rerender();
+        }
+        function studioRead() {
+            if (studioBusy) return;
+            studioBusy = true; studioFail = false;
+            tokStudioRefresh().then(() => { studioFail = false; }).catch(() => { studioFail = true; })
+                .finally(() => { studioBusy = false; paintBadge(); if (win && !win.hidden && !ui.item) rerender(); });
+        }
+
+        // ════ Notes: your notes on items, people and anything — DTI's Notes (trade reports are in Trades) ════
+        let ntT = 0;
+        const noteTitle = n => n.type === 'general' ? (n.title || String(n.text || '').split('\n')[0].slice(0, 70) || 'Untitled note') : (n.ref?.name || (n.type === 'user' ? 'A trader' : 'An item'));
+        const ntRow = n => `<div class="row go" role="button" tabindex="0" data-ntkey="${esc(n.key)}">
+                ${n.type === 'item' ? (n.ref?.img ? `<img src="${esc(n.ref.img)}" alt="" loading="lazy">` : '<span class="noimg"></span>') : `<span class="ntico">${n.type === 'user' ? ICO.user : ICO.notes}</span>`}
+                <span class="rt"><b>${esc(noteTitle(n))}</b><small class="two">${esc(String(n.type === 'general' && !n.title ? String(n.text || '').split('\n').slice(1).join(' ') : (n.text || '')).replace(/\s+/g, ' ').slice(0, 140))}</small></span>
+                ${n.pinned ? `<i class="pinned" title="Pinned">${ICO.pin}</i>` : ''}<span class="when">${esc(ago(n.updated))}</span>
+            </div>`;
+        const isTrade = n => String(n?.key || '').startsWith('trade:');
+        const kindOf = n => isTrade(n) ? 'trade' : n.type;
+        const noteText = n => isTrade(n) ? [titleOf(n), n.trade?.partner?.name, ...(n.trade?.give || []).map(x => x.name), ...(n.trade?.get || []).map(x => x.name), n.text].join(' ') : `${noteTitle(n)} ${n.text || ''}`;
+        function renderNotes() {
+            const q = ui.nt.q.trim().toLowerCase(), seg = ['item', 'user', 'general'].includes(ui.nt.seg) ? ui.nt.seg : '';
+            const all = DTINotes.all().filter(n => n && !isTrade(n));   // (trade reports — and NC gifts — are in Trades: one place each)
+            const cnt = t => all.filter(n => !t || kindOf(n) === t).length;
+            const list = all.filter(n => (!seg || kindOf(n) === seg) && (!q || noteText(n).toLowerCase().includes(q)))
+                .sort((a, b) => (!!b.pinned - !!a.pinned) || (b.updated || 0) - (a.updated || 0));
+            body.innerHTML = `<button type="button" class="btn pri wide" data-ntnew>${ICO.plus}Note</button>`
+                + (all.length ? `<div class="seg">${[['', 'All'], ['item', 'Items'], ['user', 'People'], ['general', 'Notes']].map(([v, l]) => `<button type="button" data-ntseg="${v}" class="${seg === v ? 'on' : ''}">${l} <i>${cnt(v)}</i></button>`).join('')}</div>
+                    <label class="sbox">${ICO.items}<input class="inp ntq" type="search" placeholder="Search your notes…" value="${esc(ui.nt.q)}" autocomplete="off" spellcheck="false" aria-label="Search your notes"></label>` : '')
+                + card(ICO.notes, 'Your notes', list.length, `<a class="alink" href="${D}/items?q=dti-enhance#notes" target="_blank" rel="noopener">On DTI ${ICO.ext}</a>`,
+                    list.length ? `<div class="rows">${list.map(ntRow).join('')}</div>` : all.length ? '<div class="msg">No notes match</div>'
+                        : emptyBox(ICO.notes, 'No notes yet', 'Write anything down with ＋ Note — or open an item and add a note to it. They’re the same notes as DTI’s Notes.'))
+                + '<p class="hint">Your trade reports and NC gifts are in <button type="button" class="alink" data-go="trades">Trades</button>.</p>';
+            const qi = body.querySelector('.ntq');
+            qi?.addEventListener('input', () => {
+                ui.nt.q = qi.value;
+                clearTimeout(ntT);
+                ntT = setTimeout(() => { const p = qi.selectionStart; rerender(); const n = body.querySelector('.ntq'); if (n) { n.focus(); n.setSelectionRange(p, p); } }, 160);
+            });
+        }
+        function renderNoteEd() {
+            const key = ui.nt.key, saved = DTINotes.get(key);
+            const n = saved || { key, type: DTINotes.typeOf(key), title: '', text: '', pinned: false };
+            body.innerHTML = `<div class="pbar">
+                    <button type="button" class="ibtn" data-ntback title="Back to your notes" aria-label="Back">${ICO.back}</button>
+                    <span class="ttl">${esc(n.type === 'general' ? (saved ? 'Note' : 'New note') : noteTitle(n))}</span>
+                    <button type="button" class="ibtn${n.pinned ? ' on' : ''}" data-ntpin title="${n.pinned ? 'Unpin it' : 'Pin it to the top'}" aria-pressed="${!!n.pinned}">${ICO.pin}</button>
+                    <a class="ibtn" href="${D}/items?q=dti-enhance#notes/${esc(key)}" target="_blank" rel="noopener" title="Open it in DTI’s Notes">${ICO.ext}</a>
+                </div>
+                ${n.type === 'item' && n.ref?.id ? `<button type="button" class="ntitem" data-item="${itemAttr({ id: n.ref.id, name: n.ref.name || 'Item', img: n.ref.img || '' })}">${n.ref.img ? `<img src="${esc(n.ref.img)}" alt="">` : ''}<span>${esc(n.ref.name || 'Item')}</span><em>Its page ›</em></button>` : ''}
+                <section class="card"><div class="cb fields">
+                    ${n.type === 'general' ? `<label class="fld"><span>Title</span><input class="inp ntitle" placeholder="A title (if you like)" maxlength="120" value="${esc(n.title || '')}"></label>` : ''}
+                    <label class="fld"><span>${n.type === 'general' ? 'Note' : 'Your note'}</span><textarea class="inp ntext" rows="9" placeholder="Write anything…">${esc(n.text || '')}</textarea></label>
+                    <div class="edfoot"><span class="saved">${saved ? 'Saved ' + esc(ago(n.updated)) : 'Saved as you type'}</span><button type="button" class="del" data-ntdel${saved ? '' : ' hidden'}>Delete</button></div>
+                </div></section>`;
+            const ta = body.querySelector('.ntext'), ti = body.querySelector('.ntitle'), msg = body.querySelector('.saved');
+            let t = 0;
+            const save = () => {
+                clearTimeout(t);
+                const now0 = DTINotes.get(key), patch = { text: ta.value };
+                if (ti) patch.title = ti.value.trim();
+                if (!now0 && !patch.text.trim() && !patch.title) return;
+                if (now0 && (now0.text || '') === patch.text && (!ti || (now0.title || '') === patch.title)) return;
+                DTINotes.save(key, patch);
+                const now = DTINotes.get(key);
+                msg.textContent = now ? 'Saved ✓' : 'Empty — removed';
+                body.querySelector('[data-ntdel]').hidden = !now;
+            };
+            [ta, ti].filter(Boolean).forEach(el => { el.addEventListener('input', () => { clearTimeout(t); t = setTimeout(save, 600); }); el.addEventListener('change', save); });
+        }
+
+        // ════ Clicks, keys and the window's edge ════
+        const ACT = ['[data-go]', '[data-malltab]', '[data-recentclear]', '[data-ctxfold]', '[data-import]', '[data-capture]', '[data-newwith]', '[data-studioread]', '[data-tkgo]',
+            '[data-scope]', '[data-chip]', '[data-smore]', '[data-mseg]', '[data-minere]', '[data-mineall]',
+            '[data-item]', '[data-iback]', '[data-iseek]', '[data-itrades]', '[data-trall]', '[data-lq]', '[data-lsave]', '[data-itrade]', '[data-inew]',
+            '[data-skrm]', '[data-skcopy]', '[data-sktog]', '[data-seenrm]', '[data-seenclr]',
+            '[data-open]', '[data-st]', '[data-set]', '[data-g]', '[data-gact]', '[data-gtickall]', '[data-undo]', '[data-gifton]', '[data-seg]', '[data-q]', '[data-gbc]', '[data-rm]',
+            '.newbtn', '.morebtn', '.acctall', '.seekoff', '.back', '.del', '[data-trpin]', '[data-gview]',
+            '[data-tkseg]', '[data-tkopen]', '[data-tkstep]', '[data-tkuft]',
+            '[data-ntkey]', '[data-ntnew]', '[data-ntseg]', '[data-ntback]', '[data-ntpin]', '[data-ntdel]'].join(', ');
+        function wire() {
+            win.querySelector('.nav').addEventListener('click', e => {
+                const v = e.target.closest('[data-v]');
+                if (v) { showMenu(false); return goTab(v.dataset.v); }
+                if (e.target.closest('.pages')) return showMenu(menu.hidden);
+                if (e.target.closest('.shut')) openWin(false);
+            });
+            win.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.menu, .pages')) showMenu(false); });
+            body.addEventListener('click', onClick);
+            body.addEventListener('change', onChange);
+            body.addEventListener('submit', onSubmit);
+            body.addEventListener('keydown', e => {   // (rows that open something: Enter / Space too)
+                if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.row.go[role="button"]')) { e.preventDefault(); e.target.click(); }
+            });
+            body.addEventListener('error', e => {   // (itemdb's picture of an item that only moves, when there's none: the item's own)
+                const img = e.target;
+                if (img?.tagName !== 'IMG' || img.dataset.fb === undefined) return;
+                const src = img.dataset.fb;
+                delete img.dataset.fb;
+                if (src) { img.src = src; img.className = 'thumb'; } else img.remove();
+            }, true);
+            // the window's left edge: wider or narrower (kept)
+            const grip = win.querySelector('.grip');
+            let rs = null;
+            grip.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); rs = { x: e.clientX, w: win.offsetWidth }; grip.setPointerCapture(e.pointerId); grip.classList.add('on'); });
+            grip.addEventListener('pointermove', e => { if (rs) win.style.width = Math.round(Math.min(Math.max(380, rs.w + rs.x - e.clientX), innerWidth - 44)) + 'px'; });
+            const endRs = () => { if (!rs) return; rs = null; grip.classList.remove('on'); GM_setValue('dti_np_win_w', win.offsetWidth); };
+            grip.addEventListener('pointerup', endRs);
+            grip.addEventListener('pointercancel', endRs);
+            // keys typed in it stay in it (not Neopets' page); Esc closes the menu, then the window
+            win.addEventListener('keydown', e => {
+                e.stopPropagation();
+                if (e.key !== 'Escape') return;
+                if (!menu.hidden) return showMenu(false);
+                openWin(false); tab.focus();
+            });
+            ['keyup', 'keypress'].forEach(t => win.addEventListener(t, e => e.stopPropagation()));
+        }
+        function onSubmit(e) {
+            const f = e.target.closest('form[data-form]');
+            if (!f) return;
+            e.preventDefault();
+            if (f.dataset.form === 'find') {   // (Home's search: Items, with it)
+                const q = f.elements.q.value.trim();
+                if (!q) return;
+                ui.q = q; ui.chip = ''; ui.scope = 'search'; GM_setValue('dti_np_items_scope', 'search');
+                goTab('items');
+            } else if (f.dataset.form === 'pet') {
+                const p = f.elements.pet.value.trim();
+                if (p) window.open(`${D}/outfits/new?name=${encodeURIComponent(p)}`, '_blank', 'noopener');
+            }
+        }
+        function onChange(e) {
             const t = e.target;
-            if (t.closest('[data-skrm], [data-skadd], .go, .stmenu, [data-st], [data-open]')) return;   // (the trades' handler has those, or it's a link)
-            const b = t.closest('[data-item], [data-iback], [data-iseek], [data-lq], [data-lsave], [data-itrade], [data-inew], [data-tkseg], [data-tkopen], [data-tkstep], [data-tkuft], [data-studioread], [data-tkgo], [data-ntkey], [data-ntnew], [data-ntseg], [data-ntback], [data-ntpin], [data-ntdel], [data-ctxfold], [data-import], [data-newwith]');
+            if (t.matches('[data-tklist]')) {   // (a wanted token's list)
+                const key = t.closest('[data-tk]')?.dataset.tk;
+                if (key) { TokLists.put(key, t.value); tkRefresh(key); }
+            } else if (t.matches('[data-isp]')) {   // (an item's picture on another species)
+                const id = String(ui.item?.id || '');
+                if (isDtiId(id)) { body.querySelector('.stage')?.classList.add('busy'); loadItemPage(id, t.value); }
+            }
+        }
+        function onClick(e) {
+            const b = e.target.closest(ACT);
+            if (ui.stFor && !e.target.closest('.stmenu, [data-st]')) { ui.stFor = ''; if (!b) return rerender(); }
             if (!b || b.disabled) return;
             const d = b.dataset;
-            if ('item' in d) {
-                let it = null;
-                try { it = JSON.parse(d.item); } catch (_) {}
-                if (!it?.name) return;
-                ui.itemTop = body.scrollTop; ui.item = it; itemLists = null;
+            // ── going places ──
+            if (d.go) return goTab(d.go);
+            if (d.malltab) { ui.mallTab = d.malltab; return rerender(); }
+            if ('recentclear' in d) { GM_setValue('dti_np_recent', []); return rerender(); }
+            if ('ctxfold' in d) { const f = GM_getValue('dti_np_ctx_fold', {}) || {}; f[ctx.kind] = !f[ctx.kind]; GM_setValue('dti_np_ctx_fold', f); return rerender(); }
+            if ('import' in d) { const at = Date.now(); GM_setValue('dti_tok_capture', { at, src: ctx.src }); openWin(false); runTokenCapture(ctx.src, at); return; }
+            if ('capture' in d) {   // (the import panel, as when you come from DTI's My Items: your items here into your DTI lists)
+                const src = NEO_SOURCES.find(s => s.key === ctx.src);
+                if (src) { GM_setValue('dti_capture_flag', Date.now()); openWin(false); runNeoCapture(src); }
+                return;
+            }
+            if ('newwith' in d) {
+                ui.item = null; itemPage = null; ui.tab = 'trades'; GM_setValue('dti_np_panel_tab', 'trades');
+                ui.view = 'edit'; ui.key = newKey(); ui.draft = { key: ui.key, partner: ctx.who };
+                render(); body.scrollTop = 0; body.querySelector('[data-add="give"]')?.focus();
+                return;
+            }
+            if ('studioread' in d) { studioFail = false; studioRead(); return rerender(); }
+            if (d.tkgo) {
+                ui.item = null; itemPage = null; ui.tab = 'tokens'; GM_setValue('dti_np_panel_tab', 'tokens');
+                ui.tk.seg = d.tkgo; ui.tk.q = ''; ui.tk.open = d.tkkey || '';
                 render(); body.scrollTop = 0;
                 return;
             }
-            if ('iback' in d) { ui.item = null; itemLists = null; render(); body.scrollTop = ui.itemTop || 0; return; }
+            // ── Items ──
+            if (d.scope) { ui.scope = d.scope; GM_setValue('dti_np_items_scope', d.scope); return render(); }
+            if ('chip' in d) { ui.chip = d.chip; return render(); }
+            if ('smore' in d) return searchMore(b);
+            if (d.mseg) { ui.mine.seg = d.mseg; return paintMine(); }
+            if ('minere' in d) return paintMine(true);
+            if (d.mineall) { ui.mine.all[d.mineall] = true; const top = body.scrollTop; paintMine(); body.scrollTop = top; return; }
+            // ── an item ──
+            if ('item' in d) {
+                let it = null;
+                try { it = JSON.parse(d.item); } catch (_) {}
+                if (it?.name) openItem(it);
+                return;
+            }
+            if ('iback' in d) { ui.item = null; itemPage = null; render(); body.scrollTop = ui.itemTop || 0; return; }
             if ('iseek' in d) {
                 const it = ui.item, on = !seekHas(it.id);
-                seekSave(items => { if (on) items[it.id] = { name: it.name, img: it.img || '', at: Date.now(), note: '', acct: acctMany() ? meAcct() : '', ord: -Date.now() }; else delete items[it.id]; });
-                b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
-                b.querySelector('small').textContent = on ? 'On your Seeking list' : 'Your short list of items you want ASAP';
+                seekSave(items => { if (on) items[it.id] = seekEntry(it); else delete items[it.id]; });
+                b.outerHTML = seekBtn(on);
                 paintBadge();
                 return;
             }
-            if ('lq' in d) { const r = itemLists?.rows[+d.li]; if (r) { r.cur = Math.max(0, Math.min(999, r.cur + Number(d.lq))); itemLists.msg = ''; paintItemLists(); } return; }
-            if ('lsave' in d) { saveItemLists(); return; }
+            if ('itrades' in d) {
+                if (!itemPage) return;
+                if (!d.itrades || itemPage.tr === d.itrades) { itemPage.tr = ''; return rerender(); }
+                return loadTrades(d.itrades);
+            }
+            if ('trall' in d) { itemPage.trAll = true; const el = body.querySelector('.trdw'); if (el) el.innerHTML = tradesHtml(itemPage); return; }
+            if ('lq' in d) { const r = itemPage?.rows?.[+d.li]; if (r) { r.cur = Math.max(0, Math.min(999, r.cur + Number(d.lq))); itemPage.msg = ''; paintLists(); } return; }
+            if ('lsave' in d) return saveItemLists();
             if (d.itrade) {
                 const n = tradeOf(d.itrade), it = ui.item, side = d.side;
                 if (!n || !it) return;
-                const tr = cleanTrade(n.trade), ex = tr[side].find(o => o.id === String(it.id));
-                if (ex) ex.qty++; else tr[side].push({ id: String(it.id), name: it.name, img: it.img || '', qty: 1 });
+                const id = String(it.id || npId(it.name)), tr = cleanTrade(n.trade), ex = tr[side].find(o => o.id === id);
+                if (ex) ex.qty++; else tr[side].push({ id, name: it.name, img: it.img || '', qty: 1 });
                 saveNote(d.itrade, { trade: tr });
-                b.classList.add('done'); b.textContent = 'Added \u2713';
+                b.classList.add('done'); b.textContent = 'Added ✓';
                 setTimeout(() => { if (b.isConnected) { b.classList.remove('done'); b.textContent = side === 'give' ? 'You give' : 'You get'; } }, 1600);
                 return;
             }
             if (d.inew) {
                 const it = ui.item, key = newKey();
-                saveNote(key, { trade: { partner: null, give: [], get: [], status: 'planned', date: today(), [d.inew]: [{ id: String(it.id), name: it.name, img: it.img || '', qty: 1 }] } });
-                ui.item = null; itemLists = null; ui.tab = 'trades'; GM_setValue('dti_np_panel_tab', 'trades');
+                saveNote(key, { trade: { partner: null, give: [], get: [], status: 'planned', date: today(), [d.inew]: [{ id: String(it.id || npId(it.name)), name: it.name, img: it.img || '', qty: 1 }] } });
+                ui.item = null; itemPage = null; ui.tab = 'trades'; GM_setValue('dti_np_panel_tab', 'trades');
                 ui.view = 'edit'; ui.key = key; ui.draft = null;
                 render(); body.scrollTop = 0; body.querySelector('.partner')?.focus();
                 return;
             }
+            // ── Seeking ──
+            if (d.seenrm) { GM_setValue('dti_nb_seen', (GM_getValue('dti_nb_seen', []) || []).filter(r => r && r.slug !== d.seenrm)); return rerender(); }
+            if ('seenclr' in d) { GM_setValue('dti_nb_seen', []); return rerender(); }
+            if ('sktog' in d) {   // (a search tile's ◎: on / off your Seeking list)
+                let it = null;
+                try { it = JSON.parse(b.closest('[data-item]').dataset.item); } catch (_) {}
+                if (!it || !isDtiId(it.id)) return;
+                const on = !seekHas(it.id);
+                seekSave(items => { if (on) items[it.id] = seekEntry(it); else delete items[it.id]; });
+                b.classList.toggle('on', on);
+                b.title = on ? 'On your Seeking list — click to take it off' : 'Seeking now: add it to your Seeking list';
+                paintBadge();
+                return;
+            }
+            if (d.skrm) { seekSave(items => { delete items[d.skrm]; }); return rerender(); }
+            if ('skcopy' in d) {
+                const list = seekSorted();
+                Promise.all(list.map(x => npNcValue(x.name).catch(() => null))).then(vals => {
+                    const text = 'Seeking: ' + list.map((x, i) => x.name + (capNums(vals[i]) ? ` (${String(vals[i]).replace(/\*$/, '')} caps)` : '')).join(', ');
+                    navigator.clipboard.writeText(text).then(() => { b.classList.add('on'); b.title = 'Copied ✓'; setTimeout(() => { if (b.isConnected) { b.classList.remove('on'); b.title = 'Copy the list as text'; } }, 1600); }).catch(() => {});
+                });
+                return;
+            }
+            // ── Trades ──
+            if ('gtickall' in d) {   // (a gift's other gifts with them: tick or untick them all)
+                const boxes = [...body.querySelectorAll('.gift .gbody input[data-gs]')], all = boxes.every(c => c.checked);
+                boxes.forEach(c => { c.checked = !all; });
+                b.textContent = all ? 'Tick all' : 'Untick all';
+                return;
+            }
+            if ('undo' in d) {   // (gifts put in the wrong report: everything back as it was, and the gift open again)
+                const u = ui.undo;
+                ui.undo = null;
+                if (u) {
+                    if (u.trade) saveNote(u.key, { trade: u.trade }); else removeNote(u.key);
+                    GM_setValue('dti_np_gifts', u.gifts);
+                    ui.view = 'list'; ui.key = ''; ui.openGift = u.uid;
+                }
+                return render();
+            }
+            if (b.matches('.newbtn')) { ui.view = 'edit'; ui.key = newKey(); ui.draft = null; render(); body.scrollTop = 0; body.querySelector('.partner')?.focus(); return; }
+            if (d.open && ui.tab === 'notes') { ui.nt.key = ui.key = d.open; render(); body.scrollTop = 0; return; }   // (from Notes: the report there)
+            if (d.open) { ui.tab = 'trades'; GM_setValue('dti_np_panel_tab', 'trades'); ui.item = null; itemPage = null; ui.view = 'edit'; ui.key = d.open; render(); body.scrollTop = 0; return; }   // (from Trades, or Home)
+            if (d.st) { ui.stFor = ui.stFor === d.st ? '' : d.st; return rerender(); }
+            if (d.set) {
+                const key = ui.stFor, n = tradeOf(key);
+                ui.stFor = '';
+                if (n) saveNote(key, { trade: Object.assign(cleanTrade(n.trade), { status: d.set }) });
+                return rerender();
+            }
+            if (b.matches('.morebtn')) { ui.showDone = !ui.showDone; return rerender(); }
+            if (b.matches('.acctall')) { ui.allAcct = !ui.allAcct; return rerender(); }
+            if (b.matches('.seekoff')) { const ids = (d.ids || '').split(','); seekSave(items => ids.forEach(id => delete items[id])); return rerender(); }
+            if (d.g) { ui.openGift = ui.openGift === d.g ? '' : d.g; ui.gdel = ''; return rerender(); }
+            if ('gifton' in d) {   // (NC gift tracking on — here and on DTI, from now)
+                GM_setValue('dti_track_gifts', true);
+                npSafe('NC gift tracking', runGiftTracker);
+                return rerender();
+            }
+            if (d.gact) return giftAct(b);
+            if (b.matches('.back')) { ui.view = 'list'; ui.key = ''; if (ui.tab === 'notes') ui.nt.key = ''; return render(); }
+            if ('trpin' in d) {   // (a report pinned to the top of your notes)
+                const on = !tradeOf(ui.key)?.pinned;
+                saveNote(ui.key, { pinned: on, trade: cur().trade });
+                b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); b.title = on ? 'Unpin it' : 'Pin it to the top of your notes';
+                return;
+            }
+            if (d.seg) { patchTrade(t => { t.status = d.seg; }); return rerenderEditor(); }
+            if (d.q) { patchTrade(t => { const it = t[d.side][+d.i]; if (it) it.qty = Math.max(1, it.qty + +d.q); }); return rerenderEditor(); }
+            if (d.rm) { patchTrade(t => { t[d.side].splice(+d.rm, 1); }); return rerenderEditor(); }
+            if (d.gbc) { patchTrade(t => { const ex = t[d.side].find(o => o.id === d.gbc); if (ex) ex.qty++; else t[d.side].push({ id: d.gbc, name: GBC_KINDS[d.gbc].name, img: '', qty: 1 }); }); return rerenderEditor(); }
+            // ── Tokens ──
             if (d.tkseg) { ui.tk.seg = d.tkseg; ui.tk.open = ''; GM_setValue('dti_np_tk_seg', d.tkseg); render(); body.scrollTop = 0; return; }
-            if (d.tkopen) { ui.tk.open = ui.tk.open === d.tkopen ? '' : d.tkopen; rerender(); return; }
+            if (d.tkopen) { ui.tk.open = ui.tk.open === d.tkopen ? '' : d.tkopen; return rerender(); }
             if ('tkuft' in d) {   // (up for trade, on / off)
                 const box = b.closest('[data-tk]'), key = box?.dataset.tk;
                 if (!key) return;
                 const i = tkInfoOf(key, box.dataset.tkname ? { name: box.dataset.tkname, img: box.dataset.tkimg || '' } : null);
                 tokSetUft(i, !i.uft, tkCat, tkScope());
-                tkRefresh(key);
-                return;
+                return tkRefresh(key);
             }
             if (d.tkstep) {
                 const box = b.closest('[data-tk]'), key = box?.dataset.tk;
@@ -34917,95 +36131,166 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 tkRefresh(key); paintBadge();
                 return;
             }
-            if ('studioread' in d) { studioFail = false; studioRead(); rerender(); return; }
-            if (d.tkgo) {
-                ui.item = null; ui.tab = 'tokens'; GM_setValue('dti_np_panel_tab', 'tokens');
-                ui.tk.seg = d.tkgo; ui.tk.q = ''; ui.tk.open = d.tkkey || '';
-                render();
-                body.querySelector(`.tkrow.open`)?.scrollIntoView({ block: 'center' });
-                return;
-            }
+            // ── Notes ──
             if (d.ntkey) { ui.nt.key = d.ntkey; render(); body.scrollTop = 0; return; }
+            if ('gview' in d) { ui.allGifts = !ui.allGifts; ui.openGift = ''; ui.gdel = ''; return rerender(); }   // (NC gifts: to sort ⇄ all)
             if ('ntnew' in d) { ui.nt.key = 'note:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); render(); body.querySelector('.ntext')?.focus(); return; }
-            if ('ntseg' in d) { ui.nt.seg = d.ntseg; render(); return; }
-            if ('ntback' in d) { ui.nt.key = ''; render(); return; }
+            if ('ntseg' in d) { ui.nt.seg = d.ntseg; return rerender(); }
+            if ('ntback' in d) { ui.nt.key = ''; return render(); }
             if ('ntpin' in d) {
                 const n = DTINotes.get(ui.nt.key), on = !n?.pinned;
                 DTINotes.save(ui.nt.key, { pinned: on });
                 b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); b.title = on ? 'Unpin it' : 'Pin it to the top';
-                const del = body.querySelector('.ndel'); if (del) del.hidden = !DTINotes.get(ui.nt.key);
+                const del = body.querySelector('[data-ntdel]'); if (del) del.hidden = !DTINotes.get(ui.nt.key);
                 return;
             }
             if ('ntdel' in d) {
                 if (!b.classList.contains('sure')) { b.classList.add('sure'); b.textContent = 'Delete it for good?'; return; }
-                DTINotes.remove(ui.nt.key); ui.nt.key = ''; render();
-                return;
+                DTINotes.remove(ui.nt.key); ui.nt.key = '';
+                return render();
             }
-            if ('ctxfold' in d) { const f = GM_getValue('dti_np_ctx_fold', {}) || {}; f[ctx.kind] = !f[ctx.kind]; GM_setValue('dti_np_ctx_fold', f); rerender(); return; }
-            if ('import' in d) { const at = Date.now(); GM_setValue('dti_tok_capture', { at, src: ctx.src }); openPanel(false); runTokenCapture(ctx.src, at); return; }
-            if ('newwith' in d) {
-                ui.item = null; ui.tab = 'trades'; GM_setValue('dti_np_panel_tab', 'trades');
-                ui.view = 'edit'; ui.key = newKey(); ui.draft = { key: ui.key, partner: ctx.who };
-                render(); body.scrollTop = 0; body.querySelector('[data-add="give"]')?.focus();
+            if (b.matches('.del')) {   // (a trade report: twice to be sure)
+                if (!b.classList.contains('sure')) { b.classList.add('sure'); b.textContent = 'Delete it for good?'; return; }
+                removeNote(ui.key);
+                ui.view = 'list'; ui.key = '';
+                if (ui.tab === 'notes') ui.nt.key = '';
+                render();
             }
-        });
-        body.addEventListener('change', e => {   // a wanted token's list
-            if (!e.target.matches('[data-tklist]')) return;
-            const key = e.target.closest('[data-tk]')?.dataset.tk;
-            if (key) { TokLists.put(key, e.target.value); tkRefresh(key); }
-        });
-        body.addEventListener('keydown', e => {   // rows that open an item: Enter / Space too
-            if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.sr[data-item], .skrow[data-item]')) { e.preventDefault(); e.target.click(); }
-        });
+        }
 
-        // ── Moving and opening: a click opens the panel; a drag slides the tab up or down the right edge ──
+        // ── Live: the page itself — its own items coming in or paging in place (only where "On this page" reads them from the page), and
+        // someone's lists looked at on the boards ──
+        if (ctx && (ctx.kind === 'items' || (ctx.kind === 'user' && ctx.gallery)))
+            new MutationObserver(ms => { if (ms.some(m => [...m.addedNodes, ...m.removedNodes].some(n => n.nodeType === 1))) hereSoon(); })
+                .observe(document.body, { childList: true, subtree: true });
+        document.addEventListener('dti-nb-looked', () => { if (boardRows || boardBusy) boardRefresh(); });   // (once the Mini DTI has looked at the topic — not your lists read again before)
+
+        // ── Live: your notes, tokens or Seeking list changed on DTI (or another tab), gifts recorded, tracking on or off — drawn again
+        // only on a list (not while you type, or in an open trade, note or item). The theme: at once ──
+        if (typeof GM_addValueChangeListener === 'function') {
+            const typing = () => { const a = root.activeElement; return !!a && a.matches('input:not([type="checkbox"]), textarea, select'); };
+            const relist = () => {
+                paintBadge();
+                if (!win || win.hidden || ui.stFor || ui.item || typing() || (ui.tab === 'trades' && ui.view === 'edit') || (ui.tab === 'notes' && ui.nt.key)) return;
+                rerender();
+            };
+            ['dti_notes', 'dti_tokens', 'dti_tok_cap', 'dti_tok_lists', 'dti_tok_studio', 'dti_seeking', 'dti_sk_new', 'dti_nb_seen'].forEach(k => GM_addValueChangeListener(k, (kk, o, n, remote) => { if (remote) relist(); }));
+            ['dti_np_gifts', 'dti_track_gifts'].forEach(k => GM_addValueChangeListener(k, relist));
+            GM_addValueChangeListener('dti_np_here_seen', (k, o, n, remote) => { if (remote) paintBadge(); });
+            GM_addValueChangeListener('dti_theme_tokens', () => {
+                theme = themeOf();
+                root.querySelector('style.vars').textContent = theme.css;
+                if (win) { win.classList.toggle('solid', theme.solid); win.classList.toggle('dark', theme.dark); npFonts(theme.font); }
+            });
+        }
+
+        // ── Moving and opening: a click opens the window; a drag slides the tab up or down the right edge ──
         place();
-        addEventListener('resize', () => { place(); if (!panel.hidden) fit(); });   // (only moves it: a phone's keyboard opening resizes too)
+        addEventListener('resize', () => { place(); if (win && !win.hidden) fit(); });   // (only moves it: a phone's keyboard opening resizes too)
         let drag = null;
-        fab.addEventListener('pointerdown', e => {
+        tab.addEventListener('pointerdown', e => {
             if (e.button !== 0) return;
-            drag = { y0: e.clientY, dy: e.clientY - (host.getBoundingClientRect().top + FAB_H / 2), moved: false };
-            fab.setPointerCapture(e.pointerId);
+            drag = { y0: e.clientY, dy: e.clientY - (tab.getBoundingClientRect().top + TAB_H / 2), moved: false };
+            tab.setPointerCapture(e.pointerId);
         });
-        fab.addEventListener('pointermove', e => {
+        tab.addEventListener('pointermove', e => {
             if (!drag) return;
             if (!drag.moved && Math.abs(e.clientY - drag.y0) < 5) return;
-            if (!drag.moved) { drag.moved = true; openPanel(false); wrap.classList.add('drag'); }
+            if (!drag.moved) { drag.moved = true; openWin(false); tab.classList.add('drag'); }
             place(e.clientY - drag.dy);
         });
         const endDrag = e => {
             if (!drag) return;
             const moved = drag.moved;
             drag = null;
-            wrap.classList.remove('drag');
-            if (!moved) { if (e.type === 'pointerup') openPanel(panel.hidden); return; }
-            const r = host.getBoundingClientRect();
-            pos.y = Math.min(0.96, Math.max(0.04, (r.top + FAB_H / 2) / innerHeight));
+            tab.classList.remove('drag');
+            if (!moved) { if (e.type === 'pointerup') openWin(!win || win.hidden); return; }
+            const r = tab.getBoundingClientRect();
+            pos.y = Math.min(0.96, Math.max(0.04, (r.top + TAB_H / 2) / innerHeight));
             GM_setValue('dti_np_fab_pos', { y: pos.y });
             place();
         };
-        fab.addEventListener('pointerup', endDrag);
-        fab.addEventListener('pointercancel', endDrag);
-        fab.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(panel.hidden); } });
-        // a click anywhere else, or Esc, closes it; keys typed in it stay in it (not Neopets' page)
-        document.addEventListener('pointerdown', e => { if (!panel.hidden && !e.composedPath().includes(host)) openPanel(false); }, true);
-        document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.hidden) openPanel(false); });
-        panel.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') { openPanel(false); fab.focus(); } });
-        ['keyup', 'keypress'].forEach(t => panel.addEventListener(t, e => e.stopPropagation()));
-        // live: your notes, tokens or Seeking list changed on DTI (or another tab), gifts recorded, tracking turned on or off
-        // (drawn again only on a list — not while you type, or in an open trade, note or item)
-        if (typeof GM_addValueChangeListener === 'function') {
-            const typing = () => { const a = root.activeElement; return !!a && a.matches('input:not([type="checkbox"]), textarea, select'); };
-            const relist = () => {
-                paintBadge();
-                if (panel.hidden || ui.stFor || ui.item || typing() || (ui.tab === 'trades' && ui.view === 'edit') || (ui.tab === 'notes' && ui.nt.key)) return;
-                rerender();
-            };
-            ['dti_notes', 'dti_tokens', 'dti_tok_cap', 'dti_tok_lists', 'dti_tok_studio', 'dti_seeking'].forEach(k => GM_addValueChangeListener(k, (kk, o, n, remote) => { if (remote) relist(); }));
-            ['dti_np_gifts', 'dti_track_gifts'].forEach(k => GM_addValueChangeListener(k, relist));
-        }
-        if (ctx?.kind === 'mall' && seekAll().length) ctxLoads();   // (the NC Mall: is anything you're seeking in it? — for the dot)
+        tab.addEventListener('pointerup', endDrag);
+        tab.addEventListener('pointercancel', endDrag);
+        tab.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openWin(!win || win.hidden); } });
+        // a click anywhere else, or Esc, closes it
+        document.addEventListener('pointerdown', e => { if (win && !win.hidden && !e.composedPath().includes(host)) openWin(false); }, true);
+        document.addEventListener('keydown', e => { if (e.key === 'Escape' && win && !win.hidden) openWin(false); });
+        if (ctx?.kind === 'mall' && (seekAll().length || slug())) mallLoad();   // (the NC Mall: anything you want in it? — for the dot)
         paintBadge();
+        if (ctx?.kind === 'items') setTimeout(paintBadge, 2500);   // (a page's items can come in after it's loaded)
+    }
+
+    // ── Mini DTI's readers (whole functions: the Neopets side has them, and so do the tests) ──
+    // What kind of Neopets page this is, for Mini DTI's "On this page" → { kind, label, … } or null
+    //   items: your Inventory, SDB, Closet, Gallery or Styling Chamber (src) · user: someone's lookup, gallery or shop, or a Neomail to
+    //   them (who) · pet: a pet's lookup, the customiser (pet) · mall: the NC Mall · studio: the Styling Studio · board: a Neoboards topic
+    function npPageCtx(href, me = '') {
+        let u;
+        try { u = new URL(href); } catch (_) { return null; }
+        const path = u.pathname, qs = u.searchParams, low = s => String(s || '').toLowerCase();
+        if (/^ncmall\./i.test(u.hostname)) return { kind: 'mall', label: 'NC Mall' };
+        if (/^\/mall\/stylingstudio/i.test(path)) return { kind: 'studio', label: 'Styling Studio' };
+        const gal = /^\/gallery\//i.test(path), shop = path === '/browseshop.phtml';
+        const who = (path === '/userlookup.phtml' && qs.get('user')) || (path === '/neomessages.phtml' && qs.get('recipient')) || (gal && qs.get('gu')) || (shop && qs.get('owner')) || '';
+        if (who && low(who) !== low(me)) return { kind: 'user', who, gallery: gal, label: gal ? `${who}’s gallery` : shop ? `${who}’s shop` : who };
+        if (path === '/petlookup.phtml' || /^\/customise\/?$/i.test(path)) {
+            const pet = qs.get('pet') || qs.get('view') || '';
+            return { kind: 'pet', pet, label: pet || 'Customise' };
+        }
+        const src = ({ '/inventory.phtml': 'inv', '/safetydeposit.phtml': 'sdb', '/closet.phtml': 'closet' })[path] || (gal ? 'gal' : /^\/stylingchamber/i.test(path) ? 'sc' : '');
+        if (src) return { kind: 'items', src, label: 'Your ' + ({ inv: 'Inventory', sdb: 'Safety Deposit Box', closet: 'Closet', gal: 'Gallery', sc: 'Styling Chamber' })[src] };
+        if (/^\/neoboards\/topic\.phtml$/i.test(path)) return { kind: 'board', topic: qs.get('topic') || '', label: 'Neoboards' };
+        return null;
+    }
+    // A DTI item page (parsed) → what Mini DTI shows of it: { name, img, kind, first, desc, links, zones: { occ, res }, layers, species,
+    //   speciesId, color, trades: { offering, seeking }, customize } — its picture on a pet is DTI's own layers (the still ones: the moving
+    //   ones are DTI's own little pages, which only DTI shows)
+    function npItemPage(doc) {
+        const txt = el => (el?.textContent || '').replace(/\s+/g, ' ').trim();
+        const count = k => {
+            const a = [...doc.querySelectorAll('.trades-section a')].find(x => (/\/trades\/(\w+)/.exec(x.getAttribute('href') || '') || [])[1] === k);
+            const m = a && txt(a).match(/\((\d[\d,]*)\)/);
+            return m ? +m[1].replace(/,/g, '') : a ? 0 : null;
+        };
+        const opts = sel => [...doc.querySelectorAll(sel + ' option')].filter(o => /^\d+$/.test(o.value)).map(o => ({ id: o.value, name: txt(o), on: o.selected }));
+        const zone = re => { const s = [...doc.querySelectorAll('.item-zones-info section')].find(x => re.test(txt(x.querySelector('h3')))); return s ? [...s.querySelectorAll('li')].map(txt).filter(Boolean) : []; };
+        const species = opts('select[name="preview[species_id]"]'), colors = opts('select[name="preview[color_id]"]');
+        return {
+            name: txt(doc.querySelector('.item-name')), img: doc.querySelector('.item-thumbnail')?.getAttribute('src') || '',
+            kind: (doc.querySelector('.item-kind')?.dataset.type || '').toLowerCase(), first: txt(doc.querySelector('.first-seen-at')),
+            desc: txt(doc.querySelector('.item-description')),
+            links: [...doc.querySelectorAll('.item-links a')].map(a => ({ label: txt(a).replace(/:.*$/, ''), href: a.getAttribute('href') || '' })).filter(l => l.label && /^https:\/\//.test(l.href)),
+            zones: { occ: zone(/occupies/i), res: zone(/restricts/i) },
+            layers: [...doc.querySelectorAll('outfit-viewer outfit-layer')].map(l => ({ zone: l.dataset.zone || '', src: l.querySelector('img')?.getAttribute('src') || '', anim: !!l.querySelector('iframe') }))
+                .filter(l => !l.src || /^https:\/\//.test(l.src)),
+            species, speciesId: species.find(s => s.on)?.id || '', color: colors.find(c => c.on)?.id || '',
+            trades: { offering: count('offering'), seeking: count('seeking') },
+            customize: doc.querySelector('a.customize-more')?.getAttribute('href') || '',
+        };
+    }
+    // One of DTI's trade lists for an item (Offering / Seeking) → [{ who, closet, active, lists: [{ name, href }] }]
+    function npTradeRows(doc) {
+        return [...doc.querySelectorAll('table tbody tr')].map(row => {
+            const c = row.querySelectorAll('td');
+            if (c.length < 3) return null;
+            const closet = (c[1].querySelector('a') || c[2].querySelector('a[href*="/user/"]'))?.getAttribute('href')?.replace(/#.*$/, '') || '';
+            return { who: c[1].textContent.trim(), closet, active: c[0].textContent.trim(), lists: [...c[2].querySelectorAll('a')].map(a => ({ name: a.textContent.trim(), href: a.getAttribute('href') || '' })) };
+        }).filter(r => r && r.who);
+    }
+    // The NC Mall now (DTI Remix's list, slimmed) → Home's rows, as DTI's Home card has them: new (the last 31 days, newest first),
+    // leaving (within 15 days, soonest first), on sale (the biggest discount first) — a bundle or pack of one item once
+    function npMallRows(items, now = Date.now()) {
+        const base = n => String(n || '').replace(/\s+(?:double\s+)?\d+[- ]?(?:bundle|pack)$/i, '').trim().toLowerCase();
+        const once = rows => { const seen = new Set(); return rows.filter(r => { const k = base(r.name); if (seen.has(k)) return false; seen.add(k); return true; }); };
+        const live = (items || []).filter(r => r && r.name && r.price != null && (!r.sb || Date.parse(r.sb) <= now) && (!r.se || Date.parse(r.se) > now));
+        const sale = r => r.dp > 0 && r.dp < r.price && (!r.db || Date.parse(r.db) <= now) && (!r.de || Date.parse(r.de) >= now);
+        const began = r => Date.parse(r.sb || r.add) || 0;
+        return {
+            new: once(live.filter(r => began(r) >= now - 31 * 864e5).sort((a, b) => began(b) - began(a))),
+            leaving: once(live.filter(r => r.se && Date.parse(r.se) <= now + 15 * 864e5).sort((a, b) => Date.parse(a.se) - Date.parse(b.se))),
+            sale: once(live.filter(sale).sort((a, b) => a.dp / a.price - b.dp / b.price)),
+        };
     }
 
     // NC values on Neopets pages: Lebron's list (wearables) and Valisar's (capsules and other non-wearables — a Neopets pet
@@ -35013,40 +36298,41 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     // again next time. Each is fetched once per page, and only when needed. (State lives on the functions: the Neopets side
     // runs before the rest of the script is set up.)
     function npNcNorm(n) { return String(n).trim().replace(/\s*:\s*/g, ': ').replace(/\s{2,}/g, ' ').toLowerCase(); }
-    function npLebron() {
-        return npLebron.p || (npLebron.p = new Promise(res => {
-            try {
-                const c = JSON.parse(localStorage.getItem('dti_lebron_cache') || 'null');
-                if (c && c.t && Date.now() - c.t < 86400000 && c.m) return res(c.m);
-            } catch (_) {}
-            GM_xmlhttpRequest({
+    function npLebron() {   // (kept a day in our own store — the site's storage is too small for it)
+        return npLebron.p || (npLebron.p = (async () => {
+            const c = await npStoreGet('lebron');
+            if (c && c.t && Date.now() - c.t < 86400000 && c.m) return c.m;
+            return new Promise(res => GM_xmlhttpRequest({
                 method: 'GET', url: 'https://lebron-values.netlify.app/item_values.json', timeout: 12000, anonymous: true,
                 onload(r) {
                     const m = {};
                     try { const raw = JSON.parse(r.responseText); Object.keys(raw).forEach(k => { m[npNcNorm(k)] = raw[k]; }); } catch (_) {}
-                    if (Object.keys(m).length) try { localStorage.setItem('dti_lebron_cache', JSON.stringify({ m, t: Date.now() })); } catch (_) {}
+                    if (Object.keys(m).length) npStoreSet('lebron', { m, t: Date.now() });
                     res(m);
                 },
                 onerror() { res({}); },
                 ontimeout() { res({}); },
-            });
-        }));
+            }));
+        })());
     }
     function npValisar() {
         return npValisar.p || (npValisar.p = new Promise(res => {
             try {
                 const c = JSON.parse(localStorage.getItem('dti_val_cache') || 'null');
                 if (c?.t && Date.now() - c.t < 86400000 && c.m && Object.keys(c.m).length) return res(c.m);
+                if (Date.now() < (+localStorage.getItem('dti_val_wait') || 0)) return res({});   // (empty a moment ago: 10 minutes, across pages)
             } catch (_) {}
+            const fail = () => { try { localStorage.setItem('dti_val_wait', String(Date.now() + 10 * 60e3)); } catch (_) {} res({}); };
             GM_xmlhttpRequest({
                 method: 'GET', url: 'https://www.neopets.com/~valisar', timeout: 15000,
                 onload(r) {
                     const m = _parseValisarHtml(r.responseText);
-                    if (Object.keys(m).length) try { localStorage.setItem('dti_val_cache', JSON.stringify({ m, t: Date.now() })); } catch (_) {}
+                    if (!Object.keys(m).length) return fail();
+                    try { localStorage.setItem('dti_val_cache', JSON.stringify({ m, t: Date.now() })); localStorage.removeItem('dti_val_wait'); } catch (_) {}
                     res(m);
                 },
-                onerror() { res({}); },
-                ontimeout() { res({}); },
+                onerror: fail,
+                ontimeout: fail,
             });
         }));
     }
@@ -35430,6 +36716,26 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         add('dti-np-font', 'https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
         add('dti-np-theme-font', themeHref);
     }
+    // The items picked in the Neoboards' Seeking popup (user asked): their names filled into the Neomail page it opened, the caret before
+    // them for the rest of the message — only for that person, only within a few minutes, only into empty boxes. Sending is yours.
+    function runNeomailDraft() {
+        const d = GM_getValue('dti_nm_draft', null);
+        if (!d || !d.to || Date.now() - (d.at || 0) > 5 * 60e3) return;
+        const fill = () => {
+            const f = document.querySelector('form[action*="process_neomessages"]');
+            const to = f?.querySelector('input[name="recipient"]'), subj = f?.querySelector('input[name="subject"]'), body = f?.querySelector('textarea[name="message_body"]');
+            if (!to || !body) return false;
+            if (String(to.value).trim().toLowerCase() !== String(d.to).toLowerCase()) return true;   // (someone else: left alone)
+            if (subj && !subj.value.trim()) subj.value = String(d.subject || '');
+            if (!body.value.trim()) {
+                body.value = String(d.body || '');
+                try { body.focus(); body.setSelectionRange(0, 0); } catch (_) {}
+            }
+            GM_setValue('dti_nm_draft', null);
+            return true;
+        };
+        if (!fill()) document.addEventListener('DOMContentLoaded', fill, { once: true });
+    }
     function runNbSeek() {
         const SLUG = /impress\.openneo\.net\/user\/([^/?#\s"'<>]+)\/closet/i, KEEP = 2 * 3600e3, MAX = 20, D = 'https://impress.openneo.net';
         const ICO = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.6"/><path d="M8 .9v2.2M8 12.9v2.2M.9 8h2.2M12.9 8h2.2"/></svg>';   // (Seeking's own)
@@ -35468,16 +36774,18 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const items = GM_getValue('dti_seeking', null)?.items || {}, me = acctMany() ? acctOfNp(npWhoAmI()) : null;
             return new Set(Object.entries(items).filter(([, e]) => !me || (e?.acct && acctGet(e.acct) ? e.acct : 'main') === me).map(([id]) => id));
         };
-        async function closet(slug) {   // (theirs, kept 2 hours)
-            const all = ls.get('dti_nb_closets2') || {}, c = all[slug];
+        async function closet(slug) {   // (theirs, kept 2 hours — each person on their own in our store, the last 60)
+            const c = await npStoreGet('nb:' + slug);
             if (c && Date.now() - c.at < KEEP) return c;
             const p = nbParseCloset(await get(`${D}/user/${encodeURIComponent(slug)}/closet`));
             if (!p) return null;
-            all[slug] = { at: Date.now(), ...p };
-            Object.keys(all).sort((a, b) => all[b].at - all[a].at).slice(60).forEach(k => delete all[k]);   // (the last 60 people)
-            ls.set('dti_nb_closets2', all);
-            try { localStorage.removeItem('dti_nb_closets'); } catch (_) {}   // (the old one: items as arrays)
-            return all[slug];
+            const e = { at: Date.now(), ...p };
+            await npStoreSet('nb:' + slug, e);
+            const ix = ((await npStoreGet('nb:index')) || []).filter(x => x !== slug);
+            ix.unshift(slug);
+            ix.splice(60).forEach(old => npStoreDel('nb:' + old));
+            npStoreSet('nb:index', ix);
+            return e;
         }
         let mineP = null;
         function mine() {   // (what you own and want — your own Items page, kept 6 hours; never opened My Items on DTI: not known)
@@ -35537,13 +36845,24 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         async function check(slug) {
             results.set(slug, 'busy'); paint(slug);
             const c = await closet(slug), seek = seeking(), me = await mine();
-            results.set(slug, c ? sumOf(c, seek, me) : 'fail'); paint(slug);
+            results.set(slug, c ? sumOf(c, seek, me) : 'fail');
+            if (c && results.get(slug).seek.length) nbSeen(slug, c, results.get(slug).seek);
+            paint(slug);
+            if (c) document.dispatchEvent(new CustomEvent('dti-nb-looked', { detail: slug }));   // (the Mini DTI's "On this page" follows)
         }
         async function pump() {   // (one person at a time, a little apart)
             if (busy) return;
             busy = true;
             while (queue.length) { await check(queue.shift()); await new Promise(r => setTimeout(r, 700)); }
             busy = false;
+        }
+        // (seen on the boards — someone with things from your Seeking list, noted for the Seeking page: who, what, where; the last 40)
+        function nbSeen(slug, c, items) {
+            const mail = location.pathname === '/neomessages.phtml';
+            const all = (GM_getValue('dti_nb_seen', []) || []).filter(x => x && x.slug !== slug);
+            all.unshift({ slug, who: c.name || nameOf(slug), np: c.np || '', at: Date.now(), mail, where: mail ? '' : location.href.replace(/#.*$/, ''),
+                items: items.slice(0, 12).map(x => ({ id: String(x.id), name: x.name || '', img: x.img || '' })) });
+            GM_setValue('dti_nb_seen', all.slice(0, 40));
         }
         let pop = null;
         const closePop = () => { pop?.remove(); pop = null; };
@@ -35566,15 +36885,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             pop.dataset.style = tk.style || '';
             const sh = pop.attachShadow({ mode: 'open' });
             // (an item: its picture, name, NC / NP and cap value — how many and which of their lists on hover; a click opens their DTI page at it)
-            const tile = x => `<a class="t" href="${noteEsc(home)}#dti-jump=${noteEsc(x.id)}" target="_blank" rel="noopener" data-name="${noteEsc(x.name)}"${x.nc ? ' data-nc="1"' : ''}`
+            const tile = x => `<a class="t" href="${noteEsc(home)}#dti-jump=${noteEsc(x.id)}" target="_blank" rel="noopener" data-id="${noteEsc(x.id)}" data-name="${noteEsc(x.name)}"${x.nc ? ' data-nc="1"' : ''}`
                 + ` title="${noteEsc(x.name)}&#10;In their \u201c${noteEsc(x.list)}\u201d${x.qty > 1 ? ` (\u00d7${x.qty})` : ''} \u2014 click to see it on DTI">`
                 + `<span class="pic">${x.img ? `<img src="${noteEsc(x.img)}" alt="" loading="lazy">` : ''}${x.qty > 1 ? `<i class="q">\u00d7${x.qty}</i>` : ''}</span>`
-                + `<span class="nm">${noteEsc(x.name || 'Item ' + x.id)}</span><span class="b"><i class="k${x.nc ? ' nc' : ''}">${x.nc ? 'NC' : 'NP'}</i><i class="v"></i></span></a>`;
+                + `<span class="nm">${noteEsc(x.name || 'Item ' + x.id)}</span><span class="b"><i class="k${x.nc ? ' nc' : ''}">${x.nc ? 'NC' : 'NP'}</i><i class="v"></i></span><i class="ck" aria-hidden="true"></i></a>`;
             // (a group: its count as a badge in its colour, its title — nothing there: one quiet line)
             const group = (key, list, head, sub, none, unknown) => {
                 const n = list ? list.length : null;
                 return `<section class="g ${key}${n ? '' : ' empty'}"><div class="gh"><i class="nb">${n == null ? '?' : n}</i><b>${head}</b><span class="sub">${sub}</span>`
-                    + (n ? `<span class="tot"></span></div><div class="tiles">${list.map(tile).join('')}</div>` : `<span class="none">${n == null ? unknown : none}</span></div>`) + '</section>';
+                    + (n ? `<span class="tot"></span><button type="button" class="all" title="Pick all of these \u2014 or none of them">All</button></div><div class="tiles">${list.map(tile).join('')}</div>` : `<span class="none">${n == null ? unknown : none}</span></div>`) + '</section>';
             };
             const NOT_KNOWN = 'open My Items on DTI once to tell';
             const cnt = (k, n, label) => `<span class="c ${k}${n ? '' : ' zero'}"><em>${n == null ? '?' : n}</em> ${label}</span>`;
@@ -35637,17 +36956,99 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 .k.nc { background: color-mix(in srgb, var(--nc) 16%, var(--surface)); color: color-mix(in srgb, var(--nc) 78%, var(--text)); }
                 .v:empty { display: none; }
                 .v { background: var(--vbg); color: var(--vfg); border-color: var(--vbd); white-space: nowrap; }
+                .ft { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--border); background: var(--surface); }
+                /* (Select items: a switch — on, a click picks a tile (a tick on it) instead of opening it; Neomail then) */
+                .ft .pick { flex: none; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px 0 8px; border: 1px solid var(--border); border-radius: 9px;
+                    background: var(--surface); color: var(--text); font: 600 12px/1 'Poppins', system-ui, sans-serif; cursor: pointer; transition: border-color .12s; }
+                .ft .pick:hover { border-color: var(--accent); }
+                .ft .pick:focus-visible, .ft .offer:focus-visible, .gh .all:focus-visible, .t:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+                .sw { position: relative; flex: none; width: 26px; height: 15px; border-radius: 99px; background: color-mix(in srgb, var(--muted) 38%, var(--surface)); transition: background .15s; }
+                .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+                .pick[aria-checked="true"] .sw { background: var(--accent); }
+                .pick[aria-checked="true"] .sw::after { transform: translateX(11px); }
+                .ft .offer { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: none; border-radius: 9px; cursor: pointer;
+                    background: var(--accent); color: var(--accent-fg); font: 700 12px/1 'Poppins', system-ui, sans-serif; }
+                .ft .offer[hidden] { display: none; }
+                .ft .offer:hover:not(:disabled) { filter: brightness(1.06); }
+                .ft .offer:disabled { opacity: .45; cursor: default; }
+                .ft .offer svg { width: 14px; height: 14px; }
+                .ft .said { flex: 1; min-width: 0; font-size: 11px; color: var(--muted); line-height: 1.3; }
+                .gh .all { display: none; flex: none; height: 20px; padding: 0 9px; border: 1px solid var(--border); border-radius: 99px; background: var(--surface); color: var(--muted);
+                    font: 700 10px/1 'Poppins', system-ui, sans-serif; cursor: pointer; }
+                .gh .all:hover { border-color: var(--accent); color: var(--accent-text); }
+                .card.picking .gh .all { display: inline-block; }
+                .t .ck { position: absolute; left: 5px; top: 5px; width: 18px; height: 18px; display: none; place-items: center; border: 1.5px solid var(--border); border-radius: 50%; background: var(--surface); }
+                .card.picking .t .ck { display: grid; }
+                .card.picking .t.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+                .card.picking .t.on .ck { border-color: var(--accent); background: var(--accent); }
+                .card.picking .t.on .ck::after { content: ''; width: 8px; height: 4px; margin-top: -2px; border: solid var(--accent-fg); border-width: 0 0 2px 2px; transform: rotate(-45deg); }
             </style><div class="card" role="dialog" aria-label="${noteEsc(who)}\u2019s DTI lists">
                 <div class="h"><span class="ico">${ICO}</span><div class="who"><b>${noteEsc(who)}</b><div class="cnt">${cnt('seek', r.seek.length, 'Seeking')}${cnt('want', r.want?.length, 'Wanted')}${cnt('they', r.they?.length, 'They Want')}</div></div>`
                 + (c.np ? `<a href="https://www.neopets.com/neomessages.phtml?type=send&recipient=${noteEsc(encodeURIComponent(c.np))}" target="_blank" rel="noopener" title="Neomail ${noteEsc(c.np)}" aria-label="Neomail ${noteEsc(c.np)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="1.8" y="3.2" width="12.4" height="9.6" rx="1.6"/><path d="m2.4 4.2 5.6 4.4 5.6-4.4"/></svg></a>` : '')
                 + `<a href="${noteEsc(home)}" target="_blank" rel="noopener" title="Their items on DTI" aria-label="Their items on DTI"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 9.5v3.5H3V4h3.5"/></svg></a>`
                 + `<button class="x" type="button" aria-label="Close">\u00d7</button></div>
-                <div class="body">${group('seek', r.seek, 'Seeking', 'they have', 'nothing from your Seeking list', '')}${group('want', r.want, 'Wanted', 'they have', 'nothing from your wishlist', NOT_KNOWN)}${group('they', r.they, 'They Want', 'you have', 'nothing you have', NOT_KNOWN)}</div></div>`;
+                <div class="body">${group('seek', r.seek, 'Seeking', 'they have', 'nothing from your Seeking list', '')}${group('want', r.want, 'Wanted', 'they have', 'nothing from your wishlist', NOT_KNOWN)}${group('they', r.they, 'They Want', 'you have', 'nothing you have', NOT_KNOWN)}</div>
+                <div class="ft"><button type="button" class="pick" role="switch" aria-checked="false" title="Pick the items a trade could take in \u2014 a Neomail to them then opens with their names in"><i class="sw" aria-hidden="true"></i>Select items</button><span class="said" role="status"></span><button type="button" class="offer" hidden disabled title="A Neomail to them with the picked items\u2019 names in: Seeking and Wanted, an empty line, then They Want \u2014 the rest is yours to write"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><rect x="1.8" y="3.2" width="12.4" height="9.6" rx="1.6"/><path d="m2.4 4.2 5.6 4.4 5.6-4.4"/></svg>Neomail</button></div></div>`;
             document.body.appendChild(pop);
             const rect = b.getBoundingClientRect(), w = Math.min(392, innerWidth - 16), h = Math.min(innerHeight * .74, sh.querySelector('.card').offsetHeight || 400);
             pop.style.left = Math.max(8, Math.min(rect.left, innerWidth - w - 8)) + 'px';
             pop.style.top = (rect.bottom + 6 + h < innerHeight - 8 ? rect.bottom + 6 : Math.max(8, rect.top - 6 - h)) + 'px';
             sh.querySelector('.x').addEventListener('click', closePop);
+            // (Select items (user asked — in place of a drafted offer): pick what a trade could take in. On, a click picks a tile instead of
+            // opening it, All a whole group; Neomail opens a Neomail to them with the names in, a comma between: Seeking and Wanted, an empty
+            // line, then They Want — the rest is yours to write. The switch is kept)
+            const card = sh.querySelector('.card'), pickB = sh.querySelector('.pick'), mailB = sh.querySelector('.offer'), said = sh.querySelector('.said');
+            const GET = '.g.seek .t.on, .g.want .t.on', GIVE = '.g.they .t.on';
+            const picked = sel => [...new Set([...sh.querySelectorAll(sel)].map(t => t.dataset.name).filter(Boolean))];
+            const pickPaint = () => {
+                const on = card.classList.contains('picking'), n = picked(GET).length + picked(GIVE).length;
+                pickB.setAttribute('aria-checked', String(on));
+                mailB.hidden = !on; mailB.disabled = !n;
+                sh.querySelectorAll('.t').forEach(t => {
+                    if (on) { t.setAttribute('role', 'checkbox'); t.setAttribute('aria-checked', String(t.classList.contains('on'))); }
+                    else { t.removeAttribute('role'); t.removeAttribute('aria-checked'); }
+                });
+                said.textContent = on ? (n ? `${n} picked` : 'Click the items a trade could take in') : '';
+            };
+            card.classList.toggle('picking', !!GM_getValue('dti_nb_pick', false));
+            pickPaint();
+            pickB.addEventListener('click', () => {
+                const on = card.classList.toggle('picking');
+                if (!on) sh.querySelectorAll('.t.on').forEach(t => t.classList.remove('on'));
+                GM_setValue('dti_nb_pick', on);
+                pickPaint();
+            });
+            const bodyEl = sh.querySelector('.body');
+            bodyEl.addEventListener('click', e => {
+                if (!card.classList.contains('picking')) return;
+                const all = e.target.closest('.all'), t = e.target.closest('.t');
+                if (all) {
+                    const ts = [...all.closest('.g').querySelectorAll('.t')], to = !ts.every(x => x.classList.contains('on'));
+                    ts.forEach(x => x.classList.toggle('on', to));
+                } else if (t) {
+                    e.preventDefault();
+                    const to = !t.classList.contains('on');
+                    t.closest('.g').querySelectorAll('.t').forEach(x => { if (x.dataset.id === t.dataset.id) x.classList.toggle('on', to); });   // (in two of their lists: both)
+                } else return;
+                pickPaint();
+            });
+            bodyEl.addEventListener('keydown', e => {   // (a tile picked with Space too, like a tick box)
+                const t = e.key === ' ' && card.classList.contains('picking') && e.target.closest?.('.t');
+                if (t) { e.preventDefault(); t.click(); }
+            });
+            mailB.addEventListener('click', async () => {
+                const body = [picked(GET).join(', '), picked(GIVE).join(', ')].filter(Boolean).join('\n\n');
+                if (!body) return;
+                if (c.np) {
+                    GM_setValue('dti_nm_draft', { to: c.np, subject: 'Trade?', body, at: Date.now() });
+                    window.open(`https://www.neopets.com/neomessages.phtml?type=send&recipient=${encodeURIComponent(c.np)}`, '_blank', 'noopener');
+                    said.textContent = `A Neomail to ${c.np} opens with the names in \u2014 write the rest, then send`;
+                    return;
+                }
+                let copied = false;
+                try { await navigator.clipboard.writeText(body); copied = true; } catch (_) {}
+                said.textContent = copied ? 'Copied \u2014 their Neopets name isn\u2019t on their DTI page, so paste it into a Neomail to them' : 'Couldn\u2019t copy it';
+            });
             const fg = focus && sh.querySelector('.g.' + focus), body = sh.querySelector('.body');
             if (fg && body) body.scrollTop += fg.getBoundingClientRect().top - body.getBoundingClientRect().top - 6;
             // (NC items' cap values — Lebron's, else Valisar's — on their tiles as they come, and each group's total)
@@ -35687,6 +37088,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .observe(document.body, { childList: true, subtree: true });
     }
 
+    // (a Neopets-side feature started on its own: one failing doesn't stop the rest — said in the console)
+    function npSafe(where, fn) { try { return fn(); } catch (e) { try { console.error('[DTI Enhance] ' + where, e); } catch (_) {} } }
     function runLinkify() {
         const RE_QUICK = /impress\.openneo\.net\/user\//i;
         const RE       = /(https?:\/\/)?impress\.openneo\.net\/user\/[^\s<>"\/]+\/closet[^\s<>"]*/gi;
@@ -36023,12 +37426,20 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         }
 
         // What's captured: NC items and NP items you can wear — never paint brush clothes. When a page can't
-        // say whether an item is wearable (Galleries), DTI is asked (it lists every wearable), 3 at a time,
-        // and the answer is remembered so the same item is never asked about twice.
+        // say whether an item is wearable (Galleries), DTI is asked (it lists every wearable), 6 at a time, by its exact name.
+        // The answers are kept as they come — every few seconds and when you leave, not only once they're all in (user: a big
+        // gallery "used to be one click") — so the same item is never asked about twice; what's wearable goes in as it's known.
         const WEAR_KEY = 'dti_wearable_names';
         let wearKnown = null;   // lowercase name → 1 on DTI / 0 not
         const dtiQueue = [], dtiAsked = new Set();
-        let dtiBusy = 0;
+        let dtiBusy = 0, wearSaveT = 0, wearAddT = 0;
+        const wearSave = () => { clearTimeout(wearSaveT); wearSaveT = 0; GM_setValue(WEAR_KEY, JSON.stringify(wearKnown)); };
+        const wearAdd = () => {   // (what's turned out wearable so far: in — and how many are left to check)
+            clearTimeout(wearAddT); wearAddT = 0;
+            if (!host.isConnected) return;
+            if (live) { const scan = captureVisible(); flashAdded(); render(scan); } else render();
+        };
+        addEventListener('pagehide', () => { if (wearSaveT) wearSave(); });
         function onDti(name) {
             if (!wearKnown) { try { wearKnown = JSON.parse(GM_getValue(WEAR_KEY, '') || '{}') || {}; } catch (_) { wearKnown = {}; } }
             const v = wearKnown[name.toLowerCase()];
@@ -36036,21 +37447,22 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         }
         function askDti(names) {
             names.forEach(n => { if (!dtiAsked.has(n)) { dtiAsked.add(n); dtiQueue.push(n); } });
-            while (dtiBusy < 3 && dtiQueue.length) {
+            while (dtiBusy < 6 && dtiQueue.length) {
                 const name = dtiQueue.shift();
                 dtiBusy++;
                 const done = hit => {
-                    if (hit !== undefined) wearKnown[name.toLowerCase()] = hit ? 1 : 0;
+                    if (hit !== undefined) { wearKnown[name.toLowerCase()] = hit ? 1 : 0; if (!wearSaveT) wearSaveT = setTimeout(wearSave, 3000); }
                     dtiBusy--;
-                    if (dtiQueue.length) return askDti([]);
-                    if (dtiBusy) return;
-                    GM_setValue(WEAR_KEY, JSON.stringify(wearKnown));
-                    // Every answer is in — add what turned out to be wearable
-                    if (!host.isConnected) return;
-                    if (live) { const scan = captureVisible(); flashAdded(); render(scan); } else render();
+                    if (dtiQueue.length || dtiBusy) {
+                        if (!wearAddT) wearAddT = setTimeout(wearAdd, 1200);
+                        return askDti([]);
+                    }
+                    wearSave(); wearAdd();   // (every answer in)
                 };
+                // (its exact name: a small answer, so a quick one — a name with a quote in it, as words)
+                const q = name.includes('"') ? 'q=' + encodeURIComponent(name) : 'per_page=50&q=' + encodeURIComponent('"' + name + '"');
                 GM_xmlhttpRequest({
-                    method: 'GET', url: 'https://impress.openneo.net/items.json?q=' + encodeURIComponent(name),
+                    method: 'GET', url: 'https://impress.openneo.net/items.json?' + q,
                     headers: { Accept: 'application/json' }, timeout: 15000,
                     onload: r => {
                         let hit;
@@ -36585,8 +37997,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         });
     }
 
-    // ── Reveal page after our styles are applied ──────────────────────────────
-    requestAnimationFrame(function() {
+    // ── Reveal page after our styles are applied (set going where DTI's part of the start-up begins — see there) ──
+    function _dtiReveal() {
         document.documentElement.style.transition = 'opacity .18s ease-out';
         document.documentElement.classList.remove('dti-cov');
         const boot = document.getElementById('dti-boot');   // (the loading screen of the pages built on the empty item search)
@@ -36599,7 +38011,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         setTimeout(function() {
             document.documentElement.style.transition = '';
         }, 220);
-    });
+    }
 
     } // end _dtiInit
 
