@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      3.2
+// @version      3.2.1
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -13630,6 +13630,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['3.2.1', [
+            'Customs editor: a Reset button by the padlock puts the custom back to how it was when you opened it \u2014 with Undo',
+            'Customs editor: the lock keeps what was on when you locked it \u2014 those can\u2019t be taken off or replaced, while anything you add after still goes on and comes off',
+        ]],
         ['3.2', [
             'Customs editor: the pose picker has three tabs \u2014 Expressions, Styles and Essences (Treasured styles go with the essences)',
             'Import from Neopets: big imports are quicker \u2014 what a Gallery capture already found on DTI goes straight in',
@@ -31313,19 +31317,19 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     return;
                 }
                 if (e.target.closest('.dti-cs-x')) {   // (out of the custom altogether — a click on the tile only takes it off)
-                    if (window.__dtiEdLocked) return edLockSay('Locked \u2014 nothing can be taken out of the custom');
+                    if (edLocked(t.dataset.id)) return edLockKeep();
                     if (!csBr.remove(t.dataset.id)) dtiToast('Couldn’t remove that — try again', { variant: 'error' });
                     setTimeout(csPaintWorn, 120);
                     return;
                 }
                 if (e.target.closest('.dti-mine, .dti-note-btn, .dti-list-btn, .dti-copy-btn') || t.classList.contains('busy')) return;
-                if (window.__dtiEdLocked) {   // (locked: what's on stays on; one put on only when it replaces nothing)
-                    if (t.classList.contains('worn')) return edLockSay('Locked \u2014 what\u2019s on stays on');
+                if (window.__dtiEdLocked && !t.classList.contains('worn')) {   // (locked: one put on only when it takes no locked item's place)
                     t.classList.add('busy');
                     await edLockWear(t.dataset.id);
                     t.classList.remove('busy');
                     return setTimeout(csPaintWorn, 120);
                 }
+                if (t.classList.contains('worn') && edLocked(t.dataset.id)) return edLockKeep();   // (on when locked: stays on)
                 t.classList.add('busy');
                 const res = t.classList.contains('worn') ? { ok: csBr.unwear(t.dataset.id) } : await csBr.wear(t.dataset.id);
                 t.classList.remove('busy');
@@ -31508,7 +31512,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (!it || it.classList.contains('busy')) return;
                 const id = it.dataset.id, worn = it.classList.contains('on'), name = wbItems.find(x => x.id === id)?.name || 'that item';
                 if (e.target.closest('.dti-wb-x')) {   // (out of the custom — Undo puts it back as it was, worn or not)
-                    if (window.__dtiEdLocked) return edLockSay('Locked \u2014 nothing can be taken out of the custom');
+                    if (edLocked(id)) return edLockKeep();
                     if (!csBr.remove(id)) return dtiToast('Couldn\u2019t take that out \u2014 try again', { variant: 'error' });
                     wbAfter();
                     dtiToast(`Took \u201c${name}\u201d out of the custom`, { duration: 5000, undo: async () => {
@@ -31522,13 +31526,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     } });
                     return;
                 }
-                if (window.__dtiEdLocked) {
-                    if (worn) return edLockSay('Locked \u2014 what\u2019s on stays on');
+                if (window.__dtiEdLocked && !worn) {
                     it.classList.add('busy');
                     await edLockWear(id);
                     it.classList.remove('busy');
                     return wbAfter();
                 }
+                if (worn && edLocked(id)) return edLockKeep();
                 it.classList.add('busy');
                 const res = worn ? { ok: csBr.unwear(id) } : await csBr.wear(id);
                 it.classList.remove('busy');
@@ -31621,33 +31625,75 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             lkPaint();   // (the padlock: just after it)
         }
         const LOCK_ICO = shut => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7.2" width="10" height="7" rx="1.6"/><path d="${shut ? 'M5.2 7.2V5.1a2.8 2.8 0 0 1 5.6 0v2.1' : 'M5.2 7.2V5.1a2.8 2.8 0 0 1 5.3-1.3'}"/></svg>`;
-        let lkEl = null, lkNew = false;
+        let lkEl = null, lkNew = null;   // (lkNew: a custom not saved yet — what was on when it was locked)
         const lkOutfit = () => String(csBr.get()?.state?.id || '');
-        const lkOn = () => { const id = lkOutfit(); return id ? !!(GM_getValue('dti_ed_locks', {}) || {})[id] : lkNew; };
-        function lkSet(on) {
+        // (what's locked: the items that were on when it was locked — or null)
+        function lkIds() {
             const id = lkOutfit();
-            if (id) { const m = GM_getValue('dti_ed_locks', {}) || {}; if (on) m[id] = Date.now(); else delete m[id]; GM_setValue('dti_ed_locks', m); }
-            else lkNew = on;
+            if (!id) return lkNew;
+            const m = GM_getValue('dti_ed_locks', {}) || {}, e = m[id];
+            if (!e) return null;
+            if (Array.isArray(e.ids)) return e.ids;
+            const st = csBr.get()?.state;   // (locked before the lock kept a list: what's on now)
+            if (!st) return [];
+            m[id] = { at: typeof e === 'number' ? e : Date.now(), ids: (st.wornItemIds || []).map(String) };
+            GM_setValue('dti_ed_locks', m);
+            return m[id].ids;
+        }
+        function lkSet(on) {
+            const id = lkOutfit(), ids = on ? (csBr.get()?.state?.wornItemIds || []).map(String) : null;
+            if (id) { const m = GM_getValue('dti_ed_locks', {}) || {}; if (on) m[id] = { at: Date.now(), ids }; else delete m[id]; GM_setValue('dti_ed_locks', m); }
+            else lkNew = ids;
             lkPaint();
-            dtiToast(on ? 'Locked \u2014 what\u2019s on stays on: nothing taken off, taken out or put in its place' : 'Unlocked', { duration: 3000 });
+            dtiToast(on ? 'Locked \u2014 what\u2019s on now stays on: not taken off, taken out or replaced. Anything else can still go on and come off' : 'Unlocked', { duration: 4500 });
         }
         function lkPaint() {
             const id = lkOutfit();
-            if (id && lkNew) { const m = GM_getValue('dti_ed_locks', {}) || {}; m[id] = Date.now(); GM_setValue('dti_ed_locks', m); lkNew = false; }   // (saved while locked: locked under its own name)
-            const on = lkOn(), row = document.getElementById('dti-search-row');
-            window.__dtiEdLocked = on;
+            if (id && lkNew) { const m = GM_getValue('dti_ed_locks', {}) || {}; m[id] = { at: Date.now(), ids: lkNew }; GM_setValue('dti_ed_locks', m); lkNew = null; }   // (saved while locked: locked under its own number)
+            const ids = lkIds(), on = !!ids, row = document.getElementById('dti-search-row');
+            window.__dtiEdLocked = on ? new Set(ids) : null;
             if (!row) return;
-            if (!lkEl) { lkEl = document.createElement('button'); lkEl.type = 'button'; lkEl.id = 'dti-lockb'; lkEl.addEventListener('click', () => lkSet(!lkOn())); }
+            if (!lkEl) { lkEl = document.createElement('button'); lkEl.type = 'button'; lkEl.id = 'dti-lockb'; lkEl.addEventListener('click', () => lkSet(!lkIds())); }
             if (lkEl.classList.contains('on') !== on || !lkEl.firstChild) {
                 lkEl.classList.toggle('on', on); lkEl.setAttribute('aria-pressed', String(on));
                 lkEl.setAttribute('aria-label', on ? 'Unlock the custom\u2019s items' : 'Lock the custom\u2019s items');
-                lkEl.title = on ? 'Locked: what\u2019s on stays on \u2014 nothing taken off, taken out or put in its place. Click to unlock'
-                    : 'Lock the custom\u2019s items: what\u2019s on stays on \u2014 nothing taken off, taken out or put in its place';
+                lkEl.title = on ? 'Locked: what was on when you locked it stays on \u2014 not taken off, taken out or replaced; anything else can still go on and come off. Click to unlock'
+                    : 'Lock what\u2019s on now: it stays on \u2014 not taken off, taken out or replaced by something in its zone; anything else can still go on and come off';
                 lkEl.innerHTML = LOCK_ICO(on);
             }
             const sr = document.getElementById('dti-srb');
             if (sr && sr.parentElement === row) { if (sr.nextElementSibling !== lkEl) sr.after(lkEl); }
             else if (lkEl.parentElement !== row) row.appendChild(lkEl);
+            rsPaint();
+        }
+        // ── Reset (user asked): the custom back to how it was when this editor opened — its items (on and set aside), pet, pose and style —
+        // with Undo. Not while the padlock's on ──
+        const RESET_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.4 9.6a4.9 4.9 0 1 0 .9-4.9"/><path d="M3.2 2.6v3.2h3.2"/></svg>';
+        let rsStart = null, rsEl = null;
+        const rsLook = s => JSON.stringify([String(s.speciesId), String(s.colorId), s.pose || '', s.altStyleId == null ? '' : String(s.altStyleId),
+            [...(s.wornItemIds || [])].map(String).sort(), [...(s.closetedItemIds || [])].map(String).sort()]);
+        const rsData = (look, cur) => ({ id: cur.id, name: cur.name, speciesId: look.speciesId, colorId: look.colorId, pose: look.pose, appearanceId: look.appearanceId ?? null,
+            altStyleId: look.altStyleId ?? null, wornItemIds: [...(look.wornItemIds || [])], closetedItemIds: [...(look.closetedItemIds || [])] });
+        function rsPaint() {
+            const g = csBr.get(), st = g?.state;
+            if (!st?.speciesId || !lkEl?.parentElement) return;
+            if (!rsStart) rsStart = g.saved?.speciesId ? g.saved : st;   // (as saved when it opened — a new one: as it began)
+            if (!rsEl) {
+                rsEl = document.createElement('button'); rsEl.type = 'button'; rsEl.id = 'dti-resetb'; rsEl.innerHTML = RESET_ICO;
+                rsEl.setAttribute('aria-label', 'Reset the custom to how it was when you opened it');
+                rsEl.title = 'Reset: back to how this custom was when you opened it \u2014 its items, pet, pose and style (you can undo it)';
+                rsEl.addEventListener('click', () => {
+                    if (window.__dtiEdLocked) return edLockSay('Locked \u2014 unlock to reset the custom');
+                    const cur = csBr.get()?.state;
+                    if (!cur || !rsStart) return;
+                    if (!csBr.set(rsData(rsStart, cur))) return dtiToast('Couldn\u2019t reset it \u2014 try again', { variant: 'error' });
+                    setTimeout(lkPaint, 150);
+                    dtiToast('Back to how it was when you opened it', { duration: 8000, undo: () => { csBr.set(rsData(cur, csBr.get()?.state || cur)); setTimeout(lkPaint, 150); } });
+                });
+            }
+            const changed = rsLook(st) !== rsLook(rsStart);
+            if (rsEl.disabled === changed) rsEl.disabled = !changed;
+            if (rsEl.previousElementSibling !== lkEl) lkEl.after(rsEl);
         }
         const lkT = setInterval(() => { if (!document.getElementById('wardrobe-2020-root')) return clearInterval(lkT); lkPaint(); }, 1000);
         // (DTI's own controls under the lock: a worn item's toggle, Remove, ours too — stopped before DTI sees the click; an item put on:
@@ -31656,22 +31702,33 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             window.__dtiLockWired = true;
             const inRoot = t => { const r = document.getElementById('wardrobe-2020-root'); return !!(r && t?.closest && r.contains(t)); };
             document.addEventListener('click', e => {
-                const t = e.target;
-                if (!window.__dtiEdLocked || !inRoot(t)) return;
+                const t = e.target, L = window.__dtiEdLocked;
+                if (!L || !inRoot(t)) return;
                 const stop = () => { e.preventDefault(); e.stopPropagation(); };
-                if (t.closest('button[aria-label="Remove"], button[aria-label="Remove from the custom"], .dti-cs-x, .dti-wb-x')) { stop(); return edLockSay('Locked \u2014 nothing can be taken out of the custom'); }
+                const rm = t.closest('button[aria-label="Remove"], button[aria-label="Remove from the custom"]');
+                if (rm) {   // (DTI's Remove: what was on when locked stays in; anything else goes as usual)
+                    const rid = rm.closest('label')?.querySelector(':scope > input')?.value || rm.closest('[data-dti-item]')?.dataset.dtiItem;
+                    if (rid && L.has(String(rid))) { stop(); edLockKeep(); }
+                    return;
+                }
                 if (t.closest('button, a, [role="button"], #dti-cs, #dti-wb')) return;   // (its other buttons — and our own panels, which check for themselves)
                 const lab = t.closest('label'), inp = t.matches('input[type="checkbox"], input[type="radio"]') ? t : lab?.querySelector(':scope > input[type="checkbox"], :scope > input[type="radio"]');
                 if (!inp || !/^\d+$/.test(inp.value || '')) return;
-                stop();
                 // (worn or not: by the outfit itself — a tick clicked has already flipped by now)
-                if ((csBr.get()?.state?.wornItemIds || []).map(String).includes(inp.value)) return edLockSay('Locked \u2014 what\u2019s on stays on');
+                if ((csBr.get()?.state?.wornItemIds || []).map(String).includes(inp.value)) {
+                    if (L.has(inp.value)) { stop(); edLockKeep(); }   // (on when locked: stays on — one put on since comes off as usual)
+                    return;
+                }
+                stop();
                 edLockWear(inp.value);
             }, true);
-            document.addEventListener('keydown', e => {   // (a zone's items are a radio group: the arrow keys would put another on)
-                if (!window.__dtiEdLocked || !/^Arrow/.test(e.key) || !e.target.matches?.('input[type="radio"]') || !inRoot(e.target) || !/^\d+$/.test(e.target.value || '')) return;
+            document.addEventListener('keydown', e => {   // (a zone's items are a radio group: the arrow keys would put another in its place)
+                const L = window.__dtiEdLocked;
+                if (!L || !/^Arrow/.test(e.key) || !e.target.matches?.('input[type="radio"]') || !inRoot(e.target) || !/^\d+$/.test(e.target.value || '')) return;
+                const on = [...document.querySelectorAll('#wardrobe-2020-root input[type="radio"]')].find(r => r.name === e.target.name && r.checked);
+                if (!on || !L.has(on.value)) return;
                 e.preventDefault(); e.stopPropagation();
-                edLockSay('Locked \u2014 what\u2019s on stays on');
+                edLockKeep();
             }, true);
         }
         function srPark() {   // (Custom items: the search kept, DTI's emptied by its own ✕ — then ours cleared: every one of the custom's items)
@@ -31750,18 +31807,24 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     // look on screen and the one saved, or a look put on screen — DTI's own "load this outfit" step, so its Save lights up as usual.
     // Asked through an attribute + an event (both sides see those), answered the same way.
     // ── The editor's lock (user asked: "locking current items … helpful for having a custom part way done and not losing track of where
-    // you are"): what's on can't be taken off, nothing in the custom can be taken out, and what's put on mustn't take a worn item's place
-    // (its zones — DTI would take the other off); anything else still goes on. window.__dtiEdLocked: the padlock's on ──
+    // you are" — "basically it's to save where you were at"): what was on when it was locked can't be taken off, taken out or replaced by
+    // something in its zones (DTI would take it off); anything else — put on since, or in zones that were empty — goes on and comes off as
+    // usual. window.__dtiEdLocked: the locked items (a Set) while the padlock's on ──
     function edLockSay(msg) {
         dtiToast(msg, { duration: 4500, action: { label: 'Unlock', run: () => document.getElementById('dti-lockb')?.click() } });
     }
-    async function edLockWear(id) {   // (put on only when it replaces nothing that's on → true when it went on)
-        const br = edBridge();
-        const [mine, cand] = await Promise.all([br.zones(), br.zones([String(id)])]);
-        if (!mine?.items || !cand?.items) { edLockSay('Locked \u2014 couldn\u2019t check what it would replace, so it wasn\u2019t put on'); return false; }
-        const c = cand.items[0], meet = (a, b) => (a || []).some(z => (b || []).includes(z));
-        const clash = c ? mine.items.filter(w => w.id !== c.id && (meet(c.zids, w.zids) || meet(c.rids, w.zids) || meet(w.rids, c.zids))) : [];
-        if (clash.length) { edLockSay(`Locked \u2014 \u201c${c.name || 'that'}\u201d would take the place of ${clash.map(w => `\u201c${w.name}\u201d`).join(', ')}`); return false; }
+    function edLocked(id) { const L = window.__dtiEdLocked; return !!(L && L.has(String(id))); }
+    function edLockKeep() { edLockSay('Locked \u2014 that was on when you locked, so it stays on'); }
+    async function edLockWear(id) {   // (put on only when it takes no locked item's place → true when it went on)
+        const br = edBridge(), L = window.__dtiEdLocked;
+        const lockedOn = (br.get()?.state?.wornItemIds || []).map(String).filter(w => L?.has(w) && w !== String(id));
+        if (lockedOn.length) {
+            const [mine, cand] = await Promise.all([br.zones(lockedOn), br.zones([String(id)])]);
+            if (!mine?.items || !cand?.items) { edLockSay('Locked \u2014 couldn\u2019t check what it would replace, so it wasn\u2019t put on'); return false; }
+            const c = cand.items[0], meet = (a, b) => (a || []).some(z => (b || []).includes(z));
+            const clash = c ? mine.items.filter(w => w.id !== c.id && (meet(c.zids, w.zids) || meet(c.rids, w.zids) || meet(w.rids, c.zids))) : [];
+            if (clash.length) { edLockSay(`Locked \u2014 \u201c${c.name || 'that'}\u201d would take the place of ${clash.map(w => `\u201c${w.name}\u201d`).join(', ')}, on when you locked`); return false; }
+        }
         const r = await br.wear(String(id));
         return !!r?.ok;
     }
@@ -33390,12 +33453,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #dti-wb .dti-wb-off { flex: none; margin-left: auto; width: 24px; height: 24px; padding: 0; display: grid; place-items: center; border: none; border-radius: 50%;
                 background: transparent; color: var(--text-muted); font-family: inherit; font-size: 16px; line-height: 1; cursor: pointer; }
             #dti-wb .dti-wb-off:hover { background: var(--surface-2); color: var(--text); }
-            html.dti-ed-paused :is(#dti-srb, #dti-wb, #dti-lockb) { display: none !important; }   /* (DTI's editor can't be read: these step aside) */
-            #dti-lockb { order: 1; flex: none; align-self: center; width: 30px; height: 30px; margin: 0; padding: 0; display: grid; place-items: center; box-sizing: border-box;
+            html.dti-ed-paused :is(#dti-srb, #dti-wb, #dti-lockb, #dti-resetb) { display: none !important; }   /* (DTI's editor can't be read: these step aside) */
+            :is(#dti-lockb, #dti-resetb) { order: 1; flex: none; align-self: center; width: 30px; height: 30px; margin: 0; padding: 0; display: grid; place-items: center; box-sizing: border-box;
                 border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: 99px; background: var(--surface); color: var(--accent-text, var(--accent)); cursor: pointer; }
-            #dti-lockb:hover { border-color: var(--accent); background: var(--accent-glow); }
+            :is(#dti-lockb, #dti-resetb):hover:not(:disabled) { border-color: var(--accent); background: var(--accent-glow); }
             #dti-lockb.on { border-color: var(--accent); background: var(--accent); color: var(--accent-fg, #fff); }
-            #dti-lockb svg { width: 14px; height: 14px; }
+            :is(#dti-lockb, #dti-resetb) svg { width: 14px; height: 14px; }
+            #dti-resetb:disabled { opacity: .4; cursor: default; }   /* (nothing changed since it opened) */
             #dti-srb { order: 1; flex: 1 1 0px; min-width: 112px; max-width: max-content; display: inline-flex; align-self: center; }   /* (gives way, its words cut short — the row's buttons stay on its line) */
             #dti-srb .dti-srb-go {
                 display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 30px; margin: 0; padding: 0 12px 0 10px; box-sizing: border-box;
