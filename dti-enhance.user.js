@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      2.8.4
+// @version      2.8.5
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -10939,7 +10939,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-lp-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: dti-lp-spin .7s linear infinite; }
             @keyframes dti-lp-spin { to { transform: rotate(360deg); } }
             /* Outfit editor item cards: right column, under the "remove from outfit" button */
-            label > input + .item-container .dti-note-btn { top: 29px; right: 5px; width: 20px; height: 20px; border-radius: 6px; }
+            label > input + .item-container .dti-note-btn { top: 35px; right: 7px; width: 20px; height: 20px; border-radius: 6px; }
             label:hover > input + .item-container .dti-note-btn { opacity: 1; pointer-events: auto; }
             /* Inline pencil (trade lists): shows on row hover, always when noted */
             .dti-note-btn.inline {
@@ -12833,6 +12833,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['2.8.5', [
+            'Customs editor: search results have the add-to-lists button, and the trash (to take an item back out of the custom) is bigger',
+            'Customs editor: cap values as a pill on the picture or as small text with the labels \u2014 pick in the layout menu, search results included',
+        ]],
         ['2.8.4', [
             'Customs editor: the border round each item\u2019s picture can be any color you like, or hidden \u2014 in the layout menu',
         ]],
@@ -28742,16 +28746,28 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     const nc = [...ic.querySelectorAll('.chakra-wrap__listitem')].some(li => li.textContent.trim() === 'NC');
                     const name = nc ? (ic.querySelector('[id*="-item-"][id$="-name"]')?.textContent?.trim() || ic.querySelector('img')?.alt?.replace(/^Thumbnail art for /, '').trim() || ic.title || '') : '';
                     let b = ic.querySelector(':scope > .dti-capv');
-                    if (!name) { b?.remove(); return; }
-                    if (b?.dataset.n === name) return;
+                    // (Text: the same words at the start of its labels row — an attribute on the row, the CSS shows it: nothing added inside
+                    // DTI's list. Put back on each pass: DTI may draw the row anew)
+                    const row = ic.querySelector('.chakra-wrap__list');
+                    const toRow = () => {
+                        const v = b && !b.hidden ? b.textContent : '';
+                        if (row && (row.dataset.dtiCapv || '') !== v) { if (v) row.dataset.dtiCapv = v; else delete row.dataset.dtiCapv; }
+                    };
+                    if (!name) { b?.remove(); b = null; toRow(); return; }
+                    if (b?.dataset.n === name) return toRow();
                     if (!b) { b = document.createElement('span'); b.className = 'dti-capv'; ic.appendChild(b); }
-                    b.dataset.n = name; b.hidden = true;
-                    put(name, (txt, val) => { if (b.dataset.n !== name) return; b.textContent = txt; b.hidden = !txt; b.title = txt ? 'NC value: ' + txt : ''; if (txt) b.dataset.tier = ncValTier(val); });
+                    b.dataset.n = name; b.hidden = true; toRow();
+                    put(name, (txt, val) => { if (b.dataset.n !== name) return; b.textContent = txt; b.hidden = !txt; b.title = txt ? 'NC value: ' + txt : ''; if (txt) b.dataset.tier = ncValTier(val); toRow(); });
                 });
                 root.querySelectorAll('#dti-cs .dti-cs-tile:not([data-capv])').forEach(t => {
                     t.dataset.capv = '1';
                     if (!t.querySelector('.b .k.nc')) return;
-                    put(t.title, txt => { if (txt) t.querySelector('.b')?.insertAdjacentHTML('afterbegin', `<i class="c" title="NC value">${noteEsc(txt)}</i>`); });
+                    put(t.title, (txt, val) => {
+                        if (!txt) return;
+                        t.querySelector('.b')?.insertAdjacentHTML('afterbegin', `<i class="c" title="NC value">${noteEsc(txt)}</i>`);
+                        // (and a pill on its picture, as on DTI's tiles — the layout menu picks which shows)
+                        t.insertAdjacentHTML('beforeend', `<span class="dti-capv" data-tier="${noteEsc(String(ncValTier(val)))}" title="NC value: ${noteEsc(txt)}">${noteEsc(txt)}</span>`);
+                    });
                 });
             }
             function _applyEdLayout() {
@@ -28780,6 +28796,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 root.classList.toggle('dti-lay-lcols', lcols > 1);
                 root.classList.toggle('dti-hide-kind', !!_edLay.hideKind);
                 root.classList.toggle('dti-show-caps', !!_edLay.caps);
+                root.classList.toggle('dti-caps-text', _edLay.caps === 2);
                 const pb = edPicBorder(_edLay);
                 root.classList.toggle('dti-pbdr', !!pb.color);
                 root.classList.toggle('dti-pbdr-hide', pb.hide);
@@ -28827,7 +28844,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     <div class="dti-lay-row"><span>Items per row</span>${perRow}</div>${parts}`
                     : `<div class="dti-lay-row"><span>Items per row</span>${seg('lcols', [[1, '1'], [2, '2'], [3, '3']])}</div>`}
                     <div class="dti-lay-row"><span>NC / NP labels</span>${seg('hideKind', [[0, 'Show'], [1, 'Hide']])}</div>
-                    <div class="dti-lay-row"><span>Cap values</span>${seg('caps', [[1, 'Show'], [0, 'Hide']], 'An NC item’s value in caps, on its tile')}</div>
+                    <div class="dti-lay-row"><span>Cap values</span>${seg('caps', [[1, 'Pill'], [2, 'Text'], [0, 'Hide']], 'An NC item’s value in caps — a pill on its picture, or small text with its labels')}</div>
                     <div class="dti-lay-row"><span>Picture border</span>${pbRow}</div>
                     ${!tile && csOn() ? `<div class="dti-lay-sub">Every page’s tiles</div><div class="dti-lay-row"><span>Items per row</span>${perRow}</div>${parts}` : ''}`;
                 _paintLayFit();
@@ -29426,7 +29443,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 // (every zone it's in, A–Z as on DTI's tiles — shortened as its labels are, the whole name on hover)
                 + `<span class="b">${r.nc ? '<i class="k nc">NC</i>' : r.pb ? '<i class="k pb">PB</i>' : '<i class="k">NP</i>'}${[...r.zones].sort((a, b) => a.localeCompare(b)).map(z =>`<i title="${noteEsc(z)}">${noteEsc(zoneShort(z))}</i>`).join('')}</span>`
                 + '<button type="button" class="dti-cs-i" title="Item info" aria-label="Item info">?</button>'
-                + `<button type="button" class="dti-cs-x" title="Remove from the custom" aria-label="Remove from the custom">${ED_TRASH}</button>`;
+                + `<button type="button" class="dti-cs-x" title="Remove from the custom" aria-label="Remove from the custom">${ED_TRASH}</button>`
+                + listBtnHtml({ id: r.id, name: r.name, img: r.img.replace(/^http:/, 'https:') });   // (add to your lists, as on DTI's tiles)
             paintMineMark(t);   // (✓ / ♥: you own it, it's on your wishlist)
             CS.tiles.set(r.id, t);
             return t;
@@ -30621,6 +30639,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #wardrobe-2020-root .item-container:hover .dti-ed-remove-btn,
             #wardrobe-2020-root .item-container:hover .dti-ed-info-btn { opacity: 1 !important; pointer-events: auto !important; }
             #wardrobe-2020-root .dti-ed-remove-btn { top: 4px; right: 4px; }
+            /* (the trash a size up, and its icon — user asked: easier to hit; what's under it moves down to match) */
+            #wardrobe-2020-root .dti-ed-remove-btn { width: 26px !important; height: 26px !important; }
+            #wardrobe-2020-root .dti-ed-remove-btn svg { width: 14px; height: 15px; }
             #wardrobe-2020-root .dti-ed-remove-btn:hover { background: var(--danger, #f85149) !important; }
             #wardrobe-2020-root .dti-ed-info-btn { top: 4px; left: 4px; font-size: 11px; font-weight: 700; }
             #wardrobe-2020-root .dti-ed-info-btn:hover { background: var(--accent, #7c3aed) !important; }
@@ -31142,7 +31163,25 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 font-size: 10.5px; font-weight: 800; line-height: 1.5; letter-spacing: .01em; box-shadow: 0 1px 4px rgba(0,0,0,.25);
                 background: var(--bdg-ncval-bg); color: var(--bdg-ncval-fg) !important; border: 1px solid var(--bdg-ncval-bd); opacity: var(--bdg-ncval-op, 1); }   /* (as the "NC values on DTI" badge is set — !important: the editor's spans all take their text color from their parent) */
             #wardrobe-2020-root .dti-capv[hidden] { display: none !important; }
-            #wardrobe-2020-root:not(.dti-tile-mode) .dti-capv { top: 7px; right: 32px; }
+            #wardrobe-2020-root:not(.dti-tile-mode) .dti-capv { top: 7px; right: 36px; }
+            /* (while the add-to-lists button shows on the picture's corner, the pill steps left of it) */
+            #wardrobe-2020-root .dti-capv { transition: right .12s; }
+            #wardrobe-2020-root.dti-tile-mode label:hover > input + .item-container > .dti-capv { right: 30px; }
+            /* (search results: the pill on the picture's lower right, as on DTI's tiles) */
+            #wardrobe-2020-root #dti-cs .dti-capv {
+                top: calc(9px * var(--dti-cz, 1) + min(100cqi, calc(80cqi * var(--dti-pic, 1))) - 22px);
+                right: calc(10px + (100cqi - min(100cqi, calc(80cqi * var(--dti-pic, 1)))) / 2);
+            }
+            #wardrobe-2020-root #dti-cs .dti-cs-tile:is(:hover, :focus-within) .dti-capv { right: calc(32px + (100cqi - min(100cqi, calc(80cqi * var(--dti-pic, 1)))) / 2); }
+            /* Cap values as small text with the labels instead (the layout menu): search results have it as a label; DTI's tiles get it
+               at the start of their labels row */
+            #wardrobe-2020-root.dti-caps-text .dti-capv { display: none !important; }
+            #wardrobe-2020-root:not(.dti-caps-text) .dti-cs-tile .b .c { display: none !important; }
+            #wardrobe-2020-root.dti-show-caps.dti-caps-text .item-container .chakra-wrap__list[data-dti-capv]::before {
+                content: attr(data-dti-capv); align-self: center; white-space: nowrap; font-size: 10px; line-height: 16px; font-weight: 800;
+                color: var(--accent-text, var(--accent));
+            }
+            #wardrobe-2020-root.dti-tile-mode.dti-show-caps.dti-caps-text .item-container .chakra-wrap__list[data-dti-capv]::before { font-size: calc(8px * var(--dti-lb, 1)); line-height: calc(13px * var(--dti-lb, 1)); }
             #wardrobe-2020-root .dti-cs-tile .b .c { color: var(--accent-text, var(--accent)); text-transform: none; }
             #dti-cs { padding: 10px 10px 18px; }
             /* (standing in for DTI's list, it scrolls on its own as that did — the custom on the left and the search above stay put. No
@@ -31204,14 +31243,26 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #dti-cs .dti-cs-i:hover { background: var(--accent) !important; color: var(--accent-fg, #fff) !important; }
             /* (in the custom — worn or not: a trash to take it out; on a worn one always, else on hover — the ? under it then) */
             #dti-cs .dti-cs-x {
-                position: absolute; top: 5px; right: 5px; width: 20px !important; height: 20px !important; min-width: 0 !important; padding: 0 !important; display: none; place-items: center;
+                position: absolute; top: 5px; right: 5px; width: 26px !important; height: 26px !important; min-width: 0 !important; padding: 0 !important; display: none; place-items: center;
                 border-radius: 50% !important; border: none !important; background: var(--surface) !important; color: var(--text) !important; cursor: pointer; opacity: 0; transition: opacity .12s, background .12s !important;
                 box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 28%, transparent), 0 1px 5px rgba(0,0,0,.4) !important;
             }
             #dti-cs .dti-cs-tile.in .dti-cs-x { display: grid; }
             #dti-cs .dti-cs-tile.in:is(:hover, :focus-within) .dti-cs-x, #dti-cs .dti-cs-tile.worn .dti-cs-x { opacity: 1; }
             #dti-cs .dti-cs-x:hover { background: var(--danger, #f85149) !important; color: #fff !important; }
-            #dti-cs .dti-cs-tile.in .dti-cs-i { top: 29px; }
+            #dti-cs .dti-cs-tile.in .dti-cs-i { top: 35px; }
+            #dti-cs .dti-cs-x svg { width: 14px; height: 15px; }
+            /* Add to your lists: the picture's lower right, as on DTI's tiles (the picture: as wide as the tile allows, centered under
+               the tile's top padding) */
+            #dti-cs .dti-cs-tile .dti-list-btn {
+                top: calc(9px * var(--dti-cz, 1) + min(100cqi, calc(80cqi * var(--dti-pic, 1))) - 22px); bottom: auto; left: auto;
+                right: calc(8px + (100cqi - min(100cqi, calc(80cqi * var(--dti-pic, 1)))) / 2);
+                width: 20px; height: 20px; border-radius: 50%; background: var(--surface); color: var(--text);
+                box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 28%, transparent), 0 1px 5px rgba(0,0,0,.4);
+            }
+            #dti-cs .dti-cs-tile .dti-list-btn svg { width: 11px; height: 11px; }
+            #dti-cs .dti-cs-tile:is(:hover, :focus-within) .dti-list-btn, #dti-cs .dti-cs-tile .dti-list-btn.open { opacity: 1; pointer-events: auto; }
+            #dti-cs .dti-cs-tile .dti-list-btn:is(:hover, .open) { background: var(--accent); color: var(--accent-fg, #fff); }
             .dti-cs-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 10px 0; font-size: 12px; font-weight: 600; color: var(--text-muted); }
             .dti-cs-pager[hidden], .dti-cs-empty[hidden] { display: none; }
             #wardrobe-2020-root #dti-cs .dti-cs-pager button { height: auto !important; min-height: 0 !important; min-width: 0 !important; padding: 5px 12px !important; border: 1px solid var(--border) !important; border-radius: 9px !important; background: var(--surface) !important; color: var(--text) !important; font-size: 12px !important; font-weight: 700 !important; line-height: 1.4 !important; cursor: pointer; }
