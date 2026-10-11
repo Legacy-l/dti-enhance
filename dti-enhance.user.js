@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      2.9
+// @version      3.0
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -263,6 +263,14 @@
     }
 
     const noteEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    // A grab hand that shows on white (the system's has a faint grey outline that vanishes there) — drawn like the pointer hand; for
+    // anything you drag (My Items' tiles, Seeking's rows, the minimized bar…)
+    function dtiGrabCursor(grabbing) {
+        const svg = d => `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='white' stroke='black' stroke-width='1.6' stroke-linejoin='round' stroke-linecap='round'%3E${d}%3C/svg%3E") 12 12`;
+        return grabbing
+            ? svg("%3Cpath d='M6 14V9A2 2 0 0 1 10 9V8A2 2 0 0 1 14 8V9A2 2 0 0 1 18 9V11A2 2 0 0 1 22 11V14A8 8 0 0 1 14 22H10A8 8 0 0 1 2 14A2 2 0 0 1 6 14Z'/%3E%3Cpath fill='none' d='M10 9V10.5M14 9V10.5M18 11V12'/%3E") + ', grabbing'
+            : svg("%3Cpath d='M6 14V6A2 2 0 0 1 10 6V4A2 2 0 0 1 14 4V6A2 2 0 0 1 18 6V8A2 2 0 0 1 22 8V14A8 8 0 0 1 14 22H12C9.2 22 7.5 21.14 6.01 19.66L2.41 16.06A2 2 0 0 1 5.24 13.24L7 15Z'/%3E%3Cpath fill='none' d='M10 6V10.5M14 6V10M18 8V11'/%3E") + ', grab';
+    }
 
     // GBCs / BFGBCs are traded as a currency, not as specific capsules (Neopets keeps releasing new ones),
     // so a trade side records them as generic entries with a fixed cap value.
@@ -960,7 +968,12 @@
         // DTI link linkifier — neoboards and neomails only
         const isLinkifyPage = location.pathname.startsWith('/neoboards/') || location.pathname === '/neomessages.phtml';
         if (isLinkifyPage && GM_getValue('dti_linkify', true)) runLinkify();
-        if (location.pathname.startsWith('/neoboards/') && seekOn()) runSeekHighlight();   // (items you're seeking, marked in posts)
+        // (Seeking on the boards — off on its own in ⚙ › Neopets: items you're seeking marked in posts, a pill by each DTI link)
+        const nbSeek = location.pathname.startsWith('/neoboards/') && seekOn() && GM_getValue('dti_nb_seek', true) !== false;
+        if (nbSeek) runSeekHighlight();
+        if (nbSeek) {
+            if (document.body) runNbSeek(); else document.addEventListener('DOMContentLoaded', runNbSeek, { once: true });
+        }
 
         // NC cap values on Neopets' item pages (only these — the script runs on every Neopets page now, for the DTI button)
         if (/^\/(inventory\.phtml|safetydeposit\.phtml|closet\.phtml|gallery\/index\.phtml|stylingchamber\/)/.test(location.pathname)) runNeopetsNcValues();
@@ -1666,14 +1679,21 @@
     const SEEK_TIERS = ['Must have', 'Want', 'Maybe'], SEEK_STALE = 30 * 864e5;
     // (a month on your list — or since you said you're still after it)
     function seekStale(e, now = Date.now()) { return !!e && now - (e.kept || e.at || now) > SEEK_STALE; }
-    // DTI's own count of who's trading an item, off its page ("Offering (58)") — null if it isn't there
-    function seekTradingFrom(html) { const m = /href="[^"]*\/trades\/offering"[^>]*>[^<]*?\((\d+)\)/.exec(html || ''); return m ? +m[1] : null; }
-    const SK_TRADE = 'dti_sk_trading', SK_TRADE_KEEP = 6 * 3600e3;   // (localStorage: { [item id]: [count, when] } — 6 hours)
-    function skTrade(id) { try { const v = JSON.parse(localStorage.getItem(SK_TRADE) || '{}')[id]; return v && Date.now() - v[1] < SK_TRADE_KEEP ? v[0] : null; } catch (_) { return null; } }
-    function skTradeSet(id, n) {
+    // DTI's own counts of who's trading an item, off its page ("Offering (58)", "Seeking (12)") → { o, s } — null if they aren't there
+    function seekTradingFrom(html) {
+        const n = t => { const m = new RegExp(`href="[^"]*/trades/${t}"[^>]*>[^<]*?\\((\\d+)\\)`).exec(html || ''); return m ? +m[1] : null; };
+        const o = n('offering');
+        return o == null ? null : { o, s: n('seeking') ?? 0 };
+    }
+    // (on a row: how many offering it and how many seeking it — the two side by side tell something of its value — user asked)
+    const skTradeText = t => !t.o && !t.s ? 'No one trading yet' : `${t.o ? t.o + ' offering' : 'None offering'} \u00b7 ${t.s} seeking`;
+    const SK_TRADE = 'dti_sk_trading2', SK_TRADE_KEEP = 6 * 3600e3;   // (localStorage: { [item id]: [offering, when, seeking] } — 6 hours)
+    function skTrade(id) { try { const v = JSON.parse(localStorage.getItem(SK_TRADE) || '{}')[id]; return v && Date.now() - v[1] < SK_TRADE_KEEP ? { o: v[0], s: v[2] ?? 0 } : null; } catch (_) { return null; } }
+    function skTradeSet(id, t) {
         try {
+            localStorage.removeItem('dti_sk_trading');   // (the old key: one number each)
             const all = JSON.parse(localStorage.getItem(SK_TRADE) || '{}');
-            all[id] = [n, Date.now()];
+            all[id] = [t.o, Date.now(), t.s];
             Object.keys(all).forEach(k => { if (!(Date.now() - all[k][1] < SK_TRADE_KEEP * 4)) delete all[k]; });
             localStorage.setItem(SK_TRADE, JSON.stringify(all));
         } catch (_) {}
@@ -1758,14 +1778,16 @@
         const of = {}, shut = {};
         Object.entries(d.of && typeof d.of === 'object' ? d.of : {}).forEach(([k, v]) => { if (/^\d+$/.test(k) && seen.has(v)) of[k] = v; });
         Object.keys(d.shut && typeof d.shut === 'object' ? d.shut : {}).forEach(k => { if (k === '' || seen.has(k)) shut[k] = 1; });
-        return { v: 1, view: d.view === 'sec' ? 'sec' : 'all', list, of, shut };
+        const none = Number.isInteger(d.none) && d.none >= 0 && d.none < list.length ? { none: d.none } : {};   // (Not in a section's place, if it was moved)
+        return { v: 1, view: d.view === 'sec' ? 'sec' : 'all', list, of, shut, ...none };
     }
-    // The customs (ids, in the order shown) in their sections, in the sections' order — then the ones in none, if there are any
+    // The customs (ids, in the order shown) in their sections, in the sections' order — and the ones in none, if there are any (last,
+    // or where Not in a section was put)
     function osecGroups(d, ids) {
         const by = new Map(d.list.map(x => [x.id, []])), none = [];
         ids.forEach(id => (by.get(d.of[id]) || none).push(id));
         const out = d.list.map(x => ({ id: x.id, name: x.name, ids: by.get(x.id) }));
-        if (none.length) out.push({ id: '', name: 'Not in a section', ids: none });
+        if (none.length) out.splice(Math.min(d.none ?? out.length, out.length), 0, { id: '', name: 'Not in a section', ids: none });   // (last, unless it was moved)
         return out;
     }
 
@@ -2445,8 +2467,10 @@
         const cs = getComputedStyle(document.documentElement);
         const t = { style: effStyle() };
         ['--bg', '--surface', '--surface-2', '--border', '--text', '--text-muted', '--accent', '--accent-fg', '--accent-text', '--accent-glow', '--success', '--nc',
-         '--nav-bg', '--solid-bg', '--solid-fill', '--solid-fg', '--solid-fg-2', '--solid-hover']
+         '--nav-bg', '--solid-bg', '--solid-fill', '--solid-fg', '--solid-fg-2', '--solid-hover', '--theme-font', '--theme-font-wt', '--theme-hc-track', '--theme-hc-case']
             .forEach(k => { const v = cs.getPropertyValue(k).trim(); if (v) t[k] = v; });
+        const font = presetOf()?.font;   // (the theme's own typeface, if it has one: its Google Fonts link, for a panel on Neopets)
+        if (font) t.fontHref = `https://fonts.googleapis.com/css2?family=${font}&display=swap`;
         const json = JSON.stringify(t);
         if (GM_getValue('dti_theme_tokens', '') !== json) GM_setValue('dti_theme_tokens', json);
     }
@@ -2534,16 +2558,123 @@
 
     // Toast notification system — inspired by DTI Remix's dtrToast pattern,
     // rewritten to use our CSS variable system and solid-color design.
+    // A question before something that can't be undone — or a message that needs a look — in a box in the middle of the page, in the
+    // theme (user asked: not the browser's own popups). Esc cancels, the buttons take Enter, focus stays in the box; one that deletes
+    // has a red button and starts on Cancel. → Promise: true / false (a message: when it's closed).
+    function dtiDialog({ title = '', message = '', ok = 'OK', cancel = 'Cancel', danger = false, alert = false } = {}) {
+        return new Promise(resolve => {
+            injectDialogCSS();
+            const prev = document.activeElement, wrap = document.createElement('div');
+            wrap.className = 'dti-dlg-wrap';
+            wrap.innerHTML = `<div class="dti-dlg${danger ? ' danger' : ''}" role="alertdialog" aria-modal="true"${title ? ' aria-labelledby="dti-dlg-t"' : ''} aria-describedby="dti-dlg-m">`
+                + (title ? `<div class="dti-dlg-t" id="dti-dlg-t">${noteEsc(title)}</div>` : '')
+                + `<div class="dti-dlg-m" id="dti-dlg-m">${noteEsc(message).replace(/\n/g, '<br>')}</div>`
+                + `<div class="dti-dlg-b">${alert ? '' : `<button type="button" class="dti-dlg-no">${noteEsc(cancel)}</button>`}<button type="button" class="dti-dlg-ok">${noteEsc(ok)}</button></div></div>`;
+            document.body.appendChild(wrap);
+            const done = v => {
+                wrap.remove(); document.removeEventListener('keydown', key, true);
+                try { prev?.focus?.({ preventScroll: true }); } catch (_) {}
+                resolve(alert ? undefined : v);
+            };
+            const key = e => {
+                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); }
+                else if (e.key === 'Tab') {   // (round the box's buttons only)
+                    const bs = [...wrap.querySelectorAll('button')], i = bs.indexOf(document.activeElement);
+                    e.preventDefault(); bs[(i + (e.shiftKey ? -1 : 1) + bs.length) % bs.length].focus();
+                } else if (e.key === 'Enter' && !wrap.contains(document.activeElement)) { e.preventDefault(); done(!danger); }
+            };
+            document.addEventListener('keydown', key, true);
+            wrap.addEventListener('click', e => {
+                if (e.target.closest('.dti-dlg-ok')) done(true);
+                else if (e.target.closest('.dti-dlg-no') || e.target === wrap) done(false);
+            });
+            (wrap.querySelector(danger ? '.dti-dlg-no' : '.dti-dlg-ok') || wrap.querySelector('.dti-dlg-ok')).focus();
+        });
+    }
+    function dtiConfirm(message, opts = {}) { return dtiDialog({ ...opts, message }); }
+    function dtiAlert(message, opts = {}) { return dtiDialog({ ...opts, message, alert: true }); }
+    function injectDialogCSS() {
+        if (document.getElementById('dti-dlg-css')) return;
+        const st = GM_addStyle(`
+            .dti-dlg-wrap { position: fixed; inset: 0; z-index: 2147483000; display: grid; place-items: center; padding: 16px; background: rgba(10,10,16,.45); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); animation: dti-dlg-in .14s ease-out; }
+            .dti-dlg { width: min(420px, 100%); box-sizing: border-box; padding: 20px 20px 16px; border-radius: 16px; background: var(--surface, #fff); color: var(--text, #16161d); border: 1px solid var(--border, #ddd); box-shadow: var(--shadow-lg, 0 20px 50px rgba(0,0,0,.35)); font-family: 'Poppins', system-ui, sans-serif; animation: dti-dlg-pop .16s ease-out; }
+            .dti-dlg-t { margin: 0 0 6px; font-size: 16px; font-weight: 800; color: var(--text, #16161d); }
+            .dti-dlg-m { font-size: 14px; line-height: 1.55; color: var(--text-muted, #4b4b57); overflow-wrap: anywhere; }
+            .dti-dlg-b { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+            .dti-dlg-b button { height: 36px; padding: 0 16px; border-radius: 10px; font-family: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+            .dti-dlg-no { border: 1px solid var(--border, #ccc); background: var(--surface, #fff); color: var(--text, #16161d); }
+            .dti-dlg-no:hover { background: var(--surface-2, #f3f3f6); }
+            .dti-dlg-ok { border: none; background: var(--accent, #7c3aed); color: var(--accent-fg, #fff); }
+            .dti-dlg-ok:hover { filter: brightness(1.07); }
+            .dti-dlg.danger .dti-dlg-ok { background: var(--danger, #e5484d); color: #fff; }
+            .dti-dlg-b button:focus-visible { outline: 2px solid var(--accent, #7c3aed); outline-offset: 2px; }
+            @keyframes dti-dlg-in { from { opacity: 0; } }
+            @keyframes dti-dlg-pop { from { opacity: 0; transform: translateY(6px) scale(.98); } }
+            @media (prefers-reduced-motion: reduce) { .dti-dlg-wrap, .dti-dlg { animation: none; } }
+        `);
+        if (st) st.id = 'dti-dlg-css';
+    }
+    // DTI's own "Are you sure…?" (its Turbo forms — deleting a custom, a list…) in the same box: Turbo is handed this confirm. A small
+    // page script asks, through the page (as the editor bridge does); the box answers. Once a window.
+    function installTurboConfirm() {
+        if (window.__dtiTurboConfirm || location.hostname !== 'impress.openneo.net') return;
+        window.__dtiTurboConfirm = true;
+        document.addEventListener('dti-cf-ask', async () => {
+            const h = document.documentElement;
+            let d = null;
+            try { d = JSON.parse(h.getAttribute('data-dti-cf-ask') || 'null'); } catch (_) {}
+            if (!d) return;
+            const msg = String(d.message || ''), m = /^Are you sure you want to delete the outfit (.+)\?$/.exec(msg), del = /\b(delete|remove)\b/i.test(msg);
+            const yes = await dtiConfirm(m ? 'It\u2019s gone for good once it\u2019s deleted.' : msg, m ? { title: `Delete \u201c${m[1]}\u201d?`, ok: 'Delete', danger: true } : { ok: del ? 'Delete' : 'OK', danger: del });
+            h.setAttribute('data-dti-cf-res', JSON.stringify({ id: d.id, ok: !!yes }));
+            document.dispatchEvent(new Event('dti-cf-done'));
+        });
+        const s = document.createElement('script');
+        s.textContent = '(' + function () {
+            if (window.__dtiCf) return;
+            window.__dtiCf = true;
+            const ask = message => new Promise(res => {
+                const id = Math.random().toString(36).slice(2), h = document.documentElement;
+                const done = () => {
+                    let d = null;
+                    try { d = JSON.parse(h.getAttribute('data-dti-cf-res') || 'null'); } catch (_) {}
+                    if (!d || d.id !== id) return;
+                    document.removeEventListener('dti-cf-done', done);
+                    res(!!d.ok);
+                };
+                document.addEventListener('dti-cf-done', done);
+                h.setAttribute('data-dti-cf-ask', JSON.stringify({ id, message: String(message || '') }));
+                document.dispatchEvent(new Event('dti-cf-ask'));
+            });
+            const set = () => {
+                const T = window.Turbo;
+                if (!T) return false;
+                if (T.config && T.config.forms) T.config.forms.confirm = ask; else if (T.setConfirmMethod) T.setConfirmMethod(ask); else return false;
+                return true;
+            };
+            if (!set()) { let n = 0; const t = setInterval(() => { if (set() || ++n > 40) clearInterval(t); }, 250); }
+        } + ')();';
+        (document.head || document.documentElement).appendChild(s);
+        s.remove();
+    }
+    // (a small mark for what kind it is: ✓ done, ! went wrong, • news — sized here too, for a page without the toast's styles)
+    const TOAST_ICO = {
+        '': '<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="currentColor"/></svg>',
+        success: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.8 8.4 6.7 11.2 12.3 5"/></svg>',
+        error: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M8 4.3v4.6M8 11.7v.1"/></svg>',
+    };
     function dtiToast(msg, opts = {}) {
         let host = document.getElementById('dti-toast-host');
         if (!host) {
             host = document.createElement('div');
-            host.id = 'dti-toast-host';
+            host.id = 'dti-toast-host'; host.setAttribute('role', 'status');
             document.body.appendChild(host);
         }
+        const v = opts.variant === 'error' || opts.variant === 'success' ? opts.variant : '';
         const t = document.createElement('div');
-        t.className = 'dti-toast' + (opts.variant === 'error' ? ' error' : opts.variant === 'success' ? ' success' : '');
-        t.textContent = msg;
+        t.className = 'dti-toast' + (v ? ' ' + v : '');
+        t.innerHTML = `<span class="dti-toast-ico">${TOAST_ICO[v]}</span><span class="dti-toast-msg"></span>`;
+        t.querySelector('.dti-toast-msg').textContent = msg;
         const act = opts.undo ? { label: 'Undo', run: opts.undo } : opts.action;   // (one button: Undo, or { label, run })
         if (act) {
             t.classList.add('has-action');
@@ -2554,10 +2685,12 @@
         }
         host.appendChild(t);
         requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add('show')));
-        setTimeout(() => {
-            t.classList.remove('show');
-            setTimeout(() => t.remove(), 320);
-        }, opts.duration || 2200);
+        // (long enough to read — longer words stay longer, a failure at least 4s; held while the pointer's on one with a button)
+        let timer = 0;
+        const go = ms => { clearTimeout(timer); timer = setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 320); }, ms); };
+        t.addEventListener('mouseenter', () => clearTimeout(timer));
+        t.addEventListener('mouseleave', () => go(1500));
+        go(opts.duration || Math.max(v === 'error' ? 4000 : 2200, Math.min(6500, 1000 + String(msg).length * 45)));
     }
 
     // Item pages: "Brought to you by" can be dozens of names — folded to one line ("24 contributors ▾") each visit
@@ -7004,7 +7137,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             :is(#dti-tokens-app, .dti-tkp) .dti-tk-lbtn.set { border-style: solid; border-color: color-mix(in srgb, var(--lc) 50%, var(--border)); background: color-mix(in srgb, var(--lc) 11%, var(--surface)); color: var(--text); }
             :is(#dti-tokens-app, .dti-tkp) .dti-tk-lbtn.set:hover { border-color: var(--lc); }
             .dti-tkp .dti-tk-lbtn { width: auto; max-width: 150px; height: 26px; }
-            .dti-tk-card[draggable="true"] { cursor: grab; }
+            .dti-tk-card[draggable="true"] { cursor: ${dtiGrabCursor()}; }
             .dti-tk-lmenu {
                 position: fixed; z-index: 10070; width: 230px; box-sizing: border-box; padding: 6px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border);
                 box-shadow: 0 14px 40px rgba(0,0,0,.18); font-family: 'Poppins', system-ui, sans-serif; color: var(--text);
@@ -7729,7 +7862,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                         <div class="dti-sk-top"><a class="dti-sk-name" href="/items/${noteEsc(e.id)}">${a ? `<i class="dti-acct-dot" style="--ac:${noteEsc(a.color)}" title="${noteEsc(acctName(a))}\u2019s"></i>` : ''}${noteEsc(e.name || 'Item ' + e.id)}</a><span class="dti-sk-val" hidden></span></div>
                         <div class="dti-sk-meta">
                             <button type="button" class="dti-sk-tier t${t}" title="How much you want it \u2014 click to change" aria-haspopup="menu">${SEEK_TIERS[t]}</button>
-                            <button type="button" class="dti-sk-offer dti-sk-trade${tn ? ' has' : ''}" title="People trading it on DTI \u2014 click to see who, in Trade Finder"${tn === 0 ? ' disabled' : ''}>${tn == null ? 'Who\u2019s trading it?' : tn ? `<i></i>${tn} trading` : 'No one trading yet'}</button>
+                            <button type="button" class="dti-sk-offer dti-sk-trade${tn?.o ? ' has' : ''}" title="On DTI: how many are offering it, and how many are seeking it \u2014 click to see who\u2019s offering, in Trade Finder"${tn && !tn.o ? ' disabled' : ''}>${tn == null ? 'Who\u2019s trading it?' : `${tn.o ? '<i></i>' : ''}${skTradeText(tn)}`}</button>
                             ${e.for?.name ? (e.for.id ? `<a class="dti-sk-for" href="/outfits/${noteEsc(e.for.id)}" title="For your custom \u2014 open it">for ${noteEsc(e.for.name)}</a>` : `<span class="dti-sk-for">for ${noteEsc(e.for.name)}</span>`) : ''}
                             <span>Added ${noteAgo(e.at)}</span>
                         </div>
@@ -7828,7 +7961,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                     if (n == null) continue;
                     skTradeSet(e.id, n);
                     const chip = listEl.querySelector(`.dti-sk-row[data-id="${e.id}"] .dti-sk-trade`);
-                    if (chip) { chip.classList.toggle('has', n > 0); chip.disabled = !n; chip.innerHTML = n ? `<i></i>${n} trading` : 'No one trading yet'; }
+                    if (chip) { chip.classList.toggle('has', n.o > 0); chip.disabled = !n.o; chip.innerHTML = (n.o ? '<i></i>' : '') + skTradeText(n); }
                     await new Promise(r => setTimeout(r, 300));
                 }
             } finally { tradeBusy = false; }
@@ -8081,8 +8214,9 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-sk-list { display: flex; flex-direction: column; gap: 8px; }
             .dti-sk-row {
                 position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 12px; border-radius: 14px; background: var(--surface);
-                border: 1px solid var(--border); box-shadow: var(--shadow-sm); transition: border-color .12s, box-shadow .12s; cursor: grab;
+                border: 1px solid var(--border); box-shadow: var(--shadow-sm); transition: border-color .12s, box-shadow .12s; cursor: ${dtiGrabCursor()};
             }
+            .dti-sk-row:active { cursor: ${dtiGrabCursor(true)}; }
             .dti-sk-row:hover { border-color: color-mix(in srgb, #f97316 45%, var(--border)); }
             .dti-sk-row.dragging { opacity: .55; box-shadow: var(--shadow-md); }
             .dti-sk-rank {
@@ -9293,15 +9427,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             old.replaceWith(tmp.firstElementChild);
             wireHeader(f);
         }
-        function toast(text, undo) {
-            main.querySelector('.dti-nf-toast')?.remove();
-            const t = document.createElement('div');
-            t.className = 'dti-nf-toast';
-            t.innerHTML = `<span>${noteEsc(text)}</span><button type="button">Undo</button>`;
-            main.appendChild(t);
-            t.querySelector('button').addEventListener('click', () => { t.remove(); undo(); });
-            setTimeout(() => t.remove(), 7000);
-        }
+        function toast(text, undo) { dtiToast(text, { duration: 7000, undo }); }   // (the same toast as everywhere, its Undo with it)
 
         // Other tabs / the closet pages: repaint
         gmWatch(NF.KEY, app, (k, o, n, remote) => {
@@ -9993,12 +10119,6 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-nf-tip b { color: var(--text); }
             #dti-nf-app .dti-nf-cancel { margin-top: 14px; height: 32px; padding: 0 14px; border: none; border-radius: 9px; background: transparent; color: var(--text-muted); cursor: pointer; font-family: inherit; font-size: 12.5px; font-weight: 700; }
             #dti-nf-app .dti-nf-cancel:hover { background: var(--surface-2); color: var(--text); }
-            .dti-nf-toast {
-                position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 14px;
-                padding: 9px 9px 9px 16px; border-radius: 12px; background: #1d1f2b; color: #fff; font-size: 13px; box-shadow: 0 10px 30px rgba(0,0,0,.3); animation: dti-lp-in .15s ease-out;
-            }
-            #dti-nf-app .dti-nf-toast button { height: 30px; padding: 0 12px; border: none; border-radius: 8px; cursor: pointer; background: rgba(255,255,255,.14); color: #fff; font-family: inherit; font-size: 12.5px; font-weight: 700; }
-            #dti-nf-app .dti-nf-toast button:hover { background: rgba(255,255,255,.24); }
             @media (max-width: 860px) {
                 #dti-nf-app:not(.in-modal) { grid-template-columns: minmax(0, 1fr); }
                 #dti-nf-app:not(.in-modal) .dti-nf-side { position: static; max-height: 360px; }
@@ -11137,6 +11257,21 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 line-height: 15px; font-size: 8.5px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; background: #f97316; color: #fff; pointer-events: none;
             }
             .dti-sks-worth b { font-size: 12px; }
+            /* (someone else's page: your Seeking list in theirs — a click jumps to one, flashed) */
+            #dti-seek-theirs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; padding: 7px 9px; border-radius: 12px;
+                border: 1px solid color-mix(in srgb, #f97316 45%, var(--border)); background: color-mix(in srgb, #f97316 7%, var(--surface)); }
+            #dti-seek-theirs[hidden] { display: none; }
+            #dti-seek-theirs.none { border-color: var(--border); background: transparent; }
+            #dti-seek-theirs .dti-skt-h { display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; font-size: 12.5px; color: var(--text-muted); }
+            #dti-seek-theirs .dti-skt-h b { color: var(--text); }
+            #dti-seek-theirs .dti-skt-h svg { flex: none; width: 15px; height: 15px; color: #f97316; }
+            #dti-seek-theirs .dti-skt-i { display: inline-flex; align-items: center; gap: 6px; max-width: 240px; height: 30px; padding: 0 11px 0 3px; border: 1px solid var(--border);
+                border-radius: 99px; background: var(--surface); color: var(--text); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+            #dti-seek-theirs .dti-skt-i:hover { border-color: #f97316; }
+            #dti-seek-theirs .dti-skt-i img { flex: none; width: 24px; height: 24px; border-radius: 50%; object-fit: cover; background: #fff; }
+            #dti-seek-theirs .dti-skt-i span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .dti-item-card.dti-flash { animation: dti-skt-flash 1.9s ease-out; }
+            @keyframes dti-skt-flash { 0%, 35% { box-shadow: 0 0 0 4px #f97316, 0 0 26px rgba(249, 115, 22, .55); } 100% { box-shadow: 0 0 0 0 transparent; } }
 
             /* ── Copy the name: the tile's bottom-left corner, on hover ── */
             .dti-copy-btn {
@@ -11366,12 +11501,14 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-ne-pin:disabled, .dti-ne-del:disabled { opacity: .35; cursor: default; }
             .dti-ne-open { flex-shrink: 0; font-size: 11.5px; font-weight: 700; color: var(--accent-text, var(--accent)); text-decoration: none; padding: 0 2px; }
             .dti-ne-open:hover { text-decoration: underline; }
-            .dti-toast.has-action { pointer-events: auto; display: flex; align-items: center; gap: 12px; }
+            .dti-toast.has-action { pointer-events: auto; padding-right: 7px; }
             .dti-toast-action {
                 flex: none; white-space: nowrap;   /* (a two-word button stays on one line) */
-                border: none; background: none; padding: 0; cursor: pointer;
-                font-family: inherit; font-size: 13px; font-weight: 700; color: var(--accent-text, var(--accent));
+                margin-left: 4px; padding: 5px 12px; border: none; border-radius: 999px; cursor: pointer;
+                background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-text, var(--accent));
+                font-family: inherit; font-size: 12.5px; font-weight: 700; transition: background .15s;
             }
+            .dti-toast-action:hover { background: color-mix(in srgb, var(--accent) 24%, transparent); }
 
             /* ── Pencil popover ─────────────────────────────────────────────── */
             .dti-note-pop {
@@ -12194,9 +12331,10 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         const A = res('var(--accent)'), AT = res('var(--accent-text, var(--accent))'), S = res('var(--surface)'), T = res('var(--text)'), B = res('var(--border)');
         probe.remove();
         const [h0, s0, l0] = _ncRgbHsl(A), [ht, st0, lt] = _ncRgbHsl(AT), W = [1, 1, 1], K = [17 / 255, 17 / 255, 17 / 255];
-        [0, 35, 70, 105, -40].forEach((shift, i) => {
+        // (each step in both looks — the badge's own as it's set, and Theme and Solid apart: the customs editor's pill can have its own)
+        ['theme', 'solid'].forEach(mode => [0, 35, 70, 105, -40].forEach((shift, i) => {
             let bg, fg, bd;
-            if (st.mode === 'solid') {   // (as on Neopets: white text, the pill darkened until it reads — black text when that's too dark)
+            if (mode === 'solid') {   // (as on Neopets: white text, the pill darkened until it reads — black text when that's too dark)
                 const h = (h0 + shift + 720) % 360, s = Math.max(s0, .55);
                 let l = Math.min(Math.max(l0, .45), .62); const start = l;
                 while (l > .4 && _ncContrast(_ncHslRgb(h, s, l), W) < 4.5) l -= .01;
@@ -12209,10 +12347,10 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 let t = .82; fg = _ncMix(ct, T, t);
                 while (t > 0 && _ncContrast(fg, bg) < 4.5) { t = Math.max(0, t - .06); fg = _ncMix(ct, T, t); }
             }
-            html.style.setProperty(`--bdg-ncval-t${i}-bg`, _ncCss(bg));
-            html.style.setProperty(`--bdg-ncval-t${i}-fg`, _ncCss(fg));
-            html.style.setProperty(`--bdg-ncval-t${i}-bd`, _ncCss(bd));
-        });
+            const put = pre => { html.style.setProperty(`${pre}-bg`, _ncCss(bg)); html.style.setProperty(`${pre}-fg`, _ncCss(fg)); html.style.setProperty(`${pre}-bd`, _ncCss(bd)); };
+            put(`--bdg-ncval-${mode}-t${i}`);
+            if (mode === st.mode) put(`--bdg-ncval-t${i}`);
+        }));
         html.classList.add('dti-ncval-tiers');
     }
     async function ncCapTotal(entries) {   // [{ name, qty }]
@@ -12708,6 +12846,14 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
 }
 .dti-pm-close:hover { background: var(--surface-2); color: var(--text); }
 .dti-pm-close svg { width: 14px; height: 14px; }
+.dti-pm-min {
+    width: 34px; height: 34px; flex-shrink: 0; padding: 0; display: grid; place-items: center; cursor: pointer;
+    border: none; border-radius: 10px; background: transparent; color: var(--text-muted);
+    transition: background .12s, color .12s;
+}
+.dti-pm-min:hover { background: var(--surface-2); color: var(--text); }
+.dti-pm-min svg { width: 16px; height: 16px; }
+.dti-pm-min.busy { opacity: .5; cursor: progress; }   /* (minimizing: DTI's last save waited for) */
 
 /* Toolbar under the header (search, filters) */
 .dti-pm-filters {
@@ -12893,6 +13039,8 @@ html[data-style="solid"] :is(.dti-pm-header, .dti-tm-header) .dti-pm-ext { backg
 html[data-style="solid"] :is(.dti-pm-header, .dti-tm-header) .dti-pm-ext:hover { background: var(--solid-fg); color: var(--solid-bg) !important; }
 html[data-style="solid"] :is(.dti-pm-header, .dti-tm-header) .dti-pm-close { color: var(--solid-fg-2); }
 html[data-style="solid"] :is(.dti-pm-header, .dti-tm-header) .dti-pm-close:hover { background: var(--solid-hover); color: var(--solid-fg); }
+html[data-style="solid"] .dti-pm-header .dti-pm-min { color: var(--solid-fg-2); }
+html[data-style="solid"] .dti-pm-header .dti-pm-min:hover { background: var(--solid-hover); color: var(--solid-fg); }
 html[data-style="solid"] .dti-pm-outfit-title:not(.dti-pm-static):hover { background: var(--solid-hover); color: var(--solid-fg); }
 html[data-style="solid"] .dti-pm-outfit-title:not(.dti-pm-static)::after { color: var(--solid-fg-2); }
 html[data-style="solid"] .dti-tm-header .dti-seg { background: var(--solid-hover); border-color: transparent; }
@@ -13190,6 +13338,24 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['3.0', [
+            'Coming in a future update: the Mini DTI on Neopets.com, completely reworked and greatly improved',
+            'Customs: drop a custom anywhere in a section to move it there (not just on its heading) \u2014 and Select several to move them together; up to 12 a row',
+            'Customs: Quick new \u2014 a new custom from just its name (a Blue Acara, or one of your pets as it looks now), made right there in the section you pick',
+            'Customs: drag a section\u2019s heading (Not in a section too) to put your sections in the order you like',
+            'Seeking: each item shows how many are offering it and how many are seeking it on DTI \u2014 the two side by side say something about its value',
+            'Seeking: on someone\u2019s items page, which of your Seeking list they have \u2014 click one to jump straight to it',
+            'Neoboards: Seeking\u2019s symbol by each DTI link in a post (checked by itself, once a person) \u2014 a dot on it when they have something from your Seeking list or wishlist, or want something you have; click it for the counts, and a count for the items with their cap values, in your DTI theme (\u2699 \u203a Neopets turns it off)',
+            'Settings: People you avoid \u2014 everyone you\u2019ve avoided (or hidden from Trade Finder), with a button to stop',
+            'Customs editor: Custom items (by the custom\u2019s name while you search) shows the custom\u2019s own items without losing your search \u2014 Back to search returns to the same page and spot (DTI\u2019s \u2715 and Esc keep it too)',
+            'Customs editor: minimize customs (popup or full page, several at once) into small bars with their names that stay as you browse DTI \u2014 one click brings one back as a popup or the full page, and its last change is saved first; drag the bars wherever you like',
+            'Customs editor: the Wearing row can be turned off \u2014 its \u00d7, the Layout menu, or \u2699 \u203a Features',
+            'Customs editor: search results in one list now have a Pages switch beside it \u2014 the same look, 30 a page',
+            'Customs editor: cap value pills can have their own Theme or Solid colors, apart from the rest of DTI \u2014 Layout \u203a Pill colors',
+            '\u201cAre you sure?\u201d questions (deleting a custom \u2014 in the editor too \u2014 a list\u2026) now ask in a box in the middle of the page, in your theme',
+            'Toasts look a little cleaner (a small \u2713 or ! mark), stay up long enough to read, and wait while you\u2019re on their Undo \u2014 and a few things that failed quietly now say so (renaming a custom, copying a link, removing an item)',
+            'Fixes: the Customs card on Home no longer cuts its name short in some themes; DTI links on the Neoboards no longer come apart into text alongside the Neoboard Enhancement Suite',
+        ]],
         ['2.9', [
             'Customs: put your customs in sections you name \u2014 All or Sections above the list; drag a custom into a section, or use the folder button on its picture',
             'Customs editor: while you search, a Wearing row shows what the custom has on (and what\u2019s in it, not worn) \u2014 click to take off or put on, \u00d7 to take out',
@@ -13490,6 +13656,190 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         _openFramedPageModal('Settings', '/users/edit', { icon: SETTINGS_ICO, cls: 'dti-pm-settings', css: '#dti-haul-wrap { display: none !important; }', loading: 'Opening Settings…' });
     }
 
+    // ── Customs minimized (user asked): the editor — a popup or the full page — folded into a small bar that stays as you browse DTI,
+    // the custom's name on it; ⧉ brings it back in a popup, ⤢ as the full page (one click each), × closes it. Several at once, in GM
+    // `dti_ed_min` ([{ url, name, id, at }], oldest first). Nothing changed is lost: a saved custom's last change is saved by DTI first
+    // (it saves 2s after one — waited for; not saved, it stays open), and a new one's whole look goes in its url. ──
+    let _edMinWired = false, _edMinCss = false;
+    const ED_MIN_MAX = 8;
+    const ED_MIN_ICO = {
+        min: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M3.5 12h9"/></svg>',
+        item: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5.4v-.9a1.7 1.7 0 1 1 1.7-1.7"/><path d="M8 5.4 1.9 10.6c-.5.4-.2 1.2.5 1.2h11.2c.7 0 1-.8.5-1.2z"/></svg>',
+        full: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9.2 6.8M2.5 13.5l4.3-4.3"/></svg>',
+    };
+    const edMinOk = u => typeof u === 'string' && /^\/(outfits|pets)\//.test(u);
+    const edMinUnsaved = u => /^\/(outfits\/new|pets\/)/.test(u);   // (a new custom: only its url has it)
+    const edMinKey = m => /^\/outfits\/\d+/.test(m.url) ? m.url.split('?')[0] : m.url;   // (a saved custom: its page — a new one: its whole look)
+    function edMinAll() {   // (oldest first — one kept from before there could be several: a list of one)
+        const v = GM_getValue('dti_ed_min', null);
+        return (Array.isArray(v) ? v : v ? [v] : []).filter(m => m && edMinOk(m.url));
+    }
+    // (a new custom's look as DTI's own url for it — as its "Edit a copy" builds one)
+    function edNewUrl(st) {
+        const p = new URLSearchParams({ name: st.name || '', species: st.speciesId || '', color: st.colorId || '', pose: st.pose || '' });
+        if (st.altStyleId != null) p.append('style', st.altStyleId);
+        if (st.appearanceId != null) p.append('state', st.appearanceId);
+        (st.wornItemIds || []).forEach(i => p.append('objects[]', i));
+        (st.closetedItemIds || []).forEach(i => p.append('closet[]', i));
+        return '/outfits/new?' + p;
+    }
+    // (the custom as it is now, nothing lost — br: the editor's bridge, { saving(), get() }, on this page or in a popup's frame: a saved
+    // custom of yours once DTI has saved its last change (6s at most, else null — not let go); one that's new, or someone else's that
+    // you've changed, as its whole look in a url) → { url, name, id } | null
+    async function edMinCapture(br, fallbackUrl, fallbackName) {
+        let sv = br.saving();
+        for (let n = 0; sv && sv.can && !sv.isNew && !sv.saved; n++) {   // (30 looks, 0.2s apart)
+            if (sv.error || n >= 30) return null;
+            await new Promise(r => setTimeout(r, 200));
+            sv = br.saving();
+        }
+        const got = br.get(), st = got?.state;
+        if (!st) return { url: fallbackUrl, name: fallbackName, id: (/^\/outfits\/(\d+)/.exec(fallbackUrl) || [])[1] || null };
+        const look = s => s && JSON.stringify([s.name, s.speciesId, s.colorId, s.pose, s.altStyleId ?? null, [...(s.wornItemIds || [])].sort(), [...(s.closetedItemIds || [])].sort()]);
+        return st.id && (sv?.can || look(st) === look(got.saved)) ? { url: `/outfits/${st.id}`, name: st.name, id: String(st.id) } : { url: edNewUrl(st), name: st.name, id: null };
+    }
+    function edMinAdd(m) {   // (minimized again: its newest look, at the end — 8 at most)
+        const list = edMinAll().filter(x => edMinKey(x) !== edMinKey(m));
+        if (list.length >= ED_MIN_MAX) { dtiToast(`Up to ${ED_MIN_MAX} customs can be minimized \u2014 close one first`, { variant: 'error' }); return false; }
+        list.push({ url: m.url, name: m.name || 'Untitled outfit', id: m.id || null, at: Date.now() });
+        GM_setValue('dti_ed_min', list);
+        injectEdMinBar();
+        return true;
+    }
+    const edMinDrop = key => { GM_setValue('dti_ed_min', edMinAll().filter(x => edMinKey(x) !== key)); injectEdMinBar(); };
+    // (the editor in a popup, asked through its own bridge — the page's side, in that frame)
+    function edAskFrame(fr, req) {
+        try {
+            const d = fr.contentDocument, h = d.documentElement;
+            h.setAttribute('data-dti-ed-req', JSON.stringify(req)); h.removeAttribute('data-dti-ed-res');
+            d.dispatchEvent(new Event('dti-ed-req'));
+            return JSON.parse(h.getAttribute('data-dti-ed-res') || 'null');
+        } catch (_) { return null; }
+    }
+    async function edMinimize(modal, fr, fallback) {   // (a popup's editor: its last change saved, then minimized — the popup closes)
+        const btn = modal.querySelector('.dti-pm-min');
+        if (!btn || btn.disabled) return;
+        btn.disabled = true; btn.classList.add('busy');
+        let loc = '';
+        try { const l = fr.contentWindow.location; loc = l.pathname + l.search; } catch (_) {}
+        if (!edMinOk(loc)) { const u = new URL(fr.src, location.href); loc = u.pathname + u.search; }
+        const got = await edMinCapture({ saving: () => edAskFrame(fr, { op: 'saving' }), get: () => edAskFrame(fr, { op: 'get' }) }, loc, fallback);
+        btn.disabled = false; btn.classList.remove('busy');
+        if (!got) return dtiToast('Couldn\u2019t save its last change yet \u2014 it\u2019s still open; try again in a moment', { variant: 'error' });
+        if (edMinAdd(got)) modal.querySelector('.dti-pm-close')?.click();   // (closed as usual — a popup it was opened over comes back)
+    }
+    async function edMinOpen(key, full) {
+        const m = edMinAll().find(x => edMinKey(x) === key);
+        if (!m) return injectEdMinBar();
+        const cur = full ? null : document.querySelector('#dti-page-modal.dti-pm-outfit');   // (a custom open in the popup now: minimized first)
+        if (cur?.querySelector('iframe')) {
+            await edMinimize(cur, cur.querySelector('iframe'), cur.querySelector('.dti-pm-title')?.textContent.trim() || '');
+            if (cur.isConnected) return;
+        }
+        edMinDrop(key);
+        if (full) return location.assign(m.url);
+        _openOutfitModal(m.id, m.name, m.url);
+    }
+    async function edMinClose(key) {
+        const m = edMinAll().find(x => edMinKey(x) === key);
+        if (m && edMinUnsaved(m.url) && !(await dtiConfirm('It isn\u2019t saved \u2014 closing it loses it.', { title: `Close \u201c${m.name || 'Untitled outfit'}\u201d?`, ok: 'Close it', danger: true }))) return;
+        edMinDrop(key);
+    }
+    // (where you left the bar: the corner it was nearest and how far from it, as a share of the window — else bottom-left; kept on screen)
+    function edMinPlace() {
+        const bar = document.getElementById('dti-ed-minbar');
+        if (!bar) return;
+        const p = GM_getValue('dti_ed_min_pos', null), at = (f, size) => Math.round(Math.max(0, Math.min(1, +f || 0)) * size) + 'px';
+        Object.assign(bar.style, !p ? { left: '', right: '', top: '', bottom: '', alignItems: '' } : {
+            left: p.ax === 'r' ? 'auto' : at(p.x, innerWidth), right: p.ax === 'r' ? at(p.x, innerWidth) : 'auto',
+            top: p.ay === 'b' ? 'auto' : at(p.y, innerHeight), bottom: p.ay === 'b' ? at(p.y, innerHeight) : 'auto', alignItems: p.ax === 'r' ? 'flex-end' : '' });
+        const r = bar.getBoundingClientRect(), x = Math.max(4, Math.min(innerWidth - r.width - 4, r.left)), y = Math.max(4, Math.min(innerHeight - r.height - 4, r.top));
+        if (Math.abs(x - r.left) > 1 || Math.abs(y - r.top) > 1) Object.assign(bar.style, { left: x + 'px', top: y + 'px', right: 'auto', bottom: 'auto' });   // (a smaller window: brought back in)
+    }
+    function injectEdMinBar() {
+        if (window.top !== window) return;
+        if (!_edMinWired) {
+            _edMinWired = true;
+            document.addEventListener('pointerdown', e => {   // (moved by any of its grips — the whole stack)
+                const g = e.target.closest?.('#dti-ed-minbar .grip'), bar = g?.closest('#dti-ed-minbar');
+                if (!g || e.button !== 0) return;
+                e.preventDefault();
+                const r = bar.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+                bar.classList.add('dragging');
+                const move = ev => Object.assign(bar.style, { right: 'auto', bottom: 'auto',
+                    left: Math.max(4, Math.min(innerWidth - r.width - 4, ev.clientX - dx)) + 'px', top: Math.max(4, Math.min(innerHeight - r.height - 4, ev.clientY - dy)) + 'px' });
+                const up = () => {
+                    document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up);
+                    bar.classList.remove('dragging');
+                    const b = bar.getBoundingClientRect(), right = b.left + b.width / 2 > innerWidth / 2, low = b.top + b.height / 2 > innerHeight / 2;
+                    GM_setValue('dti_ed_min_pos', { ax: right ? 'r' : 'l', x: (right ? innerWidth - b.right : b.left) / innerWidth,
+                        ay: low ? 'b' : 't', y: (low ? innerHeight - b.bottom : b.top) / innerHeight });
+                    edMinPlace();
+                };
+                document.addEventListener('pointermove', move); document.addEventListener('pointerup', up);
+            });
+            document.addEventListener('dblclick', e => { if (e.target.closest?.('#dti-ed-minbar .grip')) { GM_setValue('dti_ed_min_pos', null); edMinPlace(); } });
+            window.addEventListener('resize', () => edMinPlace());
+            if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('dti_ed_min_pos', () => edMinPlace());
+            document.addEventListener('click', e => {   // (caught here: a page Turbo brings back from its cache has a copy of the bar)
+                const b = e.target.closest?.('#dti-ed-minbar button'), key = b?.closest('.dti-edm')?.dataset.key;
+                if (key == null) return;
+                if (b.classList.contains('full')) edMinOpen(key, true);
+                else if (b.classList.contains('x')) edMinClose(key);
+                else edMinOpen(key, false);
+            });
+            if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('dti_ed_min', () => injectEdMinBar());   // (another tab too)
+            window.addEventListener('pageshow', e => { if (e.persisted) injectEdMinBar(); });   // (Back to a page the browser kept as it was)
+        }
+        const list = edMinAll().filter(m => !(/^\/outfits\/\d+$/.test(edMinKey(m)) && location.pathname === edMinKey(m)));   // (one open here, full page: not in the bar)
+        let bar = document.getElementById('dti-ed-minbar');
+        if (!list.length) return bar?.remove();
+        if (!_edMinCss) {
+            _edMinCss = true;
+            GM_addStyle(`
+                #dti-ed-minbar { position: fixed; left: 16px; bottom: 16px; z-index: 9990; display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+                    max-width: calc(100vw - 32px); max-height: calc(100vh - 96px); overflow-y: auto; font-family: 'Poppins', system-ui, sans-serif; }
+                #dti-ed-minbar .dti-edm { display: flex; align-items: center; gap: 4px; max-width: 100%; box-sizing: border-box; padding: 5px;
+                    border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: 0 3px 12px rgba(0,0,0,.1); }
+                #dti-ed-minbar button { flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; margin: 0; padding: 0; box-sizing: border-box;
+                    border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer; }
+                #dti-ed-minbar button:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+                #dti-ed-minbar button svg { width: 14px; height: 14px; }
+                #dti-ed-minbar .nm { display: inline-flex; align-items: center; gap: 7px; width: auto; min-width: 0; max-width: 240px; padding: 0 10px 0 4px;
+                    border-color: transparent; background: transparent; font-size: 13px; font-weight: 700; white-space: nowrap; }
+                #dti-ed-minbar .nm .ico { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--accent-glow); color: var(--accent-text, var(--accent)); }
+                #dti-ed-minbar .nm .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+                #dti-ed-minbar .x { width: 28px; border-color: transparent; background: transparent; color: var(--text-muted); font-size: 17px; font-weight: 600; line-height: 1; }
+                #dti-ed-minbar .x:hover { border-color: transparent; background: var(--surface-2); color: var(--text); }
+                #dti-ed-minbar .grip { flex: none; align-self: stretch; width: 9px; margin: 2px 0 2px 1px; border-radius: 4px; cursor: ${dtiGrabCursor()}; opacity: .75; touch-action: none;
+                    background: radial-gradient(circle, var(--text-muted) 1.1px, transparent 1.5px) 0 50% / 4.5px 4.5px; }
+                #dti-ed-minbar .grip:hover { opacity: .95; }
+                #dti-ed-minbar.dragging { user-select: none; }
+                #dti-ed-minbar.dragging, #dti-ed-minbar.dragging .grip { cursor: ${dtiGrabCursor(true)}; }
+                @media (max-width: 560px) { #dti-ed-minbar .nm { max-width: 120px; } }
+                body:has(#dti-page-modal.dti-pm-outfit) #dti-ed-minbar { z-index: 10010; }   /* (over an editor popup: another one brought in, that one minimized first) */
+            `);
+        }
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'dti-ed-minbar'; bar.setAttribute('role', 'region'); bar.setAttribute('aria-label', 'Minimized customs');
+            document.body.appendChild(bar);
+        }
+        bar.replaceChildren(...list.map(m => {
+            const name = m.name || 'Untitled outfit', row = document.createElement('div');
+            row.className = 'dti-edm'; row.dataset.key = edMinKey(m); row.setAttribute('role', 'group'); row.setAttribute('aria-label', name);
+            row.innerHTML = '<span class="grip" title="Drag to move \u2014 double-click to put it back in the corner" aria-hidden="true"></span>'
+                + `<button type="button" class="nm"><span class="ico">${ED_MIN_ICO.item}</span><span class="t"></span></button>`
+                + `<button type="button" class="pop" title="Open it as a popup" aria-label="Open it as a popup">${POPUP_ICO}</button>`
+                + `<button type="button" class="full" title="Open it as a full page" aria-label="Open it as a full page">${ED_MIN_ICO.full}</button>`
+                + '<button type="button" class="x" title="Close it" aria-label="Close it">\u00d7</button>';
+            row.querySelector('.t').textContent = name;
+            row.querySelector('.nm').title = `${name} \u2014 open it as a popup`;
+            return row;
+        }));
+        edMinPlace();
+    }
+
     // src overrides the outfit URL (e.g. /pets/load?name=…); without an id the title isn't renamable
     function _openOutfitModal(id, name, src) {
         const href = src || `/outfits/${id}`;
@@ -13540,6 +13890,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             setTimeout(() => { iframe.style.opacity = '1'; }, 220);
         });
         content.appendChild(iframe);
+        // (minimize: a small bar that stays as you browse DTI — Popup or Full page brings it back)
+        const minBtn = document.createElement('button');
+        minBtn.type = 'button'; minBtn.className = 'dti-pm-min'; minBtn.innerHTML = ED_MIN_ICO.min;
+        minBtn.title = 'Minimize \u2014 keep it in a small bar while you browse DTI'; minBtn.setAttribute('aria-label', 'Minimize');
+        modal.querySelector('.dti-pm-close').before(minBtn);
+        minBtn.addEventListener('click', () => edMinimize(modal, iframe, modal.querySelector('.dti-pm-title')?.textContent.trim() || name));
 
         // Title: click to rename the outfit (saved to DTI); pet previews and new outfits aren't renamable
         const titleEl = modal.querySelector('.dti-pm-title');
@@ -13559,12 +13915,19 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 titleEl.textContent = newName;
                 inp.replaceWith(titleEl);
                 if (save && newName !== currentName) {
+                    // (the editor inside told too — DTI saves the custom as you go, and would put the old name back)
+                    edAskFrame(iframe, { op: 'rename', name: newName });
+                    const fail = () => {
+                        titleEl.textContent = currentName; edAskFrame(iframe, { op: 'rename', name: currentName });
+                        dtiToast('Couldn\u2019t rename it \u2014 try again', { variant: 'error' });
+                    };
                     const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
-                    if (csrf) fetch(`/outfits/${id}`, {
+                    if (!csrf) return fail();
+                    fetch(`/outfits/${id}`, {
                         method: 'PATCH', credentials: 'same-origin',
                         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
                         body: JSON.stringify({ outfit: { name: newName } }),
-                    });
+                    }).then(r => { if (!r.ok) fail(); }, fail);
                 }
             };
             inp.addEventListener('blur', () => restore(true));
@@ -13893,7 +14256,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
         injectThemePicker();
         injectHaulTray();
+        injectEdMinBar();   // (a custom minimized: its bar)
         installNoteHandlers();
+        installTurboConfirm();
         _dtiSetFavicon();
         _dtiSetTitle();
 
@@ -15969,25 +16334,33 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             .dti-accent-label { font-size: 10px; color: var(--text-sub); }
 
-            /* ── Toast notifications (inspired by DTI Remix's toast system) ── */
+            /* ── Toasts: a note at the foot of the page — frosted, a small mark for its kind (✓ done · ! went wrong · • news) ── */
             #dti-toast-host {
                 position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
                 z-index: 10060; display: flex; flex-direction: column; gap: 8px;   /* above popups/modals */
                 align-items: center; pointer-events: none;
             }
             .dti-toast {
-                background: var(--surface); border: 1.5px solid var(--border);
-                border-radius: 20px; padding: 10px 22px;
-                font-size: 13px; font-weight: 500; color: var(--text);
-                box-shadow: var(--shadow-md);
-                opacity: 0; transform: translateY(10px);
-                transition: opacity .22s, transform .22s;
-                pointer-events: none; white-space: normal; text-wrap: balance; line-height: 1.45;
-                width: max-content; max-width: min(520px, calc(100vw - 32px)); box-sizing: border-box; text-align: center;
+                --tk: var(--accent-text, var(--accent));
+                display: flex; align-items: center; gap: 10px;
+                width: max-content; max-width: min(520px, calc(100vw - 32px)); box-sizing: border-box;
+                padding: 9px 18px 9px 10px; border-radius: 16px;
+                background: color-mix(in srgb, var(--surface) 90%, transparent);
+                -webkit-backdrop-filter: blur(14px) saturate(1.5); backdrop-filter: blur(14px) saturate(1.5);
+                border: 1px solid color-mix(in srgb, var(--tk) 24%, var(--border));
+                box-shadow: 0 14px 34px -12px rgba(0,0,0,.38), 0 2px 8px rgba(0,0,0,.08);
+                font-size: 13px; font-weight: 500; line-height: 1.45; color: var(--text); text-align: left; white-space: normal;
+                opacity: 0; transform: translateY(10px) scale(.97);
+                transition: opacity .22s ease, transform .32s cubic-bezier(.2, .9, .3, 1.15);
+                pointer-events: none;
             }
-            .dti-toast.show { opacity: 1; transform: translateY(0); }
-            .dti-toast.error { border-color: var(--danger); color: var(--danger); }
-            .dti-toast.success { border-color: var(--success); color: var(--success); }
+            .dti-toast.show { opacity: 1; transform: none; }
+            .dti-toast.success { --tk: var(--success); }
+            .dti-toast.error { --tk: var(--danger); }
+            .dti-toast-ico { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--tk) 15%, transparent); color: var(--tk); }
+            .dti-toast-ico svg { display: block; width: 13px; height: 13px; }
+            .dti-toast-msg { min-width: 0; text-wrap: pretty; }
+            @media (prefers-reduced-motion: reduce) { .dti-toast { transform: none; transition: opacity .2s; } }
 
             /* ── NC value badge (Lebron / Valisar) ─────────────────────────── */
             /* On item cards: positioned absolute in top-right corner of the card */
@@ -16036,6 +16409,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-nc-val-slot-badge.loading { opacity: .35; }
             /* (by cap value, when that's on: each step's colors, set from the theme by applyNcTiers) */
             ${[0, 1, 2, 3, 4].map(i => `html.dti-ncval-tiers :is(.dti-nc-val, .dti-nc-val-slot-badge, .dti-nc-val-inline, .dti-cap-row, #wardrobe-2020-root .dti-capv)[data-tier="${i}"] { background: var(--bdg-ncval-t${i}-bg) !important; color: var(--bdg-ncval-t${i}-fg) !important; border-color: var(--bdg-ncval-t${i}-bd) !important; }`).join('\n            ')}
+            /* (the customs editor's pill in a look of its own — its layout menu's Pill colors) */
+            ${['theme', 'solid'].flatMap(m => [0, 1, 2, 3, 4].map(i => `html.dti-ncval-tiers #wardrobe-2020-root.dti-capv-${m} .dti-capv[data-tier="${i}"] { background: var(--bdg-ncval-${m}-t${i}-bg) !important; color: var(--bdg-ncval-${m}-t${i}-fg) !important; border-color: var(--bdg-ncval-${m}-t${i}-bd) !important; }`)).join('\n            ')}
 
             /* ── Item tooltip (hover name overlay) ─────────────────────────── */
             .dti-item-tip {
@@ -16599,7 +16974,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (!row) return;
             save(acctAll().map(a => a.id === row.dataset.id ? { ...a, [inp.dataset.f]: inp.value.trim() } : a));
         });
-        box.addEventListener('click', e => {
+        box.addEventListener('click', async e => {
             const row = e.target.closest('.dti-acm-row');
             if (e.target.closest('.dti-acm-add')) return add('');
             const k = e.target.closest('[data-np]');
@@ -16611,7 +16986,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             if (e.target.closest('.dti-acm-del') && row) {
                 const a = acctGet(row.dataset.id);
-                if (!a || !confirm(`Remove ${acctName(a)}? Its lists go back to Main and the token counts you set for it are cleared (nothing on DTI changes).`)) return;
+                if (!a || !(await dtiConfirm(`Its lists go back to Main and the token counts you set for it are cleared (nothing on DTI changes).`, { title: `Remove ${acctName(a)}?`, ok: 'Remove', danger: true }))) return;
                 save(acctAll().filter(x => x.id !== a.id));
                 const tk = GM_getValue('dti_tokens', null);
                 if (tk?.acct?.[a.id]) { delete tk.acct[a.id]; GM_setValue('dti_tokens', tk); }
@@ -17333,6 +17708,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             linkifyToggle.classList.toggle('active', next);
         });
         linkifyRow.appendChild(linkifyToggle);
+        const nbSeekTg = document.createElement('button');   // (Seeking on the Neoboards — off on its own, Seeking itself stays)
+        nbSeekTg.type = 'button'; nbSeekTg.id = 'dti-nbseek-toggle';
+        nbSeekTg.className = 'dti-toggle-row' + (GM_getValue('dti_nb_seek', true) !== false ? ' active' : '');
+        nbSeekTg.innerHTML = '<span class="dti-toggle-txt"><b>Seeking on the Neoboards</b><small>By each DTI link in a post: what they have from your Seeking list and wishlist, and what they want that you have \u2014 and the items you\u2019re seeking marked in posts</small></span><span class="dti-ts"></span>';
+        nbSeekTg.addEventListener('click', () => {
+            const next = GM_getValue('dti_nb_seek', true) === false;
+            GM_setValue('dti_nb_seek', next);
+            nbSeekTg.classList.toggle('active', next);
+        });
+        linkifyRow.appendChild(nbSeekTg);
 
         const npFabToggle = document.createElement('button');
         npFabToggle.id = 'dti-np-fab-toggle';
@@ -17428,7 +17813,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         panel.appendChild(makeSection('NC item values', TP_ICO.caps,      ncValBody,   'dti_sec_ncval',   false));
         panel.appendChild(makeSection('Zoom',           TP_ICO.zoom,      zoomBody,    'dti_sec_zoom',    false));
         panel.appendChild(makeSection('Neopets',        TP_ICO.link,      linkifyBody, 'dti_sec_linkify', false));
-        // Features: whole parts of DTI Enhance you can turn off (user asked, for Seeking)
+        // Features: whole parts of DTI Enhance you can turn off (user asked: Seeking; the editor's Wearing row)
         const featBody = document.createElement('div'); featBody.className = 'dti-tp-section-body';
         const featList = document.createElement('div'); featList.className = 'dti-toggle-list';
         const seekTg = document.createElement('button');
@@ -17442,6 +17827,17 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             seekApplyOnOff();
         });
         featList.appendChild(seekTg);
+        const wbTg = document.createElement('button');
+        wbTg.type = 'button'; wbTg.id = 'dti-wearbar-on-toggle';
+        wbTg.className = 'dti-toggle-row' + (GM_getValue('dti_ed_wearbar_on', true) !== false ? ' active' : '');
+        wbTg.innerHTML = '<span class="dti-toggle-txt"><b>Wearing row</b><small>In the customs editor, while you search: what the custom has on, in a row under the search. Off: the row goes</small></span><span class="dti-ts"></span>';
+        wbTg.addEventListener('click', () => {
+            const next = GM_getValue('dti_ed_wearbar_on', true) === false;
+            GM_setValue('dti_ed_wearbar_on', next);
+            wbTg.classList.toggle('active', next);
+        });
+        if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('dti_ed_wearbar_on', (k, o, v) => wbTg.classList.toggle('active', v !== false));   // (its × in the editor)
+        featList.appendChild(wbTg);
         featBody.appendChild(featList);
         panel.appendChild(makeSection('Features', '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="1.5" y="3" width="13" height="4" rx="2"/><circle cx="11.5" cy="5" r="1.1" fill="currentColor"/><rect x="1.5" y="9" width="13" height="4" rx="2"/><circle cx="4.5" cy="11" r="1.1" fill="currentColor"/></svg>', featBody, 'dti_sec_features', false));
         // Backup: one file with everything kept in this browser — save it now and then, restore it here or anywhere
@@ -19474,6 +19870,41 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const footer  = document.getElementById('footer');
         if (contrib && footer) footer.before(contrib);
 
+        // Card titles whole in every theme (user: "the word CUSTOMS is being cut off by many themes" — Customs has a count and
+        // four buttons in the narrow column): fitted again as a header's counts or buttons change, fonts load, the theme or the window
+        const inHead = n => (n.nodeType === 1 ? n : n.parentElement)?.closest('.dti-hc-head');
+        new MutationObserver(ms => { if (ms.some(m => inHead(m.target) || [...m.addedNodes].some(n => n.nodeType === 1 && (n.matches('.dti-hc-head') || n.querySelector('.dti-hc-head'))))) fitHcTitlesSoon(); })
+            .observe(homeGrid, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden'] });
+        if (!window._dtiHcFit) {
+            window._dtiHcFit = true;
+            document.fonts?.addEventListener('loadingdone', fitHcTitlesSoon);
+            addEventListener('resize', fitHcTitlesSoon);
+            new MutationObserver(fitHcTitlesSoon).observe(document.documentElement, { attributes: true, attributeFilter: ['data-dti-theme', 'data-dti-font', 'data-style'] });
+        }
+        fitHcTitlesSoon();
+    }
+
+    // A home card's title that doesn't fit its header (a theme's font a little wide for it): its letter-spacing, then its size,
+    // come down just enough — the rest are left as their theme has them
+    function fitHcTitlesSoon() {
+        if (fitHcTitlesSoon.raf) return;
+        fitHcTitlesSoon.raf = requestAnimationFrame(() => {
+            fitHcTitlesSoon.raf = 0;
+            // (how far its words run past its box: a fraction of a pixel is enough for "…" — and whole-pixel widths round it away)
+            const over = t => {
+                const r = document.createRange(), cs = getComputedStyle(t), px = k => parseFloat(cs[k]) || 0;
+                r.selectNodeContents(t);
+                return r.getBoundingClientRect().width - (t.getBoundingClientRect().width - px('paddingLeft') - px('paddingRight') - px('borderLeftWidth') - px('borderRightWidth'));
+            };
+            document.querySelectorAll('#dti-home-grid .dti-hc-title').forEach(t => {
+                t.style.removeProperty('letter-spacing'); t.style.removeProperty('font-size');
+                if (!t.clientWidth || over(t) <= .005) return;
+                const cs = getComputedStyle(t);
+                let ls = parseFloat(cs.letterSpacing) || 0, fs = parseFloat(cs.fontSize);
+                while (over(t) > .005 && ls > 0) t.style.setProperty('letter-spacing', (ls = Math.max(0, ls - .25)) + 'px', 'important');
+                while (over(t) > .005 && fs > 8) t.style.setProperty('font-size', (fs -= .5) + 'px', 'important');
+            });
+        });
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -19485,9 +19916,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         if (!window._dtiClosetCSSInjected) {
             window._dtiClosetCSSInjected = true;
             // Native Windows grab cursor has a faint grey outline that vanishes on white — draw our own like the pointer hand
-            const cursorSvg = d => `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='white' stroke='black' stroke-width='1.6' stroke-linejoin='round' stroke-linecap='round'%3E${d}%3C/svg%3E") 12 12`;
-            const GRAB_CURSOR = cursorSvg("%3Cpath d='M6 14V6A2 2 0 0 1 10 6V4A2 2 0 0 1 14 4V6A2 2 0 0 1 18 6V8A2 2 0 0 1 22 8V14A8 8 0 0 1 14 22H12C9.2 22 7.5 21.14 6.01 19.66L2.41 16.06A2 2 0 0 1 5.24 13.24L7 15Z'/%3E%3Cpath fill='none' d='M10 6V10.5M14 6V10M18 8V11'/%3E") + ', grab';
-            const GRABBING_CURSOR = cursorSvg("%3Cpath d='M6 14V9A2 2 0 0 1 10 9V8A2 2 0 0 1 14 8V9A2 2 0 0 1 18 9V11A2 2 0 0 1 22 11V14A8 8 0 0 1 14 22H10A8 8 0 0 1 2 14A2 2 0 0 1 6 14Z'/%3E%3Cpath fill='none' d='M10 9V10.5M14 9V10.5M18 11V12'/%3E") + ', grabbing';
+            const GRAB_CURSOR = dtiGrabCursor(), GRABBING_CURSOR = dtiGrabCursor(true);
             GM_addStyle(`
             /* ── Non-selectable chrome ───────────────────────────────────────── */
             #dti-closet-header, #dti-closet-left, #dti-closet-right,
@@ -22492,8 +22921,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (!entries.length) return;
             const partial = entries.filter(e => e.n < e.item.qty);
             const delBtn = document.getElementById('dti-bulk-delete');
-            if (!confirm(`Remove ${entries.length} item${entries.length !== 1 ? 's' : ''} from your closet?`
-                + (partial.length ? `\n${partial.length} of them will only have the chosen quantity removed.` : ''))) return;
+            if (!await dtiConfirm(`Remove ${entries.length} item${entries.length !== 1 ? 's' : ''} from your closet?`
+                + (partial.length ? `\n${partial.length} of them will only have the chosen quantity removed.` : ''), { ok: 'Remove', danger: true })) return;
             delBtn.disabled = true;
             const ids = entries.filter(e => e.n >= e.item.qty).map(e => e.item.hangerId);
             // Partial: just lower the quantity on the existing hanger
@@ -23070,7 +23499,50 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
         } catch (_) {}
 
-        left.addEventListener('click', e => {
+        // Your Seeking list on someone else's page (user asked): which of it they have in their lists — a click on one jumps to it (its
+        // list shown first if it wasn't; again: its next copy), flashed. It follows your list as it changes.
+        if (!isOwnPage) {
+            const skBar = document.createElement('div');
+            skBar.id = 'dti-seek-theirs'; skBar.hidden = true;
+            document.getElementById('dti-closet-center-header')?.after(skBar);
+            const idOf = i => String(i.itemId || i.href?.match(/\/items\/(\d+)/)?.[1] || '');
+            const jumped = new Map();
+            const paintSeekTheirs = () => {
+                const seek = seekOn() ? DTISeek.list() : [];
+                skBar.hidden = !seek.length;
+                if (!seek.length) return;
+                const have = seek.filter(e => sections.owned.some(l => l.items.some(i => idOf(i) === String(e.id))));
+                skBar.classList.toggle('none', !have.length);
+                skBar.innerHTML = `<span class="dti-skt-h">${SEEK_ICO}${have.length ? `<b>${have.length} from your Seeking list</b> in ${noteEsc(theirDisplayName)}\u2019s lists` : `None of your Seeking list in ${noteEsc(theirDisplayName)}\u2019s lists`}</span>`
+                    + have.map(e => `<button type="button" class="dti-skt-i" data-id="${noteEsc(e.id)}" title="Jump to it in their lists">${e.img ? `<img src="${noteEsc(e.img)}" alt="" loading="lazy">` : ''}<span>${noteEsc(e.name || 'Item ' + e.id)}</span></button>`).join('');
+            };
+            function jumpToItem(id) {   // (its list shown if none showing has it — theirs first, then their wishlists; again: its next copy)
+                if (!activeItems.some(i => idOf(i) === id)) {
+                    for (const sec of ['owned', 'wanted']) {
+                        const idx = sections[sec].findIndex(l => l.items.some(i => idOf(i) === id));
+                        const card = idx < 0 ? null : document.querySelector(`.dti-list-card[data-section="${sec}"][data-list-idx="${idx}"]`);
+                        if (card) { card.classList.add('active'); activeLists.push({ lst: sections[sec][idx], section: sec }); syncActiveItems(); updateCenterTitle(); renderGrid(); break; }
+                    }
+                }
+                flushGrid();   // (every card drawn — the far ones too)
+                const cards = [...document.querySelectorAll(`#dti-item-grid .dti-item-card[data-seek-id="${CSS.escape(id)}"]`)];
+                if (!cards.length) return dtiToast('It\u2019s hidden by your search or filters here \u2014 clear them to see it');
+                const n = ((jumped.get(id) ?? -1) + 1) % cards.length, card = cards[n];
+                jumped.set(id, n);
+                card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                document.querySelectorAll('.dti-item-card.dti-flash').forEach(c => c.classList.remove('dti-flash'));
+                void card.offsetWidth; card.classList.add('dti-flash');
+                setTimeout(() => card.classList.remove('dti-flash'), 2000);
+            }
+            skBar.addEventListener('click', e => { const b = e.target.closest('.dti-skt-i'); if (b) jumpToItem(b.dataset.id); });
+            // (a link from the Neoboards' Seeking button: #dti-jump=<item id>)
+            const jm = location.hash.match(/^#dti-jump=(\d+)$/);
+            if (jm) setTimeout(() => jumpToItem(jm[1]), 400);
+            paintSeekTheirs();
+            if (typeof GM_addValueChangeListener === 'function') ['dti_seeking', 'dti_seek_on'].forEach(k => GM_addValueChangeListener(k, paintSeekTheirs));
+        }
+
+        left.addEventListener('click', async e => {
             // Scroll-to button — jump to this list's group header in the center panel
             const scrollBtn = e.target.closest('.dti-list-scroll-btn');
             if (scrollBtn) {
@@ -23129,7 +23601,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 const name = delBtn.dataset.name || 'this list';
                 const url  = delBtn.dataset.url;
                 if (!url) return;
-                if (!confirm(`Delete "${name}" and all its items? This cannot be undone.`)) return;
+                if (!(await dtiConfirm('It and all its items go \u2014 this can\u2019t be undone.', { title: `Delete \u201c${name}\u201d?`, ok: 'Delete', danger: true }))) return;
                 delBtn.disabled = true; delBtn.textContent = '…';
                 fetch(url, {
                     method: 'POST', credentials: 'same-origin',
@@ -23302,8 +23774,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     }
                     syncActiveItems();
                     document.getElementById('dti-center-count').textContent = `${activeItems.length} item${activeItems.length !== 1 ? 's' : ''}`;
-                } else { removeBtn.disabled = false; removeBtn.textContent = '✕'; }
-            }).catch(() => { removeBtn.disabled = false; removeBtn.textContent = '✕'; });
+                } else { removeBtn.disabled = false; removeBtn.textContent = '✕'; dtiToast('Couldn\u2019t remove it \u2014 try again', { variant: 'error' }); }
+            }).catch(() => { removeBtn.disabled = false; removeBtn.textContent = '✕'; dtiToast('Couldn\u2019t remove it \u2014 try again', { variant: 'error' }); });
         });
 
         // ── Upgrade native selects to custom themed dropdowns ────────────────
@@ -23352,10 +23824,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
         document.getElementById('dti-copy-url-btn')?.addEventListener('click', e => {
             const btn = e.currentTarget;
-            navigator.clipboard.writeText(pubUrl).then(() => {
+            dtiCopyText(pubUrl, () => {
                 btn.textContent = 'Copied!';
                 setTimeout(() => { btn.textContent = 'Copy'; }, 1800);
-            }).catch(() => {});
+            });
         });
 
         // List Visibility: an option applies to every selected list that isn't set to it yet
@@ -24143,8 +24615,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
         async function runGalleryImport(names, listId) {
             const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
-            if (!csrf) { alert('Session error — please reload and try again.'); return; }
-            if (!userSlug) { alert('Could not determine your DTI user. Please go back to My Items first.'); return; }
+            if (!csrf) { dtiAlert('Session error \u2014 please reload and try again.'); return; }
+            if (!userSlug) { dtiAlert('Could not determine your DTI user. Please go back to My Items first.'); return; }
 
             const submitBtn = form.querySelector('input[type="submit"], button[type="submit"]');
             if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Importing…'; }
@@ -24210,7 +24682,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
             const names = parseGalleryNames(html);
             if (!names.length) {
-                alert('No item names found in the pasted HTML. Make sure you pasted the complete page source of your Neopets gallery.');
+                dtiAlert('No item names found in the pasted HTML. Make sure you pasted the complete page source of your Neopets gallery.', { title: 'Nothing to import' });
                 return;
             }
 
@@ -24573,8 +25045,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 .dti-osec-empty.drop { border-color: var(--accent); background: var(--accent-glow); color: var(--accent-text, var(--accent)); }
                 .dti-osec-hint { padding: 12px 16px; border-radius: 12px; background: var(--accent-glow); font-size: 12.5px; color: var(--text-muted); }
                 .dti-osec-hint b { color: var(--text); }
-                ul#outfits.dti-osec-on > li[draggable="true"] { cursor: grab; }
+                ul#outfits.dti-osec-on > li[draggable="true"] { cursor: ${dtiGrabCursor()}; }
                 ul#outfits > li.dti-osec-lift { opacity: .45; }
+                /* (a section's heading: a grip on hover to drag it; while dragged, dimmed — a line where it will land) */
+                .dti-osec-h { position: relative; }
+                .dti-osec-grip { position: absolute; left: -15px; top: 50%; width: 10px; height: 16px; margin-top: -8px; cursor: ${dtiGrabCursor()}; opacity: 0; transition: opacity .12s;
+                    background: radial-gradient(circle, var(--text-muted) 1.1px, transparent 1.6px) 0 0 / 5px 5px; }
+                .dti-osec-h:hover .dti-osec-grip { opacity: .8; }
+                ul#outfits > .dti-osec-h.dti-osec-hlift { opacity: .45; }
+                .dti-osec-ins { position: absolute; left: -4px; right: -4px; height: 3px; z-index: 6; pointer-events: none; border-radius: 3px; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+                .dti-osec-ins[hidden] { display: none; }
                 ul#outfits .dti-oc-sec {
                     position: absolute; z-index: 2; right: 8px; top: calc(100cqi - 8px - clamp(24px, 13cqi, 32px));
                     width: clamp(24px, 13cqi, 32px); height: clamp(24px, 13cqi, 32px); padding: 0; box-sizing: border-box; display: grid; place-items: center;
@@ -24603,12 +25083,66 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 .dti-osec-pop button.danger { color: var(--danger, #e5484d); }
                 .dti-osec-pop hr { margin: 4px 2px; border: none; border-top: 1px solid var(--border); }
                 .dti-osec-pop input { margin: 2px; padding: 6px 8px !important; border-radius: 8px !important; font-family: inherit; font-size: 13px !important; }
+                /* Dragging into a section: its whole stretch lit, and where it goes */
+                ul#outfits { position: relative; }
+                .dti-osec-zone { position: absolute; left: -8px; right: -8px; z-index: 5; pointer-events: none; border: 2px dashed var(--accent); border-radius: 16px; background: color-mix(in srgb, var(--accent) 7%, transparent); }
+                .dti-osec-zone[hidden] { display: none; }
+                .dti-osec-zone::after { content: attr(data-label); position: absolute; right: 12px; bottom: 10px; padding: 4px 12px; border-radius: 99px; background: var(--accent); color: var(--accent-fg, #fff); font-size: 12px; font-weight: 700; white-space: nowrap; box-shadow: var(--shadow-md, 0 4px 14px rgba(0,0,0,.2)); }
+                /* Select: a tick on each custom, the bar at the bottom */
+                .dti-op-select { height: 38px; padding: 0 14px; flex-shrink: 0; border-radius: 11px; border: 1.5px solid var(--border); background: var(--surface); color: var(--text-muted); font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+                .dti-op-select:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+                .dti-op-select.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg, #fff); }
+                .dti-osel-ck { display: none; }
+                ul#outfits.dti-osel-on > li { cursor: pointer; }
+                ul#outfits.dti-osel-on :is(.dti-oc-acts, .outfit-star, .dti-oc-sec) { display: none !important; }
+                ul#outfits.dti-osel-on .dti-osel-ck {
+                    position: absolute; top: 8px; left: 8px; z-index: 3; width: 26px; height: 26px; box-sizing: border-box; display: grid; place-items: center;
+                    border-radius: 50%; border: 2px solid #fff; background: rgba(15,15,20,.42); box-shadow: 0 1px 4px rgba(0,0,0,.35);
+                }
+                ul#outfits.dti-osel-on > li.dti-osel { outline: 3px solid var(--accent); outline-offset: -1px; }
+                ul#outfits.dti-osel-on > li.dti-osel .dti-osel-ck { background: var(--accent); border-color: var(--accent); }
+                ul#outfits.dti-osel-on > li.dti-osel .dti-osel-ck::after { content: ''; width: 10px; height: 5px; margin-top: -3px; border: solid var(--accent-fg, #fff); border-width: 0 0 2.5px 2.5px; transform: rotate(-45deg); }
+                .dti-osel-bar {
+                    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 10055; max-width: calc(100vw - 24px); box-sizing: border-box;
+                    display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px 8px 16px; border-radius: 14px;
+                    background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,.25)); color: var(--text); font-size: 13px;
+                }
+                .dti-osel-bar[hidden] { display: none; }
+                .dti-osel-bar .n { margin-right: 6px; font-weight: 800; white-space: nowrap; }
+                .dti-osel-bar button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-family: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+                .dti-osel-bar button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+                .dti-osel-bar button:disabled { opacity: .45; cursor: default; }
+                .dti-osel-bar .mv { background: var(--accent); border-color: var(--accent); color: var(--accent-fg, #fff); }
+                .dti-osel-bar .mv:hover:not(:disabled) { color: var(--accent-fg, #fff); filter: brightness(1.08); }
+                .dti-osel-bar svg { width: 14px; height: 14px; }
+                /* Quick new: the button, its form, the new tile glowing a moment */
+                .dti-op-quick { height: 34px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; border-radius: 10px; border: 1.5px dashed var(--accent); background: transparent; color: var(--accent-text, var(--accent)); font-family: inherit; font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; transition: background .13s, color .13s; }
+                .dti-op-quick:hover, .dti-op-quick.open { border-style: solid; background: var(--accent); color: var(--accent-fg, #fff); }
+                .dti-op-quick svg { width: 13px; height: 13px; }
+                .dti-oq-pop { position: fixed; z-index: 10060; width: 300px; max-width: calc(100vw - 16px); box-sizing: border-box; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,.25)); color: var(--text); font-size: 13px; }
+                .dti-oq-h { font-size: 14px; font-weight: 800; }
+                .dti-oq-pop input[type="text"] { width: 100% !important; height: 34px !important; box-sizing: border-box !important; margin: 0 !important; padding: 0 10px !important; border-radius: 9px !important; font-family: inherit; font-size: 13.5px !important; }
+                .dti-oq-pop input[hidden] { display: none !important; }
+                .dti-oq-row { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--text-muted); }
+                .dti-oq-row select { flex: 1 1 auto !important; min-width: 0 !important; width: auto !important; height: 32px !important; box-sizing: border-box !important; margin: 0 !important; padding: 0 8px !important; border-radius: 9px !important; font-family: inherit; font-size: 13px !important; }
+                .dti-oq-note { margin: 0; font-size: 11.5px; color: var(--text-muted); }
+                .dti-oq-foot { display: flex; align-items: center; gap: 8px; }
+                .dti-oq-st { flex: 1; font-size: 12px; color: var(--text-muted); }
+                .dti-oq-st.err { color: var(--danger, #e5484d); }
+                .dti-oq-ok { height: 32px; padding: 0 16px; border: none; border-radius: 9px; background: var(--accent); color: var(--accent-fg, #fff); font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+                .dti-oq-ok:disabled { opacity: .55; cursor: default; }
+                ul#outfits > li.dti-oc-new { animation: dti-oc-new 2.4s ease-out; }
+                @keyframes dti-oc-new { 0%, 35% { box-shadow: 0 0 0 4px var(--accent), var(--shadow-lg); } 100% { box-shadow: var(--shadow-sm); } }
                 @container (max-width: 170px) {
                     .dti-oc-acts, ul#outfits .outfit-star { top: 5px; }
                     ul#outfits .dti-oc-sec { right: 5px; top: calc(100cqi - 5px - clamp(24px, 13cqi, 32px)); }
                     .dti-oc-acts { right: 5px; gap: 3px; }
                     ul#outfits .outfit-star { left: 5px; }
                     .dti-oc-acts .outfit-edit-link, .dti-oc-acts .dti-oc-copy { display: none; }   /* the picture opens the editor anyway */
+                }
+                @container (max-width: 120px) {   /* (12 a row: only Delete up top, clear of the star) */
+                    .dti-oc-acts :is(.dti-outfit-popup-btn, .dti-oc-shop) { display: none; }
+                    ul#outfits header { padding: 6px 8px; }
                 }
                 @media (max-width: 640px) { ul#outfits { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px; } }
             `);
@@ -24629,7 +25163,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const outfitId = li => li.querySelector('a[href*="/outfits/"]')?.getAttribute('href')?.match(/\/outfits\/(\d+)/)?.[1];
         const nameOf = li => (li.querySelector('.outfit-name')?.textContent || '').trim().toLowerCase();
         const items = [...list.querySelectorAll(':scope > li')];
-        const total = items.length;
+        let total = items.length;   // (a quick new custom adds one)
         const plural = n => `${n} custom${n !== 1 ? 's' : ''}`;
 
         // ── Header ──
@@ -24637,7 +25171,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const head = document.createElement('div'); head.id = 'dti-op-head';
         head.innerHTML = `<span class="dti-op-ico">${NOTE_ITEM}</span><span class="dti-op-count">${total}</span>
             <a class="dti-op-new" href="/outfits/new" title="Start a new blank custom">＋ New custom</a>
-            <button type="button" class="dti-op-newpop" title="Start a new blank custom in the popup editor">${POPUP_ICO}Popup</button>`;
+            <button type="button" class="dti-op-newpop" title="Start a new blank custom in the popup editor">${POPUP_ICO}Popup</button>
+            <button type="button" class="dti-op-quick" title="A new custom from just its name \u2014 a Blue Acara, made here without leaving the page" aria-haspopup="dialog">${ICO.plus}Quick new</button>`;
         if (titleEl) { titleEl.textContent = 'Your Customs'; head.insertBefore(titleEl, head.querySelector('.dti-op-count')); }
         head.querySelector('.dti-op-newpop').addEventListener('click', () => _openOutfitModal(null, 'New custom', '/outfits/new'));
         list.before(head);
@@ -24665,15 +25200,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
         // ── Toolbar: search · sort · customs per row · count ──
         const toolbar = document.createElement('div'); toolbar.id = 'dti-outfits-toolbar';
-        const cols = Math.min(10, Math.max(2, parseInt(GM_getValue('dti_outfits_cols', 5), 10) || 5));
+        const cols = Math.min(12, Math.max(2, parseInt(GM_getValue('dti_outfits_cols', 5), 10) || 5));
         toolbar.innerHTML = `
             <label class="dti-op-search">${NAV_ICON_SEARCH}<input type="search" id="dti-os" placeholder="Search customs…" autocomplete="off"><kbd title="Press / to search">/</kbd></label>
             <div class="dti-op-view" role="group" aria-label="Show"><button type="button" data-v="all" title="All your customs">All</button><button type="button" data-v="sec" title="Your customs in the sections you make">Sections</button></div>
             <button type="button" class="dti-op-secadd" title="New section" aria-label="New section" hidden>${ICO.plus}</button>
+            <button type="button" class="dti-op-select" aria-pressed="false" title="Select customs \u2014 to put several in a section at once">Select</button>
             <select id="dti-osort" title="Sort">
                 <option value="">Default order</option><option value="az">A → Z</option><option value="za">Z → A</option><option value="fav">Favorites first</option>
             </select>
-            <div class="dti-op-cols" title="Customs per row">${ICO.cols}<input type="range" id="dti-ocols" min="2" max="10" step="1" value="${cols}"><b id="dti-ocols-n">${cols}</b></div>
+            <div class="dti-op-cols" title="Customs per row">${ICO.cols}<input type="range" id="dti-ocols" min="2" max="12" step="1" value="${cols}"><b id="dti-ocols-n">${cols}</b></div>
             <span id="dti-outfit-count">${plural(total)}</span>`;
         (document.getElementById('dti-intro-wrap') || head).after(toolbar);
         makeCustomSelect(toolbar.querySelector('#dti-osort'), {});
@@ -24686,7 +25222,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         toolbar.querySelector('#dti-ocols').addEventListener('change', e => GM_setValue('dti_outfits_cols', parseInt(e.target.value, 10)));   // (saved when you let go)
 
         // ── Cards ──
-        items.forEach(li => {
+        function enhanceCard(li) {
             const id = outfitId(li);
             const altsN = id ? DTIAlts.count(id) : 0;   // (alternate outfits kept in it — switched between in the editor)
             if (altsN) li.querySelector('header')?.insertAdjacentHTML('beforeend', `<span class="dti-oc-alts" title="${altsN} outfits in this custom \u2014 switch between them in the editor">${ALT_ICO}${altsN}</span>`);
@@ -24733,10 +25269,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 copy.innerHTML = ICO.link;
                 copy.addEventListener('click', e => {
                     e.preventDefault(); e.stopPropagation();
-                    navigator.clipboard.writeText(`https://impress.openneo.net/outfits/${id}`).then(() => {
+                    dtiCopyText(`https://impress.openneo.net/outfits/${id}`, () => {
                         copy.innerHTML = ICO.ok; copy.classList.add('dti-oc-ok'); copy.title = 'Copied!';
                         setTimeout(() => { copy.innerHTML = ICO.link; copy.classList.remove('dti-oc-ok'); copy.title = 'Copy link'; }, 1400);
-                    }).catch(() => {});
+                    });
                 });
                 acts.appendChild(copy);
                 const shop = document.createElement('button');
@@ -24757,7 +25293,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const del = footer?.querySelector('form.button_to');
             const delBtn = del?.querySelector('.outfit-delete-button');
             if (delBtn) { delBtn.innerHTML = NOTE_TRASH; delBtn.title = 'Delete'; delBtn.setAttribute('aria-label', 'Delete'); acts.appendChild(del); }
-            if (id) del?.addEventListener('submit', () => { if (DTIAlts.count(id)) DTIAlts.put(id, null); osecForget(id); });   // (its alternate outfits and its section go with it)
+            if (id) del?.addEventListener('turbo:submit-end', e => {   // (its alternate outfits and its section go with it — once it's really deleted)
+                if (e.detail?.success === false) return;
+                if (DTIAlts.count(id)) DTIAlts.put(id, null);
+                osecForget(id);
+            });
             li.appendChild(acts);
             if (id) {   // (put it in a section: the picture's lower right, on hover)
                 const sb = document.createElement('button');
@@ -24790,13 +25330,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         const n = inp.value.trim() || nameEl.textContent.trim();
                         const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
                         if (csrf && n !== nameEl.textContent.trim()) {
-                            await fetch(`/outfits/${id}`, {
+                            const r = await fetch(`/outfits/${id}`, {
                                 method: 'POST', credentials: 'same-origin',
                                 headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': csrf },
                                 body: `_method=PATCH&outfit%5Bname%5D=${encodeURIComponent(n)}&authenticity_token=${encodeURIComponent(csrf)}`,
-                            }).catch(() => {});
-                            nameEl.textContent = n;
-                            nameEl.title = `${n} — double-click to rename`;
+                            }).catch(() => null);
+                            if (r?.ok) {
+                                nameEl.textContent = n;
+                                nameEl.title = `${n} — double-click to rename`;
+                            } else dtiToast('Couldn\u2019t rename it \u2014 try again', { variant: 'error' });
                         }
                         inp.replaceWith(nameEl);
                     };
@@ -24807,7 +25349,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     });
                 });
             }
-        });
+        }
+        items.forEach(enhanceCard);
 
         // ── Search + sort ──
         function refresh() {
@@ -24836,7 +25379,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     const h = document.createElement('div');
                     h.className = 'dti-osec-h' + (shut ? ' shut' : ''); h.dataset.sec = g.id; h.style.order = base; h.hidden = !!q && !hits.length;
                     h.setAttribute('role', 'heading'); h.setAttribute('aria-level', '2');
-                    h.innerHTML = `<button type="button" class="dti-osec-fold" aria-expanded="${!shut}" title="${shut ? 'Unfold' : 'Fold'}">${ICO.chev}</button>`
+                    h.draggable = true;   // (a section's place — Not in a section's too: drag its heading)
+                    h.innerHTML = '<i class="dti-osec-grip" title="Drag to move this section" aria-hidden="true"></i>'
+                        + `<button type="button" class="dti-osec-fold" aria-expanded="${!shut}" title="${shut ? 'Unfold' : 'Fold'}">${ICO.chev}</button>`
                         + `<b class="dti-osec-name"${g.id ? ' title="Double-click to rename"' : ''}>${noteEsc(g.name)}</b>`
                         + `<span class="dti-osec-n">${q ? `${hits.length} of ${lis.length}` : lis.length}</span><i class="dti-osec-line"></i>`
                         + (g.id ? '<button type="button" class="dti-osec-more" title="Section options" aria-label="Section options" aria-haspopup="menu">\u22ef</button>' : '');
@@ -24880,12 +25425,17 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             toolbar.querySelectorAll('.dti-op-view button').forEach(b => { const on = b.dataset.v === OSD.view; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
             toolbar.querySelector('.dti-op-secadd').hidden = OSD.view !== 'sec';
         }
-        function moveTo(id, sid, quiet) {
-            const was = OSD.of[id] || '';
-            if (was === sid) return;
-            if (sid) OSD.of[id] = sid; else delete OSD.of[id];
+        function moveMany(ids, sid, quiet) {   // (one or several into a section — or out of theirs; Undo puts each back where it was)
+            const was = ids.map(id => [id, OSD.of[id] || '']).filter(([, s0]) => s0 !== sid);
+            if (!was.length) return;
+            was.forEach(([id]) => { if (sid) OSD.of[id] = sid; else delete OSD.of[id]; });
             osecSave(); refresh();
-            if (!quiet) dtiToast(sid ? `Moved to \u201c${secName(sid)}\u201d` : 'Taken out of its section', { undo: () => moveTo(id, was, true) });
+            if (quiet) return;
+            const n = was.length === 1 ? '' : `${was.length} customs `;
+            dtiToast(sid ? `Moved ${n}to \u201c${secName(sid)}\u201d` : `Took ${n || 'it '}out of ${was.length === 1 ? 'its section' : 'their sections'}`, { duration: 6000, undo: () => {
+                was.forEach(([id, s0]) => { if (s0) OSD.of[id] = s0; else delete OSD.of[id]; });
+                osecSave(); refresh();
+            } });
         }
         function newSection(name) {
             const sec = { id: 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: String(name || '').trim().slice(0, 60) || 'New section' };
@@ -24897,6 +25447,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (!sec || !nameEl) return;
             const inp = document.createElement('input');
             inp.type = 'text'; inp.className = 'dti-osec-ren'; inp.maxLength = 60; inp.value = sec.name; inp.setAttribute('aria-label', 'Section name');
+            h.draggable = false;   // (its words can be picked with the mouse while it's renamed)
             nameEl.replaceWith(inp); inp.focus(); inp.select();
             let done = false;
             const commit = keep => {
@@ -24949,10 +25500,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             document.addEventListener('keydown', popKey, true);
             pop.querySelector('button:not(:disabled)')?.focus({ preventScroll: true });
         }
-        function openPutMenu(sb) {   // (a custom's folder button: its section, another, none, or a new one named here)
-            const id = sb.dataset.id, cur = OSD.of[id] || '';
+        function openPutMenu(sb, ids) {   // (a custom's folder button, or the selection's Move: a section, none, or a new one named here)
+            const secs = new Set(ids.map(x => OSD.of[x] || '')), cur = secs.size === 1 ? [...secs][0] : null;
             const row = (sid, label) => `<button type="button" role="menuitemradio" aria-checked="${cur === sid}" data-sec="${sid}"><i>${cur === sid ? '\u2713' : ''}</i><span>${noteEsc(label)}</span></button>`;
-            popOpen(sb, '<div class="dti-osec-pop-h">Put in a section</div>' + OSD.list.map(x => row(x.id, x.name)).join('')
+            popOpen(sb, `<div class="dti-osec-pop-h">${ids.length > 1 ? `Put ${ids.length} customs in a section` : 'Put in a section'}</div>` + OSD.list.map(x => row(x.id, x.name)).join('')
                 + (OSD.list.length ? '<hr>' : '') + row('', 'Not in a section')
                 + '<button type="button" class="add"><i>\uff0b</i><span>New section\u2026</span></button>', b => {
                 if (b.classList.contains('add')) {
@@ -24963,42 +25514,40 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         if (e.key !== 'Enter' || !inp.value.trim()) return;
                         e.preventDefault();
                         const sec = newSection(inp.value);
-                        popClose(); moveTo(id, sec.id);
+                        popClose(); moveMany(ids, sec.id); afterMove();
                     });
                     return;
                 }
-                popClose(); moveTo(id, b.dataset.sec);
+                popClose(); moveMany(ids, b.dataset.sec); afterMove();
             });
         }
-        function openSecMenu(btn, sid) {   // (a section's ⋯: rename, move up / down, delete — with Undo)
-            const i = OSD.list.findIndex(x => x.id === sid);
+        function openSecMenu(btn, sid) {   // (a section's ⋯: rename, move up / down — past Not in a section too — delete, with Undo)
+            const i = OSD.list.findIndex(x => x.id === sid), keys = secKeys(), k = keys.indexOf(sid);
             if (i < 0) return;
             popOpen(btn, '<button type="button" data-do="ren"><i></i><span>Rename</span></button>'
-                + `<button type="button" data-do="up"${i === 0 ? ' disabled' : ''}><i>\u2191</i><span>Move up</span></button>`
-                + `<button type="button" data-do="down"${i === OSD.list.length - 1 ? ' disabled' : ''}><i>\u2193</i><span>Move down</span></button>`
+                + `<button type="button" data-do="up"${k === 0 ? ' disabled' : ''}><i>\u2191</i><span>Move up</span></button>`
+                + `<button type="button" data-do="down"${k === keys.length - 1 ? ' disabled' : ''}><i>\u2193</i><span>Move down</span></button>`
                 + '<hr><button type="button" data-do="del" class="danger"><i></i><span>Delete section</span></button>', b => {
                 popClose();
                 const act = b.dataset.do;
                 if (act === 'ren') { const h = list.querySelector(`:scope > .dti-osec-h[data-sec="${sid}"]`); if (h) renameSection(h); return; }
-                if (act === 'up' || act === 'down') {
-                    const j = i + (act === 'up' ? -1 : 1);
-                    [OSD.list[i], OSD.list[j]] = [OSD.list[j], OSD.list[i]];
-                    osecSave(); refresh();
-                    return;
-                }
+                if (act === 'up' || act === 'down') return moveSection(sid, act === 'up' ? keys[k - 1] : keys[k + 2] ?? null);
                 if (act !== 'del') return;
-                const sec = OSD.list[i], had = Object.keys(OSD.of).filter(k => OSD.of[k] === sid), wasShut = !!OSD.shut[sid];
-                OSD.list.splice(i, 1); had.forEach(k => delete OSD.of[k]); delete OSD.shut[sid];
+                const sec = OSD.list[i], had = Object.keys(OSD.of).filter(x => OSD.of[x] === sid), wasShut = !!OSD.shut[sid], noneWas = OSD.none;
+                OSD.list.splice(i, 1); had.forEach(x => delete OSD.of[x]); delete OSD.shut[sid];
+                if (noneWas != null && i < noneWas) OSD.none = noneWas - 1;   // (Not in a section keeps its place among the rest)
+                if (OSD.none >= OSD.list.length) delete OSD.none;
                 osecSave(); refresh();
                 dtiToast(`Deleted \u201c${sec.name}\u201d` + (had.length ? ` \u2014 ${had.length === 1 ? 'its custom is' : `its ${had.length} customs are`} back in Not in a section` : ''), { duration: 6000, undo: () => {
-                    OSD.list.splice(Math.min(i, OSD.list.length), 0, sec); had.forEach(k => { OSD.of[k] = sid; }); if (wasShut) OSD.shut[sid] = 1;
+                    OSD.list.splice(Math.min(i, OSD.list.length), 0, sec); had.forEach(x => { OSD.of[x] = sid; }); if (wasShut) OSD.shut[sid] = 1;
+                    if (noneWas == null) delete OSD.none; else OSD.none = noneWas;
                     osecSave(); refresh();
                 } });
             });
         }
         list.addEventListener('click', e => {
             const sb = e.target.closest('.dti-oc-sec');
-            if (sb) { e.preventDefault(); e.stopPropagation(); return pop && popFor === sb ? popClose() : openPutMenu(sb); }
+            if (sb) { e.preventDefault(); e.stopPropagation(); return pop && popFor === sb ? popClose() : openPutMenu(sb, [sb.dataset.id]); }
             const h = e.target.closest('.dti-osec-h');
             if (!h) return;
             if (e.target.closest('.dti-osec-fold')) {
@@ -25010,42 +25559,268 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (more) pop && popFor === more ? popClose() : openSecMenu(more, h.dataset.sec);
         });
         list.addEventListener('dblclick', e => { const n = e.target.closest('.dti-osec-h:not([data-sec=""]) .dti-osec-name'); if (n) renameSection(n.closest('.dti-osec-h')); });
-        // (dragging, in Sections: onto a section's heading, its empty space, or any custom in it)
-        let dragId = '';
+        // (dragging, in Sections — user asked: not just onto the heading line. Anywhere in a section's stretch of the page counts: its
+        // heading, its customs, the gaps between them, the room after its last row — lit as one box; near the window's top or bottom
+        // the page scrolls. A ticked custom brings the rest of the selection along.)
+        let dragIds = [], dragSid = null;
+        const zone = document.createElement('div');
+        zone.className = 'dti-osec-zone'; zone.hidden = true;
+        const heads = () => [...list.querySelectorAll(':scope > .dti-osec-h:not([hidden])')].map(h => ({ h, top: h.getBoundingClientRect().top })).sort((a, b) => a.top - b.top);
+        const secAt = y => { let sid = null; heads().forEach(x => { if (x.top <= y + 6) sid = x.h.dataset.sec; }); return sid; };
         const dropSec = e => {
             const t = e.target.closest?.('.dti-osec-h, .dti-osec-empty, ul#outfits > li');
-            if (!t || t.parentElement !== list) return null;
-            return t.matches('li') ? OSD.of[outfitId(t)] || '' : t.dataset.sec ?? null;
+            if (t && t.parentElement === list) return t.matches('li') ? OSD.of[outfitId(t)] || '' : t.dataset.sec ?? null;
+            return e.target === list || list.contains(e.target) ? secAt(e.clientY) : null;
         };
-        const markDrop = sid => list.querySelectorAll(':scope > :is(.dti-osec-h, .dti-osec-empty)').forEach(x => x.classList.toggle('drop', x.dataset.sec === sid));
-        const endDrag = () => { dragId = ''; markDrop(null); list.querySelectorAll(':scope > li.dti-osec-lift').forEach(li => li.classList.remove('dti-osec-lift')); };
+        function markDrop(sid) {
+            list.querySelectorAll(':scope > :is(.dti-osec-h, .dti-osec-empty)').forEach(x => x.classList.toggle('drop', x.dataset.sec === sid));
+            if (sid === dragSid) return;
+            dragSid = sid;
+            const hs = sid === null ? [] : heads(), i = hs.findIndex(x => x.h.dataset.sec === sid);
+            if (i < 0) { zone.hidden = true; return; }
+            const lr = list.getBoundingClientRect(), top = hs[i].top - lr.top - 8, bottom = (i + 1 < hs.length ? hs[i + 1].top - lr.top : lr.height) - 4;
+            if (zone.parentElement !== list) list.appendChild(zone);
+            zone.style.top = top + 'px'; zone.style.height = Math.max(48, bottom - top) + 'px';
+            zone.dataset.label = `Move ${dragIds.length > 1 ? dragIds.length + ' ' : ''}to \u201c${secName(sid)}\u201d`;
+            zone.hidden = false;
+        }
+        const autoScroll = e => { const edge = 80, v = e.clientY < edge ? -1 : e.clientY > innerHeight - edge ? 1 : 0; if (v) scrollBy(0, v * 16); };
+        // (a section's heading dragged — Not in a section's too (user asked): where it lands — before the first heading below the pointer,
+        // else last — shown by a line; dropped, the sections are in that order)
+        let dragSec = null;   // (the section being dragged: its id — '' for Not in a section)
+        const ins = document.createElement('div');
+        ins.className = 'dti-osec-ins'; ins.hidden = true;
+        function secLand(y) {   // → the heading it goes before (its section's id, '' for Not in a section — null: last)
+            const hs = heads().filter(x => x.h.dataset.sec !== dragSec), lr = list.getBoundingClientRect();
+            const nx = hs.find(x => y < x.top + x.h.offsetHeight / 2);
+            if (ins.parentElement !== list) list.appendChild(ins);
+            ins.style.top = ((nx ? nx.top : lr.bottom) - lr.top - 6) + 'px'; ins.hidden = false;
+            return nx ? nx.h.dataset.sec : null;
+        }
+        // (the sections in order with Not in a section among them — '' — where it was put, else last)
+        const secKeys = () => { const k = OSD.list.map(x => x.id); k.splice(Math.min(OSD.none ?? k.length, k.length), 0, ''); return k; };
+        function moveSection(sid, before) {
+            const keys = secKeys(), was = keys.join('|');
+            if (!keys.includes(sid) || before === sid) return;
+            keys.splice(keys.indexOf(sid), 1);
+            const at = before === null ? -1 : keys.indexOf(before);
+            keys.splice(at < 0 ? keys.length : at, 0, sid);
+            if (keys.join('|') === was) return;
+            const by = new Map(OSD.list.map(x => [x.id, x])), none = keys.indexOf('');
+            OSD.list = keys.filter(Boolean).map(k => by.get(k));
+            if (none >= OSD.list.length) delete OSD.none; else OSD.none = none;   // (last: kept last, as sections are added)
+            osecSave(); refresh();
+        }
+        const endDrag = () => {
+            dragIds = []; markDrop(null);
+            list.querySelectorAll(':scope > li.dti-osec-lift').forEach(li => li.classList.remove('dti-osec-lift'));
+            dragSec = null; ins.hidden = true;
+            list.querySelectorAll(':scope > .dti-osec-hlift').forEach(h => h.classList.remove('dti-osec-hlift'));
+            document.removeEventListener('dragover', autoScroll);
+        };
         list.addEventListener('dragstart', e => {
             if (OSD.view !== 'sec') return;
+            const hd = e.target.closest?.('ul#outfits > .dti-osec-h');
+            if (hd) {
+                dragSec = hd.dataset.sec || '';
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/x-dti-section', dragSec || 'none');
+                document.addEventListener('dragover', autoScroll);
+                requestAnimationFrame(() => { if (dragSec !== null) hd.classList.add('dti-osec-hlift'); });
+                return;
+            }
             const li = e.target.closest?.('ul#outfits > li'), id = li && outfitId(li);
             if (!id) return;
-            dragId = id;
+            dragIds = selOn && sel.has(id) ? [...sel] : [id];
             e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/x-dti-custom', id);
+            e.dataTransfer.setData('text/x-dti-custom', dragIds.join(','));
             const r = li.getBoundingClientRect();
             try { e.dataTransfer.setDragImage(li, e.clientX - r.left, e.clientY - r.top); } catch (_) {}
-            requestAnimationFrame(() => { if (dragId === id) li.classList.add('dti-osec-lift'); });
+            document.addEventListener('dragover', autoScroll);
+            const lift = new Set(dragIds);
+            requestAnimationFrame(() => { if (dragIds.length) items.forEach(x => { if (lift.has(outfitId(x))) x.classList.add('dti-osec-lift'); }); });
         });
         list.addEventListener('dragover', e => {
-            if (!dragId) return;
+            if (dragSec !== null) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; secLand(e.clientY); return; }
+            if (!dragIds.length) return;
             const sid = dropSec(e);
+            markDrop(sid);
             if (sid === null) return;
             e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-            markDrop(sid);
+        });
+        list.addEventListener('dragleave', e => {
+            if (list.contains(e.relatedTarget)) return;
+            if (dragIds.length) markDrop(null);
+            if (dragSec !== null) ins.hidden = true;
         });
         list.addEventListener('drop', e => {
-            if (!dragId) return;
-            const sid = dropSec(e), id = dragId;
+            if (dragSec !== null) {
+                e.preventDefault();
+                const sid = dragSec, before = secLand(e.clientY);
+                endDrag(); moveSection(sid, before);
+                return;
+            }
+            if (!dragIds.length) return;
+            const sid = dropSec(e), ids = dragIds;
             endDrag();
             if (sid === null) return;
             e.preventDefault();
-            moveTo(id, sid, true);
+            moveMany(ids, sid, ids.length === 1);   // (one: you see it move; several: a toast, with Undo)
+            afterMove();
         });
         list.addEventListener('dragend', endDrag);
+        // ── Select (user asked: several at once): a click ticks a custom — Shift ticks the run to it — and opens nothing; the bar at
+        // the bottom moves them, or picks them all; Done (or Esc) ends it ──
+        let selOn = false, selLast = null;
+        const sel = new Set(), selBtn = toolbar.querySelector('.dti-op-select');
+        const bar = document.createElement('div');
+        bar.className = 'dti-osel-bar'; bar.hidden = true; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Selected customs');
+        bar.innerHTML = `<b class="n">0 selected</b><button type="button" class="mv" aria-haspopup="menu">${ICO.folder}Move to section</button><button type="button" class="all">Select all</button><button type="button" class="clr">Clear</button><button type="button" class="done">Done</button>`;
+        document.body.appendChild(bar);
+        items.forEach(li => { if (outfitId(li)) li.insertAdjacentHTML('beforeend', '<span class="dti-osel-ck" aria-hidden="true"></span>'); });
+        const shownLis = () => items.filter(li => li.style.display !== 'none').sort((a, b) => (+a.style.order || 0) - (+b.style.order || 0));
+        function paintSel() {
+            items.forEach(li => { const on = sel.has(outfitId(li)); li.classList.toggle('dti-osel', on); if (selOn) li.setAttribute('aria-selected', String(on)); else li.removeAttribute('aria-selected'); });
+            bar.querySelector('.n').textContent = `${sel.size} selected`;
+            bar.querySelector('.mv').disabled = bar.querySelector('.clr').disabled = !sel.size;
+        }
+        function setSel(on) {
+            selOn = on; sel.clear(); selLast = null;
+            list.classList.toggle('dti-osel-on', on);
+            selBtn.classList.toggle('on', on); selBtn.setAttribute('aria-pressed', String(on)); selBtn.textContent = on ? 'Done' : 'Select';
+            bar.hidden = !on;
+            popClose();
+            paintSel();
+        }
+        function afterMove() { if (selOn) { sel.clear(); selLast = null; paintSel(); } }
+        selBtn.addEventListener('click', () => setSel(!selOn));
+        list.addEventListener('click', e => {
+            if (!selOn) return;
+            const li = e.target.closest('ul#outfits > li'), id = li && outfitId(li);
+            if (!id || li.parentElement !== list) return;
+            e.preventDefault(); e.stopPropagation();
+            if (e.shiftKey && selLast) {
+                const vis = shownLis().map(outfitId), a = vis.indexOf(selLast), b = vis.indexOf(id);
+                if (a >= 0 && b >= 0) vis.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(x => sel.add(x));
+            } else if (sel.has(id)) sel.delete(id);
+            else sel.add(id);
+            selLast = id;
+            paintSel();
+        }, true);
+        list.addEventListener('dblclick', e => { if (selOn && e.target.closest('ul#outfits > li')) { e.preventDefault(); e.stopPropagation(); } }, true);   // (no renaming while ticking)
+        bar.addEventListener('click', e => {
+            const b = e.target.closest('button');
+            if (!b || b.disabled) return;
+            if (b.classList.contains('done')) return setSel(false);
+            if (b.classList.contains('clr')) { sel.clear(); selLast = null; return paintSel(); }
+            if (b.classList.contains('all')) { shownLis().forEach(li => { const id = outfitId(li); if (id) sel.add(id); }); return paintSel(); }
+            if (b.classList.contains('mv')) return pop && popFor === b ? popClose() : openPutMenu(b, [...sel]);
+        });
+        // ── Quick new (user asked): a custom from just its name — a Blue Acara, nothing on — made here, in the section you pick ──
+        const quickBtn = head.querySelector('.dti-op-quick');
+        let qpop = null;
+        const qOut = e => { if (qpop && !qpop.contains(e.target) && !quickBtn.contains(e.target)) qClose(); };
+        const qKey = e => { if (e.key === 'Escape' && qpop) { e.stopPropagation(); qClose(); } };
+        function qClose() { qpop?.remove(); qpop = null; quickBtn.classList.remove('open'); document.removeEventListener('mousedown', qOut, true); document.removeEventListener('keydown', qKey, true); }
+        quickBtn.addEventListener('click', () => {
+            if (qpop) return qClose();
+            const last = GM_getValue('dti_oq_sec', ''), pre = OSD.list.some(x => x.id === last) ? last : '';
+            const pop = qpop = document.createElement('div');
+            pop.className = 'dti-oq-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Quick new custom');
+            pop.innerHTML = '<div class="dti-oq-h">Quick new custom</div>'
+                + '<input type="text" class="dti-oq-name" maxlength="80" placeholder="Its name" aria-label="Its name">'
+                + `<label class="dti-oq-row"><span>Section</span><select class="dti-oq-sec" aria-label="Section"><option value="">Not in a section</option>${OSD.list.map(x => `<option value="${x.id}"${x.id === pre ? ' selected' : ''}>${noteEsc(x.name)}</option>`).join('')}<option value="+">\uff0b New section\u2026</option></select></label>`
+                + '<input type="text" class="dti-oq-newsec" maxlength="60" placeholder="The new section\u2019s name" aria-label="The new section\u2019s name" hidden>'
+                + `<label class="dti-oq-row"><span>Pet</span><input type="text" class="dti-oq-pet" list="dti-oq-pets" maxlength="40" placeholder="One of yours \u2014 or a Blue Acara" aria-label="Based on one of your pets (its name)"></label>`
+                + `<datalist id="dti-oq-pets">${(GM_getValue('dti_recent_pets', []) || []).map(n => `<option value="${noteEsc(n)}"></option>`).join('')}</datalist>`
+                + '<p class="dti-oq-note">A Blue Acara with nothing on \u2014 dress it up whenever you like.</p>'
+                + '<div class="dti-oq-foot"><span class="dti-oq-st" aria-live="polite"></span><button type="button" class="dti-oq-ok">Make it</button></div>';
+            document.body.appendChild(pop);
+            quickBtn.classList.add('open');
+            const r = quickBtn.getBoundingClientRect();
+            pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + 'px';
+            pop.style.top = (r.bottom + 6) + 'px';
+            document.addEventListener('mousedown', qOut, true); document.addEventListener('keydown', qKey, true);
+            const nameIn = pop.querySelector('.dti-oq-name'), secSel = pop.querySelector('.dti-oq-sec'), newIn = pop.querySelector('.dti-oq-newsec');
+            const ok = pop.querySelector('.dti-oq-ok'), st = pop.querySelector('.dti-oq-st'), petIn = pop.querySelector('.dti-oq-pet'), noteEl = pop.querySelector('.dti-oq-note');
+            secSel.addEventListener('change', () => { newIn.hidden = secSel.value !== '+'; if (!newIn.hidden) newIn.focus(); });
+            petIn.addEventListener('input', () => {   // (a pet: its look, and its name if none is typed)
+                noteEl.textContent = petIn.value.trim() ? 'That pet\u2019s colors, pose and what it\u2019s wearing now \u2014 its name too, if you leave Its name empty.' : 'A Blue Acara with nothing on \u2014 dress it up whenever you like.';
+                nameIn.placeholder = petIn.value.trim() ? 'Its name (the pet\u2019s, if empty)' : 'Its name';
+            });
+            const make = async () => {
+                const pet = petIn.value.trim();
+                let name = nameIn.value.trim();
+                if (!name && !pet) return nameIn.focus();
+                let sid = secSel.value;
+                if (sid === '+') { const n = newIn.value.trim(); if (!n) return newIn.focus(); sid = newSection(n).id; }
+                ok.disabled = true; st.textContent = pet ? 'Looking up that pet\u2026' : 'Making it\u2026'; st.classList.remove('err');
+                // (a pet: DTI's own "load my pet" — it answers with a new custom of it, its look in the address; a name it can't find: its
+                // home page, saying so)
+                let bio = { species_id: 1, color_id: 8, pose: 'HAPPY_FEM' }, worn = [], closeted = [];
+                if (pet) {
+                    let u = null, said = '';
+                    try {
+                        const res = await fetch(`/pets/load?name=${encodeURIComponent(pet)}`, { credentials: 'same-origin' });
+                        const at = new URL(res.url);
+                        if (res.ok && /^\/(outfits\/new|wardrobe)/.test(at.pathname)) u = at.searchParams;
+                        else said = new DOMParser().parseFromString(await res.text(), 'text/html').querySelector('.flash, .alert, [class*="flash"]')?.textContent.trim() || '';
+                    } catch (_) {}
+                    if (qpop !== pop) return;
+                    if (!u?.get('species') || !u.get('color')) { st.textContent = said || 'Couldn\u2019t find that pet \u2014 check its name'; st.classList.add('err'); ok.disabled = false; return; }
+                    bio = { species_id: +u.get('species'), color_id: +u.get('color'), pose: u.get('pose') || 'HAPPY_FEM' };
+                    worn = u.getAll('objects[]').filter(x => /^\d+$/.test(x)).map(Number);
+                    closeted = u.getAll('closet[]').filter(x => /^\d+$/.test(x)).map(Number);
+                    name = name || u.get('name') || pet;
+                    const recent = [pet, ...(GM_getValue('dti_recent_pets', []) || [])].map(n => String(n || '').trim()).filter((n, i, a) => n && a.findIndex(m => m.toLowerCase() === n.toLowerCase()) === i).slice(0, 6);
+                    GM_setValue('dti_recent_pets', recent);
+                    st.textContent = 'Making it\u2026';
+                }
+                const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                let made = null;
+                try {
+                    const res = await fetch('/outfits.json', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+                        body: JSON.stringify({ outfit: { name, biology: bio, item_ids: { worn, closeted } } }) });
+                    if (res.ok) made = await res.json();
+                } catch (_) {}
+                if (qpop !== pop) return;
+                if (!made?.id) { st.textContent = 'Couldn\u2019t make it \u2014 try again'; st.classList.add('err'); ok.disabled = false; return; }
+                const id = String(made.id);
+                if (sid) OSD.of[id] = sid;
+                osecSave(); GM_setValue('dti_oq_sec', sid);
+                qClose();
+                await addCard(id);
+                dtiToast(`Made \u201c${made.name || name}\u201d${sid ? ` in \u201c${secName(sid)}\u201d` : ''}`, { duration: 6000, action: { label: 'Open it', run: () => dtiGo(`/outfits/${id}`) } });
+            };
+            ok.addEventListener('click', make);
+            pop.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('input')) { e.preventDefault(); make(); } });
+            nameIn.focus();
+        });
+        // (its tile as DTI's page has it now — put in its place among the others, set up like the rest; the page reloads if it isn't there)
+        async function addCard(id) {
+            try {
+                const doc = new DOMParser().parseFromString(await fetch('/your-outfits', { credentials: 'include', cache: 'no-store' }).then(r => r.text()), 'text/html');
+                const fresh = [...doc.querySelectorAll('ul#outfits > li')], li0 = fresh.find(l => outfitId(l) === id);
+                if (!li0) return location.reload();
+                const li = document.importNode(li0, true);
+                const next = fresh.slice(fresh.indexOf(li0) + 1).map(l => items.find(x => outfitId(x) === outfitId(l))).find(Boolean);
+                if (next) { next.before(li); items.splice(items.indexOf(next), 0, li); } else { list.appendChild(li); items.push(li); }
+                enhanceCard(li);
+                li.insertAdjacentHTML('beforeend', '<span class="dti-osel-ck" aria-hidden="true"></span>');
+                total++;
+                const cnt = head.querySelector('.dti-op-count');
+                if (cnt) cnt.textContent = total;
+                refresh();
+                li.classList.add('dti-oc-new');
+                setTimeout(() => li.classList.remove('dti-oc-new'), 2600);
+                li.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            } catch (_) { location.reload(); }
+        }
+        const selKey = e => {
+            if (!list.isConnected) return document.removeEventListener('keydown', selKey);
+            if (e.key === 'Escape' && selOn && !pop && !e.target.closest?.('input, textarea')) setSel(false);
+        };
+        document.addEventListener('keydown', selKey);
         gmWatch('dti_osec', list, (k, o, n, remote) => { if (!remote) return; OSD = osecClean(n); popClose(); refresh(); });
         refresh();
         if (!window.__dtiOsKey) {   // (once per session — it looks up the current search box)
@@ -27952,6 +28727,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             .dti-set-btn:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
             .dti-set-btn:disabled { opacity: .55; cursor: wait; }
+            /* (People you avoid: a row each — their name, avoided or only hidden, when, and the way back) */
+            .dti-set-avrow { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 0; border-top: 1px solid var(--border); font-size: 13.5px; }
+            .dti-set-avrow a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; color: var(--text); text-decoration: none; }
+            .dti-set-avrow a:hover { color: var(--accent-text, var(--accent)); text-decoration: underline; }
+            .dti-set-avrow .tag { flex: none; padding: 0 7px; border-radius: 99px; font-size: 10px; font-weight: 800; font-style: normal; letter-spacing: .3px; line-height: 17px; text-transform: uppercase;
+                background: var(--surface-2); color: var(--text-muted); }
+            .dti-set-avrow .tag.av { background: color-mix(in srgb, var(--danger, #e5484d) 14%, transparent); color: var(--danger, #e5484d); }
+            .dti-set-avrow .when { margin-left: auto; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+            .dti-set-avrow .dti-set-btn { height: 30px; padding: 0 12px; font-size: 12px; }
             body.auth_users-edit .neopass-explanation { margin-bottom: 16px; font-size: 13.5px; line-height: 1.65; color: var(--text-muted); }
             body.auth_users-edit .neopass-explanation a { color: var(--accent-text, var(--accent)); }
             /* Neomail contact */
@@ -28125,6 +28909,38 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             <button type="button" class="dti-set-btn">Open ⚙ settings</button>`;
         appCard.querySelector('button').addEventListener('click', e => { e.stopPropagation(); document.querySelector('.dti-nav-gear')?.click(); });
         document.getElementById('dti-settings-col-left')?.appendChild(appCard);
+        // People you avoid (user asked: somewhere to see them, and stop avoiding them) — and the ones only hidden from Trade Finder; last
+        // on the left. It follows changes made elsewhere (Trade Finder, their Items page).
+        const avCard = document.createElement('div'); avCard.className = 'settings-form dti-set-avoid';
+        avCard.innerHTML = '<h2>People you avoid</h2><div class="dti-set-avlist"></div>';
+        document.getElementById('dti-settings-col-left')?.appendChild(avCard);
+        const paintAvoided = () => {
+            const av = dtiAvoid.all(), hid = tfHidden.all(), when = id => (av[id] || hid[id])?.at || 0;
+            const ids = [...new Set([...Object.keys(av), ...Object.keys(hid)])].sort((a, b) => when(b) - when(a));
+            avCard.querySelector('.dti-set-avlist').innerHTML = !ids.length
+                ? '<p class="dti-set-hint">No one. Avoid someone from Trade Finder (the \u22ef on their card) or their Items page \u2014 they\u2019re flagged wherever their name shows, and listed here in case you change your mind.</p>'
+                : '<p class="dti-set-hint">Avoided: flagged wherever their name shows (Trade Finder, item trade lists, their Items page). Hidden: only left out of Trade Finder.</p>'
+                    + ids.map(id => {
+                        const a = av[id], e = a || hid[id];
+                        return `<div class="dti-set-avrow"><a href="/user/${encodeURIComponent(id)}/closet" target="_blank" rel="noopener" title="Their items">${noteEsc(e?.name || `User ${id}`)}</a>`
+                            + (a ? '<em class="tag av">Avoided</em>' : '<em class="tag">Hidden</em>') + `<span class="when">${e?.at ? noteAgo(e.at) : ''}</span>`
+                            + `<button type="button" class="dti-set-btn" data-unavoid="${noteEsc(id)}">${a ? 'Stop avoiding' : 'Show again'}</button></div>`;
+                    }).join('');
+        };
+        avCard.addEventListener('click', e => {
+            const b = e.target.closest('[data-unavoid]');
+            if (!b) return;
+            const id = b.dataset.unavoid, a = dtiAvoid.all()[id], h = tfHidden.all()[id], name = (a || h)?.name || 'They';
+            dtiAvoid.set(id, '', false); tfHidden.set(id, '', false);
+            paintAvoided();
+            dtiToast(a ? `${name} isn\u2019t avoided any more` : `${name} shows in Trade Finder again`, { duration: 6000, undo: () => {
+                if (a) dtiAvoid.set(id, a.name, true);
+                if (h) tfHidden.set(id, h.name, true);
+                paintAvoided();
+            } });
+        });
+        paintAvoided();
+        if (typeof GM_addValueChangeListener === 'function') ['dti_avoid', 'dti_tf_hidden'].forEach(k => GM_addValueChangeListener(k, paintAvoided));
         // Side accounts (the same as ⚙ › Neopets › Side accounts), above Your info
         const acctCard = document.createElement('div'); acctCard.className = 'settings-form dti-set-acct';
         acctCard.innerHTML = '<h2>Side accounts</h2><div class="dti-set-acm"></div>';
@@ -28266,12 +29082,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         nameEl.textContent = newName;
                         inp.replaceWith(nameEl);
                         if (save && newName !== currentName) {
+                            const fail = () => { nameEl.textContent = currentName; dtiToast('Couldn\u2019t rename it \u2014 try again', { variant: 'error' }); };
                             const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
-                            if (csrf) fetch(`/outfits/${outfitId}`, {
+                            if (!csrf) return fail();
+                            fetch(`/outfits/${outfitId}`, {
                                 method: 'PATCH', credentials: 'same-origin',
                                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
                                 body: JSON.stringify({ outfit: { name: newName } })
-                            });
+                            }).then(r => { if (!r.ok) fail(); }, fail);
                         }
                     };
                     inp.addEventListener('blur', () => restore(true));
@@ -29034,7 +29852,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // The zones and colors picked (Picks: several of each, some left out — user asked); a plain search's every page in one list
         // (user asked — kept till you go back to DTI's pages)
         let edZones = Picks.none(), edColors = Picks.none(), csAll = !!GM_getValue('dti_cs_all', false);
-        let csClearAll = () => {}, kindPaintSoon = () => {}, sortPaint = () => {};
+        let csClearAll = () => {}, kindPaintSoon = () => {}, sortPaint = () => {}, setPicks = () => {};
         const filtersOn = () => Picks.on(edZones) || Picks.on(edColors);
         // Open zones (user asked: only items for the zones still open on the pet) — '~' in the zone picks: the zones what's worn is in,
         // or keeps others out of, left out; read from DTI's own data again as the outfit changes
@@ -29265,14 +30083,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 // (the ⋮ menu: DTI's own three — a copy to change, the name, and Delete: that closes the search, for DTI's own question)
                 let menu = null;
                 const closeMenu = () => { menu?.remove(); menu = null; };
-                const copyUrl = st => {   // (as DTI's "Edit a copy": the look as a new custom)
-                    const p = new URLSearchParams({ name: st.name || '', species: st.speciesId || '', color: st.colorId || '', pose: st.pose || '' });
-                    if (st.altStyleId != null) p.append('style', st.altStyleId);
-                    if (st.appearanceId != null) p.append('state', st.appearanceId);
-                    (st.wornItemIds || []).forEach(i => p.append('objects[]', i));
-                    (st.closetedItemIds || []).forEach(i => p.append('closet[]', i));
-                    return location.origin + '/outfits/new?' + p;
-                };
+                const copyUrl = st => location.origin + edNewUrl(st);   // (as DTI's "Edit a copy": the look as a new custom)
                 const deleteViaDti = async () => {
                     root.querySelector('button[aria-label="Clear search"]')?.click();
                     for (let i = 0; i < 60 && isOld(); i++) await new Promise(r => setTimeout(r, 50));   // (DTI's own heading, up here again)
@@ -29331,6 +30142,25 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
             mountOutfitAlts(row);   // (alternate outfits in this custom)
             mountFromPet(row);   // (a new custom: from one of your pets)
+            // Minimize (user asked — the full page too): the custom into the small bar that stays as you browse DTI, nothing changed lost
+            // (edMinCapture); then back to where you were on DTI, or Your Customs
+            if (window.top === window) {
+                const mb = document.createElement('button');
+                mb.type = 'button'; mb.id = 'dti-ed-min'; mb.innerHTML = ED_MIN_ICO.min; mb.setAttribute('aria-label', 'Minimize');
+                mb.title = 'Minimize \u2014 keep this custom in a small bar while you browse DTI';
+                mb.addEventListener('click', async () => {
+                    if (mb.disabled) return;
+                    mb.disabled = true;
+                    const got = await edMinCapture({ saving: () => csBr.saving(), get: () => csBr.get() }, location.pathname + location.search, 'Untitled outfit');
+                    if (!got) { mb.disabled = false; return dtiToast('Couldn\u2019t save its last change yet \u2014 try again in a moment', { variant: 'error' }); }
+                    if (!edMinAdd(got)) { mb.disabled = false; return; }
+                    // (the page you came from on DTI, loaded fresh — a page the browser kept from before wouldn't show its bar till the next
+                    // one — else Your Customs; the editor's own place in the history goes with it, so Back doesn't open it again)
+                    const ref = /^https?:/.test(document.referrer) ? new URL(document.referrer) : null;
+                    location.replace(ref && ref.origin === location.origin && !/^\/outfits\/(new|\d+)/.test(ref.pathname) ? ref.href : '/your-outfits');
+                });
+                row.appendChild(mb);
+            }
             [row, document.getElementById('dti-alts'), document.getElementById('dti-from-pet')].forEach(el => el && fitRO.observe(el));   // (the name's room: the row, what shares its line)
 
             // The zone and color filters: several of each, some left out — searching, their matches from every page show instead
@@ -29383,6 +30213,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 zonePick.set(edZones); colorPick.set(edColors);
                 csSync(); applyFilters();
             };
+            setPicks = (z, c) => {   // (the zones and colors as they were — Back to search)
+                edZones = Picks.of(z); edColors = Picks.of(c);
+                zonePick.set(edZones); colorPick.set(edColors);
+            };
 
             // ── View toggle (list / tile) ────────────────────────────────
             let _edView = GM_getValue('dti_editor_view', 'list');
@@ -29391,7 +30225,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             // on its own (user asked): its picture, item names and zone labels (the words can be hidden). Kept apart for the full page
             // and the pop-up window (its panel is far narrower). CSS reads them from variables on the root. ──
             const LAY_KEY = 'dti_ed_layout' + (window.top !== window ? '_pop' : '');
-            const LAY_DEF = { lcols: 1, zones: 0, items: 0, size: 100, hideKind: 0, caps: 0, pic: 100, nm: 2, lb: 2, bdrHide: 0, bdrC: '' };
+            const LAY_DEF = { lcols: 1, zones: 0, items: 0, size: 100, hideKind: 0, caps: 0, capSt: 0, pic: 100, nm: 2, lb: 2, bdrHide: 0, bdrC: '' };
             const LAY_TXT = [0, 0.85, 1, 1.2, 1.4];   // (words: Off, S, M — the usual — L, XL)
             const LAY_TXT_SEG = [[0, 'Off'], [1, 'S'], [2, 'M'], [3, 'L'], [4, 'XL']];
             const layVal = (k, v) => v + '%';   // (the sliders: tile size, picture)
@@ -29479,6 +30313,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 root.classList.toggle('dti-hide-kind', !!_edLay.hideKind);
                 root.classList.toggle('dti-show-caps', !!_edLay.caps);
                 root.classList.toggle('dti-caps-text', _edLay.caps === 2);
+                root.classList.toggle('dti-capv-theme', _edLay.capSt === 1);   // (the pill's own colors — else as the "NC values on DTI" badge is set)
+                root.classList.toggle('dti-capv-solid', _edLay.capSt === 2);
                 const pb = edPicBorder(_edLay);
                 root.classList.toggle('dti-pbdr', !!pb.color);
                 root.classList.toggle('dti-pbdr-hide', pb.hide);
@@ -29527,7 +30363,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     : `<div class="dti-lay-row"><span>Items per row</span>${seg('lcols', [[1, '1'], [2, '2'], [3, '3']])}</div>`}
                     <div class="dti-lay-row"><span>NC / NP labels</span>${seg('hideKind', [[0, 'Show'], [1, 'Hide']])}</div>
                     <div class="dti-lay-row"><span>Cap values</span>${seg('caps', [[1, 'Pill'], [2, 'Text'], [0, 'Hide']], 'An NC item’s value in caps — a pill on its picture, or small text with its labels')}</div>
+                    ${L.caps === 1 ? `<div class="dti-lay-row"><span>Pill colors</span>${seg('capSt', [[0, 'Global'], [1, 'Theme'], [2, 'Solid']], 'Global: as your “NC values on DTI” badge is set everywhere (⚙ › NC item values) — Theme or Solid: just here')}</div>` : ''}
                     <div class="dti-lay-row"><span>Picture border</span>${pbRow}</div>
+                    <div class="dti-lay-row"><span>Wearing row</span><div class="dti-lay-seg" data-k="wbOn" title="What the custom has on, in a row under the search while you search (⚙ › Features too)">${[[1, 'Show'], [0, 'Hide']].map(([v, t]) => `<button type="button" data-v="${v}"${(wbOn() ? 1 : 0) === v ? ' class="on"' : ''}>${t}</button>`).join('')}</div></div>
                     ${!tile && csOn() ? `<div class="dti-lay-sub">Every page’s tiles</div><div class="dti-lay-row"><span>Items per row</span>${perRow}</div>${parts}` : ''}`;
                 _paintLayFit();
             }
@@ -29550,6 +30388,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 _layPop.style.left = Math.max(8, Math.min(r.right - _layPop.offsetWidth, innerWidth - _layPop.offsetWidth - 8)) + 'px';
                 layBtn.classList.add('open');
                 _layPop.addEventListener('click', ev => {
+                    const wbB = ev.target.closest('.dti-lay-seg[data-k="wbOn"] button');   // (the Wearing row: one switch for every window — ⚙ › Features's)
+                    if (wbB) { GM_setValue('dti_ed_wearbar_on', wbB.dataset.v === '1'); wbTick(); _renderLayPop(); return; }
                     const b = ev.target.closest('.dti-lay-seg button');
                     if (b) _edLay[b.closest('.dti-lay-seg').dataset.k] = +b.dataset.v;
                     else if (ev.target.closest('.dti-lay-reset')) _edLay = { ...LAY_DEF };
@@ -29854,6 +30694,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             return false;
         };
+        // (DTI's own box: a search going — words, or one of its filters — as DTI decides between its results and the custom's list; it
+        // changes at once, while its search's requests linger a moment after ✕. Not known: as its requests say)
+        const dtiSearching = () => { const q = csBr.query(); return !q || !!(q.value || q.filterToZoneLabel || q.filterToItemKind || q.filterToCurrentUserOwnsOrWants); };
         // (nothing typed — NC / NP at most: with zones shown, every item in them instead)
         const blankSearch = u => {
             for (let i = 0; u.has(`q[${i}][key]`); i++) {
@@ -29886,13 +30729,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 // (every item: DTI's own search with nothing typed — everything this pet can wear)
                 return { base: every ? 'ALL|' + from.toString() : 'Z|' + zr.inc.map(z => zoneBase(from, z)).join('|'), zone: true };
             }
-            return (filtersOn() || csAll || CS.sort !== 'name') && u && isSearch(u) ? { base: u.toString(), zone: false } : null;
+            return (filtersOn() || csAll || CS.sort !== 'name') && u && isSearch(u) && dtiSearching() ? { base: u.toString(), zone: false } : null;
         }
         let csKindHold = 0;   // (an NC / NP switch: DTI has no search running for a moment while it swaps — the list stays meanwhile)
         function csSync() {
             const t = csTarget();
             if (!t) return Date.now() < csKindHold && csOn() ? undefined : csOff();
-            csPlace(t.zone);
+            csPlace();
             if (t.base !== CS.base) return csStart(t.base);
             csPump(CS.gen);   // (a color picked since: the pictures read now)
             csPaintSoon();
@@ -29901,11 +30744,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // this too, till ✕ takes you back to DTI's pages
         function csAllPaint() {
             if (csAll || csOn()) return;
-            const ic = root.querySelector('.item-container');
-            const list = ic && (ic.parentElement?.tagName === 'LABEL' ? ic.parentElement : ic).parentElement;
-            const pager = list?.parentElement?.firstElementChild;
-            const sel = pager && pager !== list ? pager.querySelector('select') : null;
-            const mid = sel?.closest('.chakra-select__wrapper')?.parentElement;
+            const sel = dtiPagerSel(), mid = sel?.closest('.chakra-select__wrapper')?.parentElement;
             if (!mid || sel.options.length < 2 || mid.querySelector('#dti-cs-all')) return;   // (one page: nothing to put together)
             const b = document.createElement('button');
             b.type = 'button'; b.id = 'dti-cs-all';
@@ -29927,8 +30766,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         }, true);
         // Where DTI's results are (its pager and the items) — every item in some zones: where the outfit's own items are (none yet in a
         // new custom), all of them. The panel there, what DTI shows hidden under it.
-        function csPlace(zone) {
-            let wrap = zone ? document.getElementById('dti-search-row')?.parentElement?.nextElementSibling : null;
+        function csPlace() {   // (where DTI's search panel is — the same for every search, there as soon as the search is: Back to search shows at once)
+            let wrap = document.getElementById('dti-search-row')?.parentElement?.nextElementSibling;
             if (wrap?.id === 'dti-cs') wrap = wrap.nextElementSibling;
             if (!wrap) {
                 const ic = root.querySelector('.item-container');
@@ -29980,7 +30819,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         async function csStart(base, fresh) {
             const gen = ++CS.gen;
             Object.assign(CS, { base, items: [], seen: new Set(), pages: 0, allPages: 0, fetched: 0, failed: 0, checked: 0, next: 0, active: 0, page: 1 });
-            CS.tiles.clear();
+            if (CS.tilesOf !== base) { CS.tiles.clear(); CS.tilesOf = base; }   // (the same search again — Back to search: its tiles kept)
             csPaintSoon();
             await ItemColors.ready();
             let had = !fresh && (CS.memo.get(base) || csKindOf(base));   // (a search seen a moment ago — NC / NP / All flipped back — or NC / NP of an All that's here whole: no asking again)
@@ -30076,7 +30915,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const p = document.createElement('div');
             p.id = 'dti-cs';
             p.innerHTML = `<div class="dti-cs-head"><span class="dti-cs-sw"></span><b class="dti-cs-title"></b><span class="dti-cs-count"></span>
-                <span class="dti-cs-mode" role="group" aria-label="Show them as"><button type="button" data-m="list" title="Every one in one list">One list</button><button type="button" data-m="pages" title="${CS_PER_PAGE} a page, all of this color">Pages</button></span>
+                <span class="dti-cs-mode" role="group" aria-label="Show them as"><button type="button" data-m="list" title="Every one in one list">One list</button><button type="button" data-m="pages" title="${CS_PER_PAGE} a page">Pages</button></span>
                 <button type="button" class="dti-cs-again" title="Look through the search again (for items added since)" aria-label="Look through the search again">↻</button><button type="button" class="dti-cs-clear">✕</button></div>
                 <div class="dti-cs-sub"></div><div class="dti-cs-bar"><i></i></div>${pager}<div class="dti-cs-grid"></div><div class="dti-cs-empty" hidden></div>${pager}`;
             p.addEventListener('click', async e => {
@@ -30164,9 +31003,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             title.textContent = everyAll ? (what ? `${what} — every item` : 'Every item') : filtered ? `${what} — ${zoneAll ? 'every item' : 'every page'}` : 'Every page';
             title.title = filtered ? what : '';
             p.querySelector('.dti-cs-count').textContent = `${matches.length.toLocaleString()} ${loading ? 'so far' : filtered ? 'found' : `item${matches.length === 1 ? '' : 's'}`}`;
-            const mode = filtered ? CS.mode : 'list';   // (a plain search: one list — its pages are DTI's own)
+            // (one list, or 30 a page — the same panel either way, the page buttons added (user asked: the same look in both))
+            const mode = CS.mode;
             const seg = p.querySelector('.dti-cs-mode');
-            seg.hidden = !filtered;
+            seg.querySelector('[data-m="pages"]').title = `${CS_PER_PAGE} a page`;
             seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === mode));
             const clr = p.querySelector('.dti-cs-clear');
             clr.title = zoneAll ? 'Clear the zone and color filters — back to the outfit’s items' : !filtered ? 'Back to DTI’s own pages' : csAll ? 'Clear the zone and color filters' : 'Back to DTI’s own pages (no zone or color filter)';
@@ -30206,12 +31046,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // search is told the new look each time, so its try-ons start from it. ──
         let wb = null, wbKey = '', wbT = 0, wbSoonT = 0, wbGen = 0, wbItems = [];
         const WB_CHEV = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5"/></svg>';
+        // (the row can be turned off — ⚙ › Features, or its × (user asked); switched in the settings or another tab: here at once)
+        const wbOn = () => GM_getValue('dti_ed_wearbar_on', true) !== false;
+        if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('dti_ed_wearbar_on', () => wbSoon());
         function wbSoon() { clearTimeout(wbSoonT); wbSoonT = setTimeout(wbTick, 250); }
         function wbTick() {
-            // (a search open: the every-page results showing, or DTI's own with words or a filter — DTI keeps a blank one going under
-            // the custom's own list, which shows the custom anyway)
-            const row = document.getElementById('dti-search-row'), p = csBr.search()[0], u = p ? new URLSearchParams(p) : null;
-            if (!row || !(csOn() || (u && isSearch(u)))) {
+            const row = document.getElementById('dti-search-row'), on = !!row && srSearching();
+            srPaint(row, on);   // (no search open, one kept: Back to search, in the same last row)
+            if (!on || !wbOn()) {
                 wb?.remove(); wb = null; wbKey = '';
                 clearInterval(wbT); wbT = 0;
                 return;
@@ -30259,12 +31101,18 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             el.id = 'dti-wb';
             const open = GM_getValue('dti_ed_wearbar', true) !== false;
             el.classList.toggle('shut', !open);
-            el.innerHTML = `<button type="button" class="dti-wb-h" aria-expanded="${open}" title="What the custom has on \u2014 click to fold"><b>Wearing</b><span class="dti-wb-n">0</span>${WB_CHEV}</button><div class="dti-wb-list"></div>`;
+            el.innerHTML = `<button type="button" class="dti-wb-h" aria-expanded="${open}" title="What the custom has on \u2014 click to fold"><b>Wearing</b><span class="dti-wb-n">0</span>${WB_CHEV}</button><div class="dti-wb-list"></div>`
+                + '<button type="button" class="dti-wb-off" title="Hide this row (the Layout menu or \u2699 \u203a Features brings it back)" aria-label="Hide the Wearing row">\u00d7</button>';
             el.addEventListener('click', async e => {
                 const h = e.target.closest('.dti-wb-h');
                 if (h) {
                     const now = !el.classList.toggle('shut');
                     h.setAttribute('aria-expanded', String(now)); GM_setValue('dti_ed_wearbar', now);
+                    return;
+                }
+                if (e.target.closest('.dti-wb-off')) {   // (the row off — Undo, or ⚙ › Features, brings it back)
+                    GM_setValue('dti_ed_wearbar_on', false); wbTick();
+                    dtiToast('Wearing row hidden \u2014 the Layout menu (or \u2699 \u203a Features) brings it back', { duration: 6000, undo: () => { GM_setValue('dti_ed_wearbar_on', true); wbTick(); } });
                     return;
                 }
                 const it = e.target.closest('.dti-wb-i');
@@ -30301,6 +31149,139 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }, { passive: false });
             return el;
         }
+        // ── Back and forth (user asked: to the custom's own items and back to the search, without losing your place or loading it
+        // again): Custom items (at the Wearing row's end) — or DTI's own ✕, or Esc — keeps the search as it was: what's typed, DTI's
+        // filters and ours, its page and how far down. Back to search, in the same last row, puts it all back at once (DTI and the
+        // every-page list keep what they found). ──
+        let srParked = null, srEl = null, srWait = '', srWaitAt = 0, srWaitT = 0;
+        const SR_ICO = {
+            items: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5.4v-.9a1.7 1.7 0 1 1 1.7-1.7"/><path d="M8 5.4 1.9 10.6c-.5.4-.2 1.2.5 1.2h11.2c.7 0 1-.8.5-1.2z"/></svg>',
+            back: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 3.5 5 8l4.5 4.5"/></svg>',
+        };
+        // (a search open: the every-page results showing, or DTI's own with words or a filter — DTI keeps a blank one going under
+        // the custom's own list, which shows the custom anyway)
+        const srSearching = () => { const p = csBr.search()[0], u = p ? new URLSearchParams(p) : null; return csOn() || !!(u && isSearch(u) && dtiSearching()); };
+        function dtiPagerSel() {   // (DTI's own pages: the "Page n" select above its results)
+            const ic = root.querySelector('.item-container');
+            const list = ic && (ic.parentElement?.tagName === 'LABEL' ? ic.parentElement : ic).parentElement;
+            const pager = list?.parentElement?.firstElementChild;
+            return pager && pager !== list ? pager.querySelector('select') : null;
+        }
+        function srBox() {   // (what scrolls the results: the every-page list, or the box round DTI's pages)
+            for (let el = csOn() ? csPanel : root.querySelector('.item-container'); el && el !== root; el = el.parentElement)
+                if (el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(el).overflowY)) return el;
+            return null;
+        }
+        function srSnap() {   // (the every-page list's page only while it shows pages)
+            const box = srBox(), csPages = csOn() && !!csPanel.querySelector('.dti-cs-pager:not([hidden])');
+            return { query: csBr.query(), zones: Picks.of(edZones), colors: Picks.of(edColors), cs: csOn(), base: csOn() ? CS.base : '',
+                page: csOn() ? (csPages ? CS.page : 1) : +(dtiPagerSel()?.value) || 1, scroll: box ? Math.round(box.scrollTop) : 0 };
+        }
+        // (the search in a few words: what was typed, DTI's filters and ours — and its page)
+        function srLabel(s) {
+            const q = s.query || {}, bits = [];
+            if ((q.value || '').trim()) bits.push(`\u201c${q.value.trim()}\u201d`);
+            if (q.filterToItemKind) bits.push(`${q.filterToItemKind} items`);
+            if (q.filterToZoneLabel) bits.push(q.filterToZoneLabel);
+            if (q.filterToCurrentUserOwnsOrWants) bits.push(q.filterToCurrentUserOwnsOrWants === 'WANTS' ? 'items you want' : 'items you own');
+            if (Picks.on(s.zones)) bits.push(Picks.text(s.zones, z => z === '*' ? 'Every item' : z === '~' ? 'Open zones' : z, 'zone'));
+            if (Picks.on(s.colors)) bits.push(Picks.text(s.colors, itemColorName, 'color'));
+            return (bits.join(' \u00b7 ') || 'your search') + (s.page > 1 ? ` \u00b7 page ${s.page}` : '');
+        }
+        // (which shows — and while it switches over, Custom items ⇄ Back to search, the one it's going to: greyed out and not clickable
+        // till it's ready, instead of gone for a moment (user asked); 6 s at most)
+        function srShow(now, wait, waited) {
+            return wait && now !== wait && waited < 6000 ? { mode: wait, wait: true } : { mode: now, wait: false };
+        }
+        // (a pill in the name row, after Alternate outfits / Load a pet (user asked — not a row of its own): Custom items while searching,
+        // Back to search once a search is kept)
+        function srPaint(row, searching) {
+            const sh = srShow(!row ? '' : searching ? 'go' : srParked ? 'back' : '', row ? srWait : '', Date.now() - srWaitAt), mode = sh.mode;
+            if (!sh.wait) srWait = '';
+            if (!mode) { srEl?.remove(); return; }
+            if (!srEl) {
+                srEl = document.createElement('div');
+                srEl.id = 'dti-srb';
+                srEl.addEventListener('click', e => {
+                    if (e.target.closest('.dti-srb-x')) { e.stopPropagation(); srParked = null; srWait = ''; srEl.remove(); }
+                    else if (e.target.closest('.dti-srb-go')) srEl.dataset.mode === 'go' ? srPark() : srResume();
+                });
+                srEl.addEventListener('keydown', e => { if (e.target.matches('.dti-srb-x') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.target.click(); } });
+            }
+            if (srEl.dataset.mode !== mode) {
+                srEl.dataset.mode = mode;
+                srEl.innerHTML = mode === 'go'
+                    ? `<button type="button" class="dti-srb-go" aria-label="Custom items" title="The custom\u2019s own items \u2014 your search is kept: Back to search brings it back, on the same page and scrolled where you were">${SR_ICO.items}<b>Custom items</b></button>`
+                    : `<button type="button" class="dti-srb-go" aria-label="Back to search" title="Back to your search \u2014 on the same page, scrolled where you were">${SR_ICO.back}<b>Back to</b><span class="q"></span>`
+                        + '<span class="dti-srb-x" role="button" tabindex="0" title="Forget this search" aria-label="Forget this search">\u00d7</span></button>';
+            }
+            srEl.classList.toggle('wait', sh.wait);
+            srEl.querySelector('.dti-srb-go').disabled = sh.wait;
+            if (sh.wait) { clearTimeout(srWaitT); srWaitT = setTimeout(wbTick, 120); }   // (looked at again in a moment — till it's ready)
+            if (srEl.parentElement !== row) row.appendChild(srEl);
+            const q = srEl.querySelector('.q'), t = mode === 'back' && srParked ? srLabel(srParked) : '';
+            if (q && q.textContent !== t) q.textContent = t;
+        }
+        function srPark() {   // (Custom items: the search kept, DTI's emptied by its own ✕ — then ours cleared: every one of the custom's items)
+            srParked = srSnap();
+            srWait = 'back'; srWaitAt = Date.now();   // (Back to search at once — greyed out till DTI's search has gone)
+            const x = root.querySelector('button[aria-label="Clear search"]');
+            if (x) x.click(); else csBr.setQuery(null);
+            csClearAll(); wbTick();
+        }
+        async function srResume() {
+            const s = srParked;
+            if (!s) return;
+            srParked = null; srWait = 'go'; srWaitAt = Date.now(); wbTick();   // (Custom items at once — greyed out till the search is back)
+            setPicks(s.zones, s.colors);
+            if (s.query && !csBr.setQuery(s.query)) { srParked = s; srWait = ''; wbSoon(); return dtiToast('Couldn\u2019t bring the search back \u2014 try again', { variant: 'error' }); }
+            // (DTI's own search takes a moment to start again: the every-page list stays meanwhile, as it does for an NC / NP switch —
+            // taken away and put back, it came back at the top)
+            if (s.cs) csKindHold = Date.now() + 2500;
+            setTimeout(() => { csSync(); applyFilters(); wornZRefresh(); kindPaintSoon(); }, 60);   // (once DTI's search is going)
+            // (the every-page list, kept whole: back at once — placed, drawn from its kept tiles and scrolled before the browser shows
+            // anything; DTI's own results stay hidden under it)
+            if (s.cs && s.base && CS.memo.has(s.base)) {
+                csPlace();
+                if (csPanel?.isConnected) {
+                    if (CS.base !== s.base) await csStart(s.base);
+                    CS.page = s.page; csPaint();
+                    wbTick();   // (the Wearing row back in the same moment — coming a beat later, it moved the list)
+                    const box = srBox();
+                    if (box) box.scrollTop = s.scroll;
+                    return;
+                }
+            }
+            // (else its page and how far down, once it's drawn — frame by frame; 6s at most)
+            const frame = () => new Promise(r => requestAnimationFrame(r));
+            for (let i = 0; i < 360 && !srParked; i++) {
+                await frame();
+                if (s.cs) {
+                    if (!csOn() || !CS.items.length || (CS.fetched < CS.pages && CS.items.length < s.page * CS_PER_PAGE)) continue;
+                    CS.page = s.page; csPaint();
+                } else {
+                    const panel = document.getElementById('dti-search-row')?.parentElement?.nextElementSibling;
+                    if (!panel?.querySelector('.item-container') || panel.querySelector('.chakra-skeleton')) continue;
+                    const sel = dtiPagerSel();
+                    if (s.page > 1 && sel && +sel.value !== s.page) {   // (DTI's page: by its own select)
+                        if (![...sel.options].some(o => +o.value === s.page)) break;   // (fewer pages now)
+                        sel.value = String(s.page); sel.dispatchEvent(new Event('change', { bubbles: true }));
+                        continue;
+                    }
+                }
+                await frame(); await frame();   // (DTI goes to the top of a new page — after that)
+                const box = srBox();
+                if (box && !srParked) box.scrollTop = s.scroll;
+                return;
+            }
+        }
+        // (DTI's own ✕ in the search box, or Esc there: the search kept too — just before DTI empties it)
+        document.addEventListener('click', e => { if (e.target.closest?.('#wardrobe-2020-root button[aria-label="Clear search"]')) { srParked = srSnap(); csKindHold = 0; } }, true);
+        root.addEventListener('keydown', e => {   // (Esc: only when it empties the box — the first one may just close the suggestions)
+            if (e.key !== 'Escape' || !e.target.matches?.('input.react-autosuggest__input') || !dtiSearching()) return;
+            const snap = srSnap();
+            setTimeout(() => { if (!dtiSearching()) { srParked = snap; wbSoon(); } }, 0);
+        }, true);
         function csPaintWorn() {   // (what's on the pet now: its tiles ringed — and what's in the custom, worn or not: a trash)
             if (!csOn()) return;
             const st = csBr.get()?.state, worn = new Set((st?.wornItemIds || []).map(String)), kept = new Set((st?.closetedItemIds || []).map(String));
@@ -30431,6 +31412,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                             out = { params: qc ? qc.getQueryCache().findAll({ queryKey: ['itemSearch'] }).filter(q => q.getObserversCount() > 0).map(q => q.queryKey[1]) : [] };
                         }
                         else if (req.op === 'query') { const t = toolbar(); out = { query: t ? t.query : null }; }
+                        else if (req.op === 'setq') {   // (DTI's search set to one kept from before — or emptied: the custom's own items)
+                            const t = toolbar();
+                            if (t) { t.onChange(req.query ? Object.assign({}, t.query, req.query) : Object.fromEntries(Object.keys(t.query).map(k => [k, k === 'value' ? '' : null]))); out = { ok: true }; }
+                        }
                         else if (req.op === 'kind') {   // (DTI's own "Neocash items" / "Neopoint items" filter — with what's typed in the box now)
                             const t = toolbar(), box = document.querySelector('#wardrobe-2020-root input.react-autosuggest__input');
                             if (t) { t.onChange(Object.assign({}, t.query, box ? { value: box.value } : {}, { filterToItemKind: req.kind || null })); out = { ok: true }; }
@@ -30516,6 +31501,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             get: () => ask({ op: 'get' }), set: data => ask({ op: 'set', data })?.ok === true, restore: ids => ask({ op: 'restore', ids })?.ok === true,
             saving: () => ask({ op: 'saving' }), save: () => ask({ op: 'save' })?.ok === true, rename: name => ask({ op: 'rename', name })?.ok === true,
             search: () => ask({ op: 'search' })?.params || [],
+            query: () => ask({ op: 'query' })?.query || null, setQuery: q => ask({ op: 'setq', query: q || null })?.ok === true,
             kind: () => {   // (DTI's own NC / NP filter, from the search it's running)
                 const p = ask({ op: 'search' })?.params?.[0], u = p && new URLSearchParams(p);
                 for (let i = 0; u && u.has(`q[${i}][key]`); i++) { const m = /^is_(nc|np|pb)$/.exec(u.get(`q[${i}][key]`)); if (m) return m[1].toUpperCase(); }
@@ -31755,6 +32741,26 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
             /* ── Outfit layers (right-click › Layers): dressed like our popups ── */
             .chakra-modal__overlay { background: rgba(12,12,18,.5) !important; backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); }
+            /* ── DTI's own questions (⋮ › Delete…): in the theme's box, as ours are — centered; its own color kept on the main button ── */
+            .chakra-modal__content-container:has(> .chakra-modal__content > .chakra-modal__footer) { align-items: center !important; padding: 16px !important; }   /* (one :has — they don't nest) */
+            .chakra-modal__content:has(> .chakra-modal__footer):not(:has(.chakra-table)) {
+                width: min(420px, 100%) !important; max-width: none !important; margin: 0 !important; box-sizing: border-box !important;
+                padding: 20px 20px 16px !important; border-radius: 16px !important; border: 1px solid var(--border) !important;
+                background: var(--surface) !important; color: var(--text) !important; font-family: 'Poppins', system-ui, sans-serif !important;
+                box-shadow: 0 24px 60px -12px rgba(0,0,0,.45), 0 2px 10px rgba(0,0,0,.12) !important;
+            }
+            .chakra-modal__content:has(> .chakra-modal__footer):not(:has(.chakra-table)) > .chakra-modal__header { padding: 0 36px 6px 0 !important; font-family: inherit !important; font-size: 16px !important; font-weight: 800 !important; line-height: 1.35 !important; color: var(--text) !important; }
+            .chakra-modal__content:has(> .chakra-modal__footer):not(:has(.chakra-table)) > .chakra-modal__body { padding: 0 !important; font-family: inherit !important; font-size: 14px !important; line-height: 1.55 !important; color: var(--text-muted) !important; }
+            .chakra-modal__content:has(> .chakra-modal__footer):not(:has(.chakra-table)) > .chakra-modal__footer { padding: 18px 0 0 !important; justify-content: flex-end !important; gap: 8px !important; }
+            .chakra-modal__content:has(> .chakra-modal__footer):not(:has(.chakra-table)) > .chakra-modal__footer > :not(button) { display: none !important; }   /* (DTI's spacer: both buttons on the right, as ours) */
+            .chakra-modal__content:has(> .chakra-modal__footer):not(:has(.chakra-table)) > .chakra-modal__footer > button { height: 36px !important; min-width: 0 !important; margin: 0 !important; padding: 0 16px !important; border-radius: 10px !important; font-family: inherit !important; font-size: 13.5px !important; font-weight: 700 !important; box-shadow: none !important; }
+            .chakra-modal__content:has(> .chakra-modal__footer):not(:has(.chakra-table)) > .chakra-modal__footer > button:not(:last-of-type) { border: 1px solid var(--border) !important; background: var(--surface) !important; color: var(--text) !important; }
+            .chakra-modal__content:has(> .chakra-modal__footer):not(:has(.chakra-table)) > .chakra-modal__footer > button:not(:last-of-type):hover { background: var(--surface-2) !important; }
+            .chakra-modal__content:has(> .chakra-modal__footer):not(:has(.chakra-table)) > .chakra-modal__footer > button:focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 2px !important; }
+            .chakra-modal__content:has(> .chakra-modal__footer):not(:has(.chakra-table)) > .chakra-modal__close-btn { top: 14px !important; right: 14px !important; width: 30px !important; height: 30px !important; border-radius: 8px !important; background: transparent !important; color: var(--text-muted) !important; box-shadow: none !important; }
+            .chakra-modal__content:has(> .chakra-modal__footer):not(:has(.chakra-table)) > .chakra-modal__close-btn:hover { background: var(--surface-2) !important; color: var(--text) !important; }
+            .chakra-modal__content:has(> .chakra-modal__footer):not(:has(.chakra-table)) > .chakra-modal__close-btn:focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 1px !important; }
+            .chakra-modal__content:has(> .chakra-modal__footer):not(:has(.chakra-table)) > .chakra-modal__close-btn svg { width: 11px !important; height: 11px !important; }
             .chakra-modal__content:has(> .chakra-modal__body > .chakra-table) {
                 width: calc(100vw - 32px) !important; max-width: 720px !important; overflow: hidden !important; border-radius: 18px !important;
                 background: var(--surface) !important; border: 1px solid var(--border) !important; color: var(--text) !important;
@@ -31899,6 +32905,30 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #dti-wb .dti-wb-x:hover { background: var(--danger, #e5484d); color: #fff; }
             #dti-wb .dti-wb-sep { flex: none; align-self: stretch; width: 1px; margin: 4px 3px; background: var(--border); }
             #dti-wb .dti-wb-none { padding: 0 4px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+            /* ── Back and forth: a pill in the name row, after Alternate outfits / Load a pet — Custom items, or Back to search (× forgets it);
+               the Wearing row's × turns that row off ── */
+            #dti-wb .dti-wb-off { flex: none; margin-left: auto; width: 24px; height: 24px; padding: 0; display: grid; place-items: center; border: none; border-radius: 50%;
+                background: transparent; color: var(--text-muted); font-family: inherit; font-size: 16px; line-height: 1; cursor: pointer; }
+            #dti-wb .dti-wb-off:hover { background: var(--surface-2); color: var(--text); }
+            #dti-srb { order: 1; flex: 1 1 0px; min-width: 112px; max-width: max-content; display: inline-flex; align-self: center; }   /* (gives way, its words cut short — the row's buttons stay on its line) */
+            #dti-srb .dti-srb-go {
+                display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 30px; margin: 0; padding: 0 12px 0 10px; box-sizing: border-box;
+                border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: 99px; background: var(--surface);
+                color: var(--accent-text, var(--accent)); font-family: inherit; font-size: 12px; font-weight: 700; line-height: 1; white-space: nowrap; cursor: pointer;
+            }
+            #dti-srb .dti-srb-go:hover { border-color: var(--accent); background: var(--accent-glow); }
+            #dti-srb.wait .dti-srb-go { opacity: .5; filter: grayscale(.8); cursor: default; pointer-events: none; }   /* (switching over: there, not clickable yet) */
+            #dti-srb .dti-srb-go svg { flex: none; width: 13px; height: 13px; }
+            #dti-srb .dti-srb-go b { flex: none; font-weight: 700; }
+            #dti-srb .dti-srb-go .q { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--text-muted); }
+            #dti-srb .dti-srb-x { flex: none; display: grid; place-items: center; width: 18px; height: 18px; margin: 0 -6px 0 2px; border-radius: 50%; color: var(--text-muted); font-size: 14px; }
+            #dti-srb .dti-srb-x:hover { background: color-mix(in srgb, currentColor 14%, transparent); color: var(--text); }
+            /* ── Minimize (the full page): beside the ⋮ menu ── */
+            #dti-ed-min { order: 2; flex: none; width: 36px; height: 36px; padding: 0; display: grid; place-items: center; border: none; border-radius: 10px;
+                background: transparent; color: var(--text-muted); cursor: pointer; }
+            #dti-ed-min:hover { background: var(--surface-2); color: var(--text); }
+            #dti-ed-min:disabled { opacity: .5; cursor: progress; }
+            #dti-ed-min svg { width: 18px; height: 18px; }
             /* ── Zones on the pet (beside list / tile) ── */
             #dti-wz { display: flex; flex-shrink: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
             .dti-wz-btn.open { background: var(--accent-glow) !important; color: var(--accent-text, var(--accent)) !important; }
@@ -31995,6 +33025,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 font-size: 10.5px; font-weight: 800; line-height: 1.5; letter-spacing: .01em; box-shadow: 0 1px 4px rgba(0,0,0,.25);
                 background: var(--bdg-ncval-bg); color: var(--bdg-ncval-fg) !important; border: 1px solid var(--bdg-ncval-bd); opacity: var(--bdg-ncval-op, 1); }   /* (as the "NC values on DTI" badge is set — !important: the editor's spans all take their text color from their parent) */
             #wardrobe-2020-root .dti-capv[hidden] { display: none !important; }
+            /* (the pill's own colors, picked in the layout menu: the badge presets at full strength — else the badge's, as set) */
+            #wardrobe-2020-root.dti-capv-theme .dti-capv { background: ${BADGE_PRESETS.theme.bg}; color: ${BADGE_PRESETS.theme.fg} !important; border-color: ${BADGE_PRESETS.theme.border}; opacity: 1; }
+            #wardrobe-2020-root.dti-capv-solid .dti-capv { background: ${BADGE_PRESETS.solid.bg}; color: ${BADGE_PRESETS.solid.fg} !important; border-color: ${BADGE_PRESETS.solid.border}; opacity: 1; }
             #wardrobe-2020-root:not(.dti-tile-mode) .dti-capv { top: 7px; right: 36px; }
             /* (while the add-to-lists button shows on the picture's corner, the pill steps left of it) */
             #wardrobe-2020-root .dti-capv { transition: right .12s; }
@@ -34362,6 +35395,298 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .observe(document.body, { childList: true, subtree: true });
     }
 
+    // Neoboards (user asked): a Seeking button by each DTI link in a post — it looks at that person's DTI lists by itself (one at a time,
+    // 20 people a page at most, each kept 2 hours here) and says how many of your Seeking list they have, and how many of the things
+    // they want you have; a click shows them — each opens their DTI page, jumped to it. (Function declarations only: the Neopets side.)
+    function nbParseCloset(html) {   // a DTI Items page → { name, np, have: [it], want: [it] }, it = { id, name, img, nc, qty, list } — their lists you can see
+        const doc = new DOMParser().parseFromString(html || '', 'text/html');
+        if (!doc.getElementById('closet-hangers')) return null;
+        const out = { name: ((doc.querySelector('h1#title')?.textContent || '').match(/^\s*(.+?)['\u2019]s items/i) || [])[1]?.trim() || '', np: '', have: [], want: [] };
+        try { out.np = decodeURIComponent(((doc.querySelector('#closet-hangers-contact a.neomail')?.getAttribute('href') || '').match(/recipient=([^&]+)/) || [])[1] || ''); } catch (_) {}
+        const seen = { have: new Map(), want: new Map() };
+        doc.querySelectorAll('section.closet-hangers-group').forEach(sec => {
+            const k = sec.dataset.owned === 'true' ? 'have' : 'want';
+            sec.querySelectorAll('div.closet-list').forEach(l => {
+                const list = l.classList.contains('unlisted') ? 'Not in a list' : (l.querySelector(':scope > header h4, :scope > header h3')?.textContent || '').trim() || 'A list';
+                l.querySelectorAll('div.object[data-item-id]').forEach(o => {
+                    const id = o.dataset.itemId, img = o.querySelector('img:not(.nc-icon)'), qty = parseInt(o.dataset.quantity, 10) || 1, had = seen[k].get(id);
+                    if (had) { had.qty += qty; if (!had.list.includes(list)) had.list += ', ' + list; return; }   // (in two lists: once, both named)
+                    const it = { id, name: (o.querySelector('.name')?.textContent || img?.alt || '').replace(/^Thumbnail for /, '').trim(), img: img?.getAttribute('src') || '',
+                        nc: !!o.querySelector('img.nc-icon'), qty, list };
+                    seen[k].set(id, it); out[k].push(it);
+                });
+            });
+        });
+        return out;
+    }
+    // (DTI's own fonts on a Neopets page, for a panel in your DTI theme: Poppins, and the theme's own typeface — once a page)
+    function npFonts(themeHref) {
+        const add = (id, href) => {
+            if (!href || document.getElementById(id)) return;
+            const l = document.createElement('link');
+            l.id = id; l.rel = 'stylesheet'; l.href = href;
+            (document.head || document.documentElement).appendChild(l);
+        };
+        add('dti-np-font', 'https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
+        add('dti-np-theme-font', themeHref);
+    }
+    function runNbSeek() {
+        const SLUG = /impress\.openneo\.net\/user\/([^/?#\s"'<>]+)\/closet/i, KEEP = 2 * 3600e3, MAX = 20, D = 'https://impress.openneo.net';
+        const ICO = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.6"/><path d="M8 .9v2.2M8 12.9v2.2M.9 8h2.2M12.9 8h2.2"/></svg>';   // (Seeking's own)
+        // (the pill — user asked: Seeking's orange symbol to start, a click opens it out to the counts. Its own shadow root: the board's
+        // styles and scripts leave it be. Seeking orange, Wanted rose — your wishlist, They Want green — what you can offer: each count a
+        // small badge in its colour, the labels plain; on the symbol, a dot in the colour of the first there is)
+        const PILL_CSS = `:host { all: initial; }
+            .p { position: relative; display: inline-flex; align-items: center; height: 20px; box-sizing: border-box; border: 1px solid #fdba74; border-radius: 99px;
+                background: #ffedd5; box-shadow: 0 1px 2px rgba(154,52,18,.18); font: 700 11px/1 Arial, Helvetica, sans-serif; color: #57534e; }
+            button { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; height: 18px; border-radius: 99px; cursor: pointer; }
+            button:focus-visible { outline: 2px solid #ea580c; outline-offset: 1px; }
+            .ico { width: 18px; justify-content: center; color: #ea580c; }
+            .ico:hover { color: #c2410c; background: rgba(249,115,22,.16); }
+            .ico svg { width: 12px; height: 12px; display: block; }
+            .busy .ico svg { animation: pulse 1s ease-in-out infinite; }
+            @keyframes pulse { 50% { opacity: .3; } }
+            .dot { position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; box-sizing: border-box; border: 2px solid #fff; border-radius: 50%; display: none; }
+            .dot.seek { background: #ea580c; } .dot.want { background: #db2777; } .dot.they { background: #16a34a; }
+            :host(:not(.open)) .dot.on { display: block; }
+            .segs { display: none; gap: 9px; padding: 0 9px 0 7px; border-left: 1px solid #fdba74; border-radius: 0 99px 99px 0; overflow: hidden; }
+            :host(.open) .segs { display: inline-flex; animation: grow .2s ease-out; }
+            @keyframes grow { from { max-width: 0; opacity: 0; } to { max-width: 320px; opacity: 1; } }
+            .segs:hover { background: rgba(255,255,255,.5); }
+            .c { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+            .c b { min-width: 14px; height: 14px; padding: 0 4px; box-sizing: border-box; display: inline-grid; place-items: center; border-radius: 99px; color: #fff; font-size: 9.5px; font-weight: 800; }
+            .c.seek b { background: #ea580c; } .c.want b { background: #db2777; } .c.they b { background: #16a34a; }
+            .c.zero { color: #a8a29e; } .c.zero b { background: #d6d3d1; }
+            .msg { color: #9a3412; white-space: nowrap; }`;
+        const ls = { get(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (_) { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} } };
+        const get = url => new Promise(res => GM_xmlhttpRequest({ method: 'GET', url, timeout: 20000,
+            onload: r => res(r.status === 200 ? r.responseText : null), onerror: () => res(null), ontimeout: () => res(null) }));
+        const nameOf = slug => { try { return decodeURIComponent(slug.replace(/^\d+-/, '')); } catch (_) { return slug.replace(/^\d+-/, ''); } };
+        const pillsOf = slug => [...document.querySelectorAll('.dti-nbsk')].filter(b => b.dataset.slug === slug);
+        // (your Seeking list — the account this Neopets name is, when you keep several)
+        const seeking = () => {
+            const items = GM_getValue('dti_seeking', null)?.items || {}, me = acctMany() ? acctOfNp(npWhoAmI()) : null;
+            return new Set(Object.entries(items).filter(([, e]) => !me || (e?.acct && acctGet(e.acct) ? e.acct : 'main') === me).map(([id]) => id));
+        };
+        async function closet(slug) {   // (theirs, kept 2 hours)
+            const all = ls.get('dti_nb_closets2') || {}, c = all[slug];
+            if (c && Date.now() - c.at < KEEP) return c;
+            const p = nbParseCloset(await get(`${D}/user/${encodeURIComponent(slug)}/closet`));
+            if (!p) return null;
+            all[slug] = { at: Date.now(), ...p };
+            Object.keys(all).sort((a, b) => all[b].at - all[a].at).slice(60).forEach(k => delete all[k]);   // (the last 60 people)
+            ls.set('dti_nb_closets2', all);
+            try { localStorage.removeItem('dti_nb_closets'); } catch (_) {}   // (the old one: items as arrays)
+            return all[slug];
+        }
+        let mineP = null;
+        function mine() {   // (what you own and want — your own Items page, kept 6 hours; never opened My Items on DTI: not known)
+            return mineP || (mineP = (async () => {
+                const c = ls.get('dti_nb_mine');
+                if (c?.own && Date.now() - c.at < 3 * KEEP) return { own: new Set(c.own), want: new Set(c.want || []) };
+                const slug = GM_getValue('dti_user_slug', '');
+                if (!slug) return null;
+                const p = nbParseCloset(await get(`${D}/user/${encodeURIComponent(slug)}/closet`));
+                if (!p) return null;
+                const own = p.have.map(x => x.id), want = p.want.map(x => x.id);
+                ls.set('dti_nb_mine', { at: Date.now(), own, want });
+                return { own: new Set(own), want: new Set(want) };
+            })());
+        }
+        const results = new Map(), queue = [], asked = new Set();   // slug → { seek, want, they } | 'busy' | 'fail'
+        let busy = false;
+        // (their items on your Seeking list; on your wishlist (not Seeking too); the things they want that you have)
+        const sumOf = (c, seek, me) => ({ c, seek: c.have.filter(x => seek.has(x.id)), want: me ? c.have.filter(x => me.want.has(x.id) && !seek.has(x.id)) : null, they: me ? c.want.filter(x => me.own.has(x.id)) : null });
+        const cnt = (k, n, label) => `<span class="c ${k}${n ? '' : ' zero'}" data-k="${k}"><b>${n == null ? '?' : n}</b> ${label}</span>`;
+        function paint(slug) {
+            const r = results.get(slug), done = r && r !== 'busy' && r !== 'fail';
+            const n = done ? { seek: r.seek.length, want: r.want?.length, they: r.they?.length } : null, first = n && ['seek', 'want', 'they'].find(k => n[k] > 0);
+            const say = done ? `${n.seek} Seeking \u00b7 ${n.want ?? '?'} Wanted \u00b7 ${n.they ?? '?'} They Want` : r === 'busy' ? 'checking their lists\u2026' : r === 'fail' ? 'couldn\u2019t look at their lists' : 'their lists not checked yet';
+            pillsOf(slug).forEach(b => {
+                const sh = b.shadowRoot, segs = sh?.querySelector('.segs');
+                if (!segs) return;
+                sh.querySelector('.p').classList.toggle('busy', r === 'busy');
+                sh.querySelector('.dot').className = 'dot' + (first ? ' on ' + first : '');
+                sh.querySelector('.ico').title = 'Seeking on DTI: ' + say;
+                segs.innerHTML = done ? cnt('seek', n.seek, 'Seeking') + cnt('want', n.want, 'Wanted') + cnt('they', n.they, 'They Want')
+                    : `<span class="msg">${r === 'busy' ? 'Checking\u2026' : r === 'fail' ? 'Couldn\u2019t look \u2014 try again' : 'Check their lists'}</span>`;
+                segs.title = done ? 'Click to see the items' : '';
+            });
+        }
+        // (a pill by a link — or one a post drawn again from its HTML left empty, its shadow root not coming with it: filled in again.
+        // The symbol opens it out and back; a count opens the popup at its group)
+        function build(b, slug) {
+            b.classList.add('dti-nbsk'); b.dataset.slug = slug;
+            b.style.cssText = 'all:initial;display:inline-block;vertical-align:middle;margin:0 0 0 6px';
+            const sh = b.attachShadow({ mode: 'open' });
+            sh.innerHTML = `<style>${PILL_CSS}</style><span class="p"><button type="button" class="ico" aria-expanded="${b.classList.contains('open')}">${ICO}</button><i class="dot"></i><button type="button" class="segs"></button></span>`;
+            sh.addEventListener('click', e => {
+                const ico = e.target.closest('.ico'), segs = e.target.closest('.segs');
+                if (!ico && !segs) return;
+                e.preventDefault(); e.stopPropagation();
+                const r = results.get(slug), again = () => { results.delete(slug); asked.add(slug); queue.unshift(slug); pump(); };
+                if (ico) {
+                    const open = b.classList.toggle('open');
+                    ico.setAttribute('aria-expanded', open);
+                    if (open && (!r || r === 'fail')) again();   // (not looked at yet — past the first 20 people on a page — or it failed: now)
+                } else if (r && r !== 'busy' && r !== 'fail') openPop(b, slug, e.target.closest('.c')?.dataset.k);
+                else if (r !== 'busy') again();
+            });
+            paint(slug);
+        }
+        async function check(slug) {
+            results.set(slug, 'busy'); paint(slug);
+            const c = await closet(slug), seek = seeking(), me = await mine();
+            results.set(slug, c ? sumOf(c, seek, me) : 'fail'); paint(slug);
+        }
+        async function pump() {   // (one person at a time, a little apart)
+            if (busy) return;
+            busy = true;
+            while (queue.length) { await check(queue.shift()); await new Promise(r => setTimeout(r, 700)); }
+            busy = false;
+        }
+        let pop = null;
+        const closePop = () => { pop?.remove(); pop = null; };
+        function openPop(b, slug, focus) {
+            closePop();
+            const r = results.get(slug);
+            if (r === 'busy') return;
+            if (!r || r === 'fail') { results.delete(slug); asked.add(slug); queue.unshift(slug); return pump(); }
+            const c = r.c, who = c.name || nameOf(slug), home = `${D}/user/${encodeURIComponent(slug)}/closet`;
+            // (in your DTI theme (user asked): its colours, its Solid header, its typeface — and cap values in your DTI value-pill style)
+            let tk = {}, bs = {};
+            try { tk = JSON.parse(GM_getValue('dti_theme_tokens', '') || '{}'); } catch (_) {}
+            try { bs = JSON.parse(GM_getValue('dti_badge_styles', '') || '{}').ncval || {}; } catch (_) {}
+            const v = (k, fb) => tk[k] || fb;
+            npFonts(tk.fontHref);
+            const val = bs.mode === 'custom' && bs.bg ? { bg: bs.bg, fg: bs.fg || '#ffffff', bd: bs.border || bs.bg }
+                : bs.mode === 'solid' ? { bg: 'var(--accent)', fg: 'var(--accent-fg)', bd: 'var(--accent)' }
+                : { bg: 'color-mix(in srgb, var(--accent) 14%, var(--surface))', fg: 'color-mix(in srgb, var(--accent) 82%, var(--text))', bd: 'color-mix(in srgb, var(--accent) 38%, var(--border))' };
+            pop = document.createElement('div');
+            pop.dataset.style = tk.style || '';
+            const sh = pop.attachShadow({ mode: 'open' });
+            // (an item: its picture, name, NC / NP and cap value — how many and which of their lists on hover; a click opens their DTI page at it)
+            const tile = x => `<a class="t" href="${noteEsc(home)}#dti-jump=${noteEsc(x.id)}" target="_blank" rel="noopener" data-name="${noteEsc(x.name)}"${x.nc ? ' data-nc="1"' : ''}`
+                + ` title="${noteEsc(x.name)}&#10;In their \u201c${noteEsc(x.list)}\u201d${x.qty > 1 ? ` (\u00d7${x.qty})` : ''} \u2014 click to see it on DTI">`
+                + `<span class="pic">${x.img ? `<img src="${noteEsc(x.img)}" alt="" loading="lazy">` : ''}${x.qty > 1 ? `<i class="q">\u00d7${x.qty}</i>` : ''}</span>`
+                + `<span class="nm">${noteEsc(x.name || 'Item ' + x.id)}</span><span class="b"><i class="k${x.nc ? ' nc' : ''}">${x.nc ? 'NC' : 'NP'}</i><i class="v"></i></span></a>`;
+            // (a group: its count as a badge in its colour, its title — nothing there: one quiet line)
+            const group = (key, list, head, sub, none, unknown) => {
+                const n = list ? list.length : null;
+                return `<section class="g ${key}${n ? '' : ' empty'}"><div class="gh"><i class="nb">${n == null ? '?' : n}</i><b>${head}</b><span class="sub">${sub}</span>`
+                    + (n ? `<span class="tot"></span></div><div class="tiles">${list.map(tile).join('')}</div>` : `<span class="none">${n == null ? unknown : none}</span></div>`) + '</section>';
+            };
+            const NOT_KNOWN = 'open My Items on DTI once to tell';
+            const cnt = (k, n, label) => `<span class="c ${k}${n ? '' : ' zero'}"><em>${n == null ? '?' : n}</em> ${label}</span>`;
+            sh.innerHTML = `<style>
+                :host { all: initial; position: fixed; z-index: 2147483000; font: 12.5px/1.4 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
+                    --bg: ${v('--bg', '#f6f6fb')}; --surface: ${v('--surface', '#ffffff')}; --surface-2: ${v('--surface-2', '#f4f4f8')}; --border: ${v('--border', '#e2e2ea')};
+                    --text: ${v('--text', '#1f2328')}; --muted: ${v('--text-muted', '#6b7280')}; --accent: ${v('--accent', '#4f46e5')}; --accent-fg: ${v('--accent-fg', '#ffffff')};
+                    --accent-text: ${v('--accent-text', v('--accent', '#4f46e5'))}; --glow: ${v('--accent-glow', 'rgba(79,70,229,.14)')}; --nc: ${v('--nc', '#d97706')};
+                    --solid-fill: ${v('--solid-fill', v('--solid-bg', v('--accent', '#4f46e5')))}; --solid-fg: ${v('--solid-fg', '#ffffff')}; --solid-fg-2: ${v('--solid-fg-2', 'rgba(255,255,255,.82)')};
+                    --solid-hover: ${v('--solid-hover', 'rgba(255,255,255,.16)')};
+                    --tf: ${v('--theme-font', "'Poppins', system-ui, sans-serif")}; --tfw: ${v('--theme-font-wt', '800')}; --track: ${v('--theme-hc-track', '.06em')}; --case: ${v('--theme-hc-case', 'uppercase')};
+                    --seek: #ea580c; --want: #db2777; --they: #16a34a; --vbg: ${val.bg}; --vfg: ${val.fg}; --vbd: ${val.bd}; color: var(--text); }
+                * { box-sizing: border-box; }
+                .card { width: min(392px, calc(100vw - 16px)); max-height: 74vh; display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--border);
+                    border-radius: 16px; box-shadow: 0 20px 50px rgba(0,0,0,.28), 0 0 0 4px var(--glow); overflow: hidden; animation: in .16s ease-out; }
+                @keyframes in { from { opacity: 0; transform: translateY(6px) scale(.985); } }
+                .h { display: flex; align-items: center; gap: 10px; padding: 11px 10px 10px 12px; background: var(--surface); border-bottom: 1px solid var(--border); }
+                .h .ico { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; background: color-mix(in srgb, var(--seek) 15%, var(--surface)); color: var(--seek); }
+                .h .ico svg { width: 16px; height: 16px; }
+                .h .who { flex: 1; min-width: 0; }
+                .h .who b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tfw) 15px/1.25 var(--tf); }
+                .h .cnt { display: flex; flex-wrap: wrap; gap: 3px 7px; margin-top: 4px; }
+                .c { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+                .c em, .gh .nb { min-width: 16px; height: 16px; padding: 0 5px; display: inline-grid; place-items: center; border-radius: 99px; color: #fff;
+                    font: normal 800 10px/1 'Poppins', system-ui, sans-serif; }
+                .c.seek em, .g.seek .nb { background: var(--seek); } .c.want em, .g.want .nb { background: var(--want); } .c.they em, .g.they .nb { background: var(--they); }
+                .c.zero em, .g.empty .nb { background: color-mix(in srgb, var(--muted) 40%, var(--surface)); }
+                .h a, .h button { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 9px; background: var(--surface);
+                    color: var(--muted); text-decoration: none; font: inherit; font-size: 16px; line-height: 1; cursor: pointer; transition: border-color .12s, color .12s, background .12s; }
+                .h a:hover, .h button:hover { border-color: var(--accent); color: var(--accent-text); background: var(--glow); }
+                .h svg { width: 14px; height: 14px; }
+                /* (Solid: the header in the theme's own fill, as on DTI) */
+                :host([data-style="solid"]) .h { background: var(--solid-fill); border-bottom-color: transparent; color: var(--solid-fg); }
+                :host([data-style="solid"]) .h .ico { background: var(--solid-hover); color: var(--solid-fg); }
+                :host([data-style="solid"]) .h .c { color: var(--solid-fg-2); }
+                :host([data-style="solid"]) .h .c em { box-shadow: 0 0 0 1.5px rgba(255,255,255,.6); }
+                :host([data-style="solid"]) .h :is(a, button) { background: var(--solid-hover); border-color: transparent; color: var(--solid-fg); }
+                :host([data-style="solid"]) .h :is(a, button):hover { background: color-mix(in srgb, var(--solid-fg) 26%, transparent); color: var(--solid-fg); }
+                .body { overflow-y: auto; padding: 4px 10px 12px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+                .g { margin-top: 11px; }
+                .gh { display: flex; align-items: center; gap: 7px; margin: 0 2px 7px; min-height: 18px; }
+                .gh b { font: var(--tfw) 11px/1.2 var(--tf); letter-spacing: var(--track); text-transform: var(--case); color: var(--text); white-space: nowrap; }
+                .gh .sub { font-size: 11px; color: var(--muted); white-space: nowrap; }
+                .gh .tot, .gh .none { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); }
+                .gh .tot:not(:empty) { padding: 1px 8px; border: 1px solid var(--border); border-radius: 99px; background: var(--surface); font-weight: 700; color: var(--text); }
+                .g.empty { margin-top: 8px; }
+                .g.empty .gh { margin-bottom: 0; }
+                .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+                .t { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; padding: 7px 5px 6px; background: var(--surface);
+                    border: 1px solid var(--border); border-radius: 12px; color: inherit; text-decoration: none; transition: border-color .12s, box-shadow .12s, transform .12s; }
+                .t:hover { border-color: var(--accent); box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 20%, transparent); transform: translateY(-1px); }
+                .pic { position: relative; width: 56px; height: 56px; border-radius: 9px; background: #fff; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 70%, transparent); }
+                .pic img { width: 100%; height: 100%; object-fit: contain; border-radius: 9px; display: block; }
+                .q { position: absolute; right: -5px; top: -5px; min-width: 18px; padding: 0 5px; border-radius: 99px; background: var(--accent); color: var(--accent-fg);
+                    font: normal 800 10px/18px 'Poppins', system-ui, sans-serif; text-align: center; box-shadow: 0 0 0 2px var(--surface); }
+                .nm { width: 100%; font-size: 10.5px; font-weight: 600; line-height: 1.25; text-align: center; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 2.5em; }
+                .b { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 2px; min-height: 15px; }
+                .b i { font-style: normal; font-size: 8.5px; font-weight: 800; line-height: 13px; padding: 0 4px; border: 1px solid transparent; border-radius: 99px; white-space: nowrap; }
+                .k { background: color-mix(in srgb, var(--muted) 14%, var(--surface)); color: var(--muted); }
+                .k.nc { background: color-mix(in srgb, var(--nc) 16%, var(--surface)); color: color-mix(in srgb, var(--nc) 78%, var(--text)); }
+                .v:empty { display: none; }
+                .v { background: var(--vbg); color: var(--vfg); border-color: var(--vbd); white-space: nowrap; }
+            </style><div class="card" role="dialog" aria-label="${noteEsc(who)}\u2019s DTI lists">
+                <div class="h"><span class="ico">${ICO}</span><div class="who"><b>${noteEsc(who)}</b><div class="cnt">${cnt('seek', r.seek.length, 'Seeking')}${cnt('want', r.want?.length, 'Wanted')}${cnt('they', r.they?.length, 'They Want')}</div></div>`
+                + (c.np ? `<a href="https://www.neopets.com/neomessages.phtml?type=send&recipient=${noteEsc(encodeURIComponent(c.np))}" target="_blank" rel="noopener" title="Neomail ${noteEsc(c.np)}" aria-label="Neomail ${noteEsc(c.np)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="1.8" y="3.2" width="12.4" height="9.6" rx="1.6"/><path d="m2.4 4.2 5.6 4.4 5.6-4.4"/></svg></a>` : '')
+                + `<a href="${noteEsc(home)}" target="_blank" rel="noopener" title="Their items on DTI" aria-label="Their items on DTI"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 9.5v3.5H3V4h3.5"/></svg></a>`
+                + `<button class="x" type="button" aria-label="Close">\u00d7</button></div>
+                <div class="body">${group('seek', r.seek, 'Seeking', 'they have', 'nothing from your Seeking list', '')}${group('want', r.want, 'Wanted', 'they have', 'nothing from your wishlist', NOT_KNOWN)}${group('they', r.they, 'They Want', 'you have', 'nothing you have', NOT_KNOWN)}</div></div>`;
+            document.body.appendChild(pop);
+            const rect = b.getBoundingClientRect(), w = Math.min(392, innerWidth - 16), h = Math.min(innerHeight * .74, sh.querySelector('.card').offsetHeight || 400);
+            pop.style.left = Math.max(8, Math.min(rect.left, innerWidth - w - 8)) + 'px';
+            pop.style.top = (rect.bottom + 6 + h < innerHeight - 8 ? rect.bottom + 6 : Math.max(8, rect.top - 6 - h)) + 'px';
+            sh.querySelector('.x').addEventListener('click', closePop);
+            const fg = focus && sh.querySelector('.g.' + focus), body = sh.querySelector('.body');
+            if (fg && body) body.scrollTop += fg.getBoundingClientRect().top - body.getBoundingClientRect().top - 6;
+            // (NC items' cap values — Lebron's, else Valisar's — on their tiles as they come, and each group's total)
+            sh.querySelectorAll('.g').forEach(g => {
+                const nc = [...g.querySelectorAll('.t[data-nc]')];
+                if (!nc.length) return;
+                const tot = g.querySelector('.tot');
+                let lo = 0, hi = 0, valued = 0, left = nc.length;
+                const paintTot = () => {   // (as the values come — "…" while some are still being looked up)
+                    const f = x => Math.round(x * 10) / 10;
+                    tot.textContent = valued ? `\u2248 ${f(lo)}${hi !== lo ? '\u2013' + f(hi) : ''} caps${left ? '\u2026' : ''}` : '';
+                    tot.title = left ? 'Still looking some up' : valued < nc.length ? `${nc.length - valued} NC item${nc.length - valued === 1 ? '' : 's'} with no value yet` : '';
+                };
+                nc.forEach(t => npNcValue(t.dataset.name).then(val => {
+                    const n = capNums(val);
+                    if (n) { t.querySelector('.v').textContent = String(val).replace(/\*$/, '').replace(/\s*caps?$/i, '') + (n[1] === 1 ? ' cap' : ' caps'); lo += n[0]; hi += n[1]; valued++; }
+                }).catch(() => {}).finally(() => { left--; paintTot(); }));
+            });
+        }
+        // (the popup closes on a click elsewhere, or Esc)
+        document.addEventListener('mousedown', e => { if (pop && !pop.contains(e.target) && !e.target.closest?.('.dti-nbsk')) closePop(); }, true);
+        document.addEventListener('keydown', e => { if (pop && e.key === 'Escape') closePop(); });
+        function scan(root) {
+            root?.querySelectorAll?.('a[href*="impress.openneo.net"]').forEach(a => {   // (ours have the port in: :443)
+                const slug = (SLUG.exec(a.href) || [])[1];
+                if (!slug || a.closest('.dti-nbsk') || !a.textContent.trim()) return;   // (a link with no words: ours, emptied when another script put its own link in it)
+                let b = a.nextElementSibling;
+                if (b?.classList?.contains('dti-nbsk')) { if (b.shadowRoot) return; }   // (never two by one link)
+                else { b = document.createElement('span'); a.after(b); }
+                if (!asked.has(slug) && asked.size < MAX) { asked.add(slug); queue.push(slug); }   // (each DTI user looked at once — the first 20 on the page by themselves; the rest when clicked)
+                build(b, slug);
+            });
+            pump();
+        }
+        scan(document.body);
+        new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1 && !n.classList?.contains('dti-nbsk')) scan(n.matches?.('a') ? n.parentElement : n); })))
+            .observe(document.body, { childList: true, subtree: true });
+    }
+
     function runLinkify() {
         const RE_QUICK = /impress\.openneo\.net\/user\//i;
         const RE       = /(https?:\/\/)?impress\.openneo\.net\/user\/[^\s<>"\/]+\/closet[^\s<>"]*/gi;
@@ -34387,9 +35712,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 RE.lastIndex = 0;
                 while ((m = RE.exec(text)) !== null) {
                     if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-                    const href = m[0].startsWith('http') ? m[0] : 'https://' + m[0];
+                    // (the port written out — the same address, the browser drops it — so a script that re-links DTI addresses by
+                    // rewriting the post's HTML as text (the Neoboard Enhancement Suite) finds none inside our link to break)
+                    const href = (m[0].startsWith('http') ? m[0] : 'https://' + m[0]).replace(/^https?:\/\/impress\.openneo\.net/i, 'https://impress.openneo.net:443');
                     const a = document.createElement('a');
-                    a.href = href; a.textContent = m[0]; a.target = '_blank'; a.rel = 'noopener noreferrer';
+                    a.setAttribute('href', href); a.textContent = m[0]; a.target = '_blank'; a.rel = 'noopener noreferrer';
                     a.style.cssText = 'word-break:break-all';
                     frag.appendChild(a);
                     last = m.index + m[0].length;
@@ -34966,11 +36293,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     // UTILITY
     // ══════════════════════════════════════════════════════════════════════════
 
+    // (My Items' own notes, as every other toast: its green a success, its red a failure, an account's colour just news)
     function showToast(msg, bg) {
-        const t = document.createElement('div');
-        t.style.cssText = `position:fixed;bottom:24px;right:24px;background:${bg};color:#fff;padding:12px 18px;border-radius:11px;font-size:13px;font-weight:600;z-index:99999;box-shadow:0 4px 18px rgba(0,0,0,.3);max-width:360px;line-height:1.5;font-family:inherit`;
-        t.textContent = msg; document.body.appendChild(t);
-        setTimeout(() => t.remove(), 6000);
+        dtiToast(msg, { variant: bg === '#4ade80' ? 'success' : bg === '#f87171' ? 'error' : '' });
     }
 
     // ══════════════════════════════════════════════════════════════════════════
