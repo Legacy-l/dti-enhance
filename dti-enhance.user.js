@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      3.1.337
+// @version      3.2
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -13630,6 +13630,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['3.2', [
+            'Customs editor: the pose picker has three tabs \u2014 Expressions, Styles and Essences (Treasured styles go with the essences)',
+            'Import from Neopets: big imports are quicker \u2014 what a Gallery capture already found on DTI goes straight in',
+            'Mini DTI: on a Neoboards topic, a person in \u201cOn this page\u201d opens their Seeking window \u2014 what they have for you and what they want',
+            'Customs: dragging a section\u2019s heading scrolls the page too \u2014 with the mouse wheel, or near the top or bottom of the window',
+            'Fixes: a huge quantity someone uses as a label (like 999999) shows as \u00d799+ on small item tiles',
+        ]],
         ['3.1.337', [
             'The new Mini DTI is live on Neopets.com! Any bugs or improvements will be ironed out in the near future',
             'Mini DTI: on for everyone with this update \u2014 its tab sits near the top of the right edge (drag it anywhere); \u2699 \u203a Neopets turns it off',
@@ -24331,6 +24338,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     if (i.itemId && i.name) knownItems.set(i.name.toLowerCase(), { id: i.itemId, name: i.name });
                 }));
                 looked.forEach((v, k) => { if (v && !knownItems.has(k)) knownItems.set(k, v); });
+                // (a Gallery capture found these on DTI already: their ids, so the import skips its search for them (user: quicker))
+                let wn = {};
+                try { wn = JSON.parse(GM_getValue('dti_wearable_names', '') || '{}') || {}; } catch (_) {}
+                chosen.forEach(c => { const k = c.name.toLowerCase(), id = wn[k]; if (typeof id === 'string' && /^\d+$/.test(id) && !knownItems.has(k)) knownItems.set(k, { id, name: c.name }); });
                 runItemNameImport(chosen, triggerBtn || document.createElement('button'), listId, alreadyOwnedIds, knownItems);
             });
 
@@ -25272,6 +25283,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 .dti-osec-ghost { position: fixed; z-index: 2147483000; left: 0; top: 0; width: 64px; height: 64px; pointer-events: none; will-change: transform;
                     border: 2px solid var(--accent); border-radius: 14px; background: var(--surface); box-shadow: 0 10px 28px rgba(0,0,0,.28); }
                 .dti-osec-ghost img { width: 100%; height: 100%; object-fit: cover; border-radius: 12px; display: block; }
+                .dti-osec-ghost.sec { width: auto; height: auto; padding: 7px 14px; border-radius: 99px; font-size: 13px; font-weight: 800; color: var(--text); white-space: nowrap; }
                 .dti-osec-ghost b { position: absolute; right: -9px; top: -9px; min-width: 22px; height: 22px; padding: 0 6px; box-sizing: border-box; border-radius: 99px;
                     display: grid; place-items: center; background: var(--accent); color: var(--accent-fg, #fff); font-size: 11px; font-weight: 800; box-shadow: 0 0 0 2px var(--surface); }
                 /* (a section's heading: a grip on hover to drag it; while dragged, dimmed — a line where it will land) */
@@ -25606,7 +25618,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     const h = document.createElement('div');
                     h.className = 'dti-osec-h' + (shut ? ' shut' : ''); h.dataset.sec = g.id; h.style.order = base; h.hidden = !!q && !hits.length;
                     h.setAttribute('role', 'heading'); h.setAttribute('aria-level', '2');
-                    h.draggable = true;   // (a section's place — Not in a section's too: drag its heading)
+                    h.draggable = false;   // (a section's place — Not in a section's too: drag its heading, by our own dragging below)
                     h.innerHTML = '<i class="dti-osec-grip" title="Drag to move this section" aria-hidden="true"></i>'
                         + `<button type="button" class="dti-osec-fold" aria-expanded="${!shut}" title="${shut ? 'Unfold' : 'Fold'}">${ICO.chev}</button>`
                         + `<b class="dti-osec-name"${g.id ? ' title="Double-click to rename"' : ''}>${noteEsc(g.name)}</b>`
@@ -25822,7 +25834,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         }
         const edgeAt = y => { edgeY = y; if (!edgeRaf) edgeRaf = requestAnimationFrame(edgeTick); };
         const edgeStop = () => { edgeY = -1; cancelAnimationFrame(edgeRaf); edgeRaf = 0; };
-        const autoScroll = e => edgeAt(e.clientY);
         // (a section's heading dragged — Not in a section's too (user asked): where it lands — before the first heading below the pointer,
         // else last — shown by a line; dropped, the sections are in that order)
         let dragSec = null;   // (the section being dragged: its id — '' for Not in a section)
@@ -25854,38 +25865,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             list.querySelectorAll(':scope > li.dti-osec-lift').forEach(li => li.classList.remove('dti-osec-lift'));
             dragSec = null; ins.hidden = true;
             list.querySelectorAll(':scope > .dti-osec-hlift').forEach(h => h.classList.remove('dti-osec-hlift'));
-            document.removeEventListener('dragover', autoScroll); edgeStop();
+            edgeStop();
         };
-        list.addEventListener('dragstart', e => {
-            if (OSD.view !== 'sec') return;
-            const hd = e.target.closest?.('ul#outfits > .dti-osec-h');
-            if (hd) {
-                dragSec = hd.dataset.sec || '';
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/x-dti-section', dragSec || 'none');
-                document.addEventListener('dragover', autoScroll);
-                requestAnimationFrame(() => { if (dragSec !== null) hd.classList.add('dti-osec-hlift'); });
-                return;
-            }
-            if (e.target.closest?.('ul#outfits > li')) e.preventDefault();   // (a custom: our own dragging, below — not the browser's, of its link or picture)
-        });
-        list.addEventListener('dragover', e => {
-            if (dragSec === null) return;
-            e.preventDefault(); e.dataTransfer.dropEffect = 'move'; secLand(e.clientY);
-        });
-        list.addEventListener('dragleave', e => { if (dragSec !== null && !list.contains(e.relatedTarget)) ins.hidden = true; });
-        list.addEventListener('drop', e => {
-            if (dragSec === null) return;
-            e.preventDefault();
-            const sid = dragSec, before = secLand(e.clientY);
-            endDrag(); moveSection(sid, before);
-        });
-        list.addEventListener('dragend', endDrag);
-        // (a custom dragged (user asked: the page scrolls under it as you go — the mouse wheel too, which the browser's own dragging holds
-        // still on Windows): by the pointer, its picture following; dropped anywhere in a section's stretch of the page, it's in that
-        // section. A press that doesn't move is still a click; Esc lets go)
-        let pd = null;   // (a press on a custom — dragging once it's moved: { li, x, y, cx, cy, on, sid, ghost })
-        function pdOver() {   // (the section under the pointer — after a move or a scroll)
+        // (the browser's own dragging of a custom's link or picture: not here — ours, below)
+        list.addEventListener('dragstart', e => { if (OSD.view === 'sec' && e.target.closest?.('ul#outfits > li')) e.preventDefault(); });
+        // (a custom — or a section's heading — dragged (user asked: the page scrolls under it as you go — the mouse wheel too, which the
+        // browser's own dragging holds still on Windows): by the pointer, a picture of it following. A custom dropped anywhere in a section's
+        // stretch of the page is in that section; a heading goes where its line shows. A press that doesn't move is still a click; Esc lets go)
+        let pd = null;   // (a press on a custom or a heading — dragging once it's moved: { li | h, sec, x, y, cx, cy, on, sid, before, ghost })
+        function pdOver() {   // (where it would land — after a move or a scroll)
+            if (pd.h) { pd.before = secLand(pd.cy); return; }
             const el = document.elementFromPoint(pd.cx, pd.cy);
             pd.sid = el ? dropSec({ target: el, clientY: pd.cy }) : null;
             markDrop(pd.sid);
@@ -25898,19 +25887,21 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             d.ghost.remove();
             const ids = dragIds;
             endDrag();
-            // (the click that ends it isn't a click: nothing opened, nothing ticked)
+            // (the click that ends it isn't a click: nothing opened, ticked or folded)
             const eat = e => { e.preventDefault(); e.stopPropagation(); };
             window.addEventListener('click', eat, true);
             setTimeout(() => window.removeEventListener('click', eat, true), 0);
+            if (drop && d.h) return moveSection(d.sec, d.before ?? null);
             if (!drop || d.sid == null) return;
             moveMany(ids, d.sid, ids.length === 1);   // (one: you see it move; several: a toast, with Undo)
             afterMove();
         }
         list.addEventListener('pointerdown', e => {
             if (OSD.view !== 'sec' || e.button !== 0 || e.pointerType === 'touch' || pd?.on) return;
-            const li = e.target.closest?.('ul#outfits > li');
-            pd = li && outfitId(li) && !e.target.closest('button, [role="button"], input, select, textarea, [contenteditable="true"]')   // (its buttons stay buttons)
-                ? { li, x: e.clientX, y: e.clientY, cx: e.clientX, cy: e.clientY, on: false, sid: null, ghost: null } : null;
+            const t = e.target.closest?.('ul#outfits > li, ul#outfits > .dti-osec-h'), li = t?.matches('li') ? t : null;
+            const ok = t && (li ? outfitId(li) : !t.querySelector('.dti-osec-ren'))   // (a heading being renamed: its words picked with the mouse)
+                && !e.target.closest('button, [role="button"], input, select, textarea, [contenteditable="true"]');   // (its buttons stay buttons)
+            pd = ok ? { li, h: li ? null : t, sec: li ? '' : t.dataset.sec || '', x: e.clientX, y: e.clientY, cx: e.clientX, cy: e.clientY, on: false, sid: null, before: null, ghost: null } : null;
         });
         document.addEventListener('selectstart', e => { if (pd) e.preventDefault(); });   // (no words picked up on the way)
         document.addEventListener('pointermove', e => {
@@ -25918,14 +25909,21 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             pd.cx = e.clientX; pd.cy = e.clientY;
             if (!pd.on) {
                 if (Math.hypot(pd.cx - pd.x, pd.cy - pd.y) < 6) return;
-                const id = outfitId(pd.li), img = pd.li.querySelector('img');
                 pd.on = true;
-                dragIds = selOn && sel.has(id) ? [...sel] : [id];   // (a ticked one brings the rest of the selection along)
-                const lift = new Set(dragIds);
-                items.forEach(x => { if (lift.has(outfitId(x))) x.classList.add('dti-osec-lift'); });
                 pd.ghost = document.createElement('div');
-                pd.ghost.className = 'dti-osec-ghost';
-                pd.ghost.innerHTML = (img ? `<img src="${noteEsc(img.currentSrc || img.src)}" alt="">` : '') + (dragIds.length > 1 ? `<b>${dragIds.length}</b>` : '');
+                if (pd.h) {   // (a heading: its name following)
+                    dragSec = pd.sec;
+                    pd.h.classList.add('dti-osec-hlift');
+                    pd.ghost.className = 'dti-osec-ghost sec';
+                    pd.ghost.textContent = pd.h.querySelector('.dti-osec-name')?.textContent || 'Section';
+                } else {
+                    const id = outfitId(pd.li), img = pd.li.querySelector('img');
+                    dragIds = selOn && sel.has(id) ? [...sel] : [id];   // (a ticked one brings the rest of the selection along)
+                    const lift = new Set(dragIds);
+                    items.forEach(x => { if (lift.has(outfitId(x))) x.classList.add('dti-osec-lift'); });
+                    pd.ghost.className = 'dti-osec-ghost';
+                    pd.ghost.innerHTML = (img ? `<img src="${noteEsc(img.currentSrc || img.src)}" alt="">` : '') + (dragIds.length > 1 ? `<b>${dragIds.length}</b>` : '');
+                }
                 document.body.appendChild(pd.ghost);
                 document.documentElement.classList.add('dti-osec-dragging');
                 getSelection()?.removeAllRanges();
@@ -29505,8 +29503,54 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             });
             // the grid shows pictures only — names as tooltips
             pop.querySelectorAll('.chakra-tabs__tab-panel form label:not([title])').forEach(l => { l.title = l.textContent.trim(); });
+            markStyles(); paintTabs();
             if (on) sharpenStyles();
         };
+        // Expressions · Styles · Essences (user asked: three tabs, not two — essences, Treasured styles with them, apart from the rest):
+        // our own bar in place of DTI's two tabs, working them. Styles and Essences are DTI's one Styles list, each showing its kind —
+        // Default in both; it opens on the kind of the style you're wearing
+        const ESS_RE = /^(?:prismatic [^:]+:\s*)?(?:(?:all-star )?essence of |treasured )/i;
+        const dtiTabList = () => pop.querySelector('.chakra-tabs__tablist:not(.dti-pp-tabs)');
+        const markStyles = () => pop.querySelectorAll('.chakra-tabs__tab-panel form label:not([data-dti-k])').forEach(l => {
+            l.dataset.dtiK = l.querySelector('input')?.value === '' ? 'def' : ESS_RE.test(l.textContent.trim()) ? 'ess' : 'sty';
+        });
+        let lastPick;
+        function paintTabs() {
+            const tl = dtiTabList(), dt = tl ? [...tl.querySelectorAll('.chakra-tabs__tab')] : [];
+            if (dt.length < 2) return;
+            let bar = pop.querySelector('.dti-pp-tabs');
+            if (!bar) {
+                bar = document.createElement('div');
+                bar.className = 'chakra-tabs__tablist dti-pp-tabs'; bar.setAttribute('role', 'tablist');
+                bar.innerHTML = [['expr', 'Expressions'], ['sty', 'Styles'], ['ess', 'Essences']].map(([k, l]) => `<button type="button" role="tab" class="chakra-tabs__tab" data-dti-k="${k}">${l}</button>`).join('');
+                bar.addEventListener('click', e => {
+                    const b = e.target.closest('button[data-dti-k]'), t = dtiTabList()?.querySelectorAll('.chakra-tabs__tab');
+                    if (!b || b.disabled || !t) return;
+                    e.preventDefault(); e.stopPropagation();
+                    if (b.dataset.dtiK === 'expr') t[0]?.click();
+                    else { pop.dataset.dtiStyKind = b.dataset.dtiK; t[1]?.click(); }
+                    paintTabs();
+                });
+                pop.classList.add('dti-pp-3tabs');
+            }
+            if (bar.previousElementSibling !== tl) tl.after(bar);
+            const picked = pop.querySelector('.chakra-tabs__tab-panel form input:checked'), pv = picked ? picked.value : null;
+            if (pv !== lastPick) {   // (a style put on — or the one you're wearing as it opens: its kind's tab)
+                lastPick = pv;
+                const k = picked?.closest('label')?.dataset.dtiK;
+                if (k === 'ess' || k === 'sty') pop.dataset.dtiStyKind = k; else if (!pop.dataset.dtiStyKind) pop.dataset.dtiStyKind = 'sty';
+            }
+            const on = dt[1].getAttribute('aria-selected') === 'true' ? pop.dataset.dtiStyKind : 'expr';
+            const anyEss = !!pop.querySelector('.chakra-tabs__tab-panel form label[data-dti-k="ess"]');
+            bar.querySelectorAll('button').forEach(b => {
+                const sel = String(b.dataset.dtiK === on);
+                if (b.getAttribute('aria-selected') !== sel) b.setAttribute('aria-selected', sel);
+                if (b.dataset.dtiK === 'ess') {
+                    const dis = !anyEss && on !== 'ess';
+                    if (b.disabled !== dis) { b.disabled = dis; b.title = dis ? 'No essences or Treasured styles for this pet' : ''; }
+                }
+            });
+        }
         // The grid's pictures: each style worn on a pet (itemdb's 600px preview, as My Tokens' big tiles) cropped to the pet
         // and drawn at the tile's size (TokThumb) — not Neopets' 80px token (blurry blown up, with its hanger in the
         // corner). All of them are asked for as soon as the grid shows, the ones on screen first, so they're ready before
@@ -33012,6 +33056,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .chakra-popover__content .chakra-tabs__tab:hover:not([aria-selected="true"]) { color: var(--text) !important; }
             .chakra-popover__content .chakra-tabs__tab[aria-selected="true"] { background: var(--accent) !important; color: var(--accent-fg, #fff) !important; }
             .chakra-popover__content .chakra-tabs__tab:focus-visible { box-shadow: 0 0 0 3px var(--accent-glow) !important; }
+            /* (three tabs — Expressions · Styles · Essences: ours in place of DTI's two, which it works) */
+            .dti-pp-3tabs .chakra-tabs__tablist:not(.dti-pp-tabs) { display: none !important; }
+            .dti-pp-tabs { display: flex !important; }
+            .dti-pp-tabs .chakra-tabs__tab { flex: 1 1 0; background: transparent; font-family: inherit; cursor: pointer; }
+            .dti-pp-tabs .chakra-tabs__tab:disabled { opacity: .45; cursor: default; }
+            .chakra-popover__content[data-dti-sty-kind="sty"] .chakra-tabs__tab-panel form label[data-dti-k="ess"],
+            .chakra-popover__content[data-dti-sty-kind="ess"] .chakra-tabs__tab-panel form label[data-dti-k="sty"] { display: none !important; }
             /* Expressions: the faces, with an accent ring on the one you're using */
             .chakra-popover__content table { margin: 0 auto !important; border-collapse: separate !important; border-spacing: 10px 6px !important; }
             .chakra-popover__content table th { padding: 0 !important; text-align: center !important; }
@@ -34333,7 +34384,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 ${it.img ? `<img class="pic" src="${esc(it.img)}" alt="" loading="lazy">` : '<span class="pic none"></span>'}
                 <span class="nm">${esc(it.name)}</span>
                 ${o.sub ? `<span class="sub${o.subCls ? ' ' + o.subCls : ''}">${o.sub}</span>` : it.nc ? `<span class="v" data-val="${esc(it.name)}" hidden></span>` : ''}
-                ${it.nc ? '<i class="kd">NC</i>' : it.pb ? '<i class="kd pb">PB</i>' : ''}${o.qty > 1 ? `<i class="qt">×${o.qty}</i>` : ''}${o.marks === false ? '' : marksOf(it, skt)}
+                ${it.nc ? '<i class="kd">NC</i>' : it.pb ? '<i class="kd pb">PB</i>' : ''}${o.qty > 1 ? `<i class="qt">×${o.qty > 99 ? '99+' : o.qty}</i>` : ''}${o.marks === false ? '' : marksOf(it, skt)}
                 ${skt ? `<span class="skt${seekHas(it.id) ? ' on' : ''}" data-sktog title="${seekHas(it.id) ? 'On your Seeking list — click to take it off' : 'Seeking now: add it to your Seeking list'}">${ICO.seeking}</span>` : ''}
             </button>`;
         }
@@ -34576,6 +34627,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .rt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
             .rt b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .rt small { font-size: 11.5px; color: var(--m); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            button.rt { padding: 0; border: none; background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+            button.rt:hover b { color: var(--at); text-decoration: underline; }
             .rt .v { align-self: flex-start; padding: 0 7px; border-radius: 99px; background: var(--ag); color: var(--at); font-size: 10.5px; font-weight: 700; line-height: 18px; }
             .row .new { flex: none; padding: 0 8px; border-radius: 99px; background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); font-size: 10.5px; font-weight: 800; line-height: 20px; white-space: nowrap; }
             .rm { width: 28px; height: 28px; flex: none; padding: 0; border: none; border-radius: 8px; background: none; color: var(--m); cursor: pointer; font-size: 17px; line-height: 1; }
@@ -35085,7 +35138,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 const n = boardRows.filter(r => r.seek || r.want).length;
                 return { n, sig: `board|${ctx.topic}|${boardRows.filter(r => r.seek || r.want).map(r => `${r.slug}:${r.seek}:${r.want}`).sort().join(',')}`, tip: n ? `${plural(n, 'person')} here ${n === 1 ? 'has' : 'have'} things you’re after` : '',
                     body: `<div class="hline">The DTI lists linked in this topic — what they have for you</div><div class="card"><div class="rows">${boardRows.map(r => `<div class="row">
-                        <span class="rt"><b>${esc(r.who)}</b><small>${r.seek} Seeking · ${r.want ?? '?'} Wanted · ${r.they ?? '?'} They want</small></span>
+                        ${window.__dtiNbSeek ? `<button type="button" class="rt" data-nbopen="${esc(r.slug)}" title="What they have for you and what they want — the items, with their values">` : '<span class="rt">'}<b>${esc(r.who)}</b><small>${r.seek} Seeking · ${r.want ?? '?'} Wanted · ${r.they ?? '?'} They want</small>${window.__dtiNbSeek ? '</button>' : '</span>'}
                         ${r.np ? `<a class="ibtn" href="https://www.neopets.com/neomessages.phtml?type=send&recipient=${encodeURIComponent(r.np)}" title="Neomail ${esc(r.np)}">${ICO.mail}</a>` : ''}
                         <a class="btn sm" href="${D}/user/${encodeURIComponent(r.slug)}/closet" target="_blank" rel="noopener">Their lists ${ICO.ext}</a></div>`).join('')}</div></div>` };
             }
@@ -35894,7 +35947,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         }
 
         // ════ Clicks, keys and the window's edge ════
-        const ACT = ['[data-go]', '[data-malltab]', '[data-recentclear]', '[data-ctxfold]', '[data-import]', '[data-capture]', '[data-newwith]', '[data-studioread]', '[data-tkgo]',
+        const ACT = ['[data-go]', '[data-nbopen]', '[data-malltab]', '[data-recentclear]', '[data-ctxfold]', '[data-import]', '[data-capture]', '[data-newwith]', '[data-studioread]', '[data-tkgo]',
             '[data-scope]', '[data-chip]', '[data-smore]', '[data-mseg]', '[data-minere]', '[data-mineall]',
             '[data-item]', '[data-iback]', '[data-iseek]', '[data-itrades]', '[data-trall]', '[data-lq]', '[data-lsave]', '[data-itrade]', '[data-inew]',
             '[data-skrm]', '[data-skcopy]', '[data-sktog]', '[data-seenrm]', '[data-seenclr]',
@@ -35971,6 +36024,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const d = b.dataset;
             // ── going places ──
             if (d.go) return goTab(d.go);
+            if (d.nbopen) {   // (their Seeking window — the Neoboards' own — beside the Mini, level with the row)
+                const wr = win.getBoundingClientRect();
+                document.dispatchEvent(new CustomEvent('dti-nb-open', { detail: { slug: d.nbopen, at: { left: wr.left, top: b.getBoundingClientRect().top } } }));
+                return;
+            }
             if (d.malltab) { ui.mallTab = d.malltab; return rerender(); }
             if ('recentclear' in d) { GM_setValue('dti_np_recent', []); return rerender(); }
             if ('ctxfold' in d) { const f = GM_getValue('dti_np_ctx_fold', {}) || {}; f[ctx.kind] = !f[ctx.kind]; GM_setValue('dti_np_ctx_fold', f); return rerender(); }
@@ -36214,7 +36272,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         tab.addEventListener('pointercancel', endDrag);
         tab.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openWin(!win || win.hidden); } });
         // a click anywhere else, or Esc, closes it
-        document.addEventListener('pointerdown', e => { if (win && !win.hidden && !e.composedPath().includes(host)) openWin(false); }, true);
+        document.addEventListener('pointerdown', e => { if (win && !win.hidden && !e.composedPath().some(n => n === host || n?.id === 'dti-nb-pop')) openWin(false); }, true);   // (the Seeking window it opened: not "outside")
         document.addEventListener('keydown', e => { if (e.key === 'Escape' && win && !win.hidden) openWin(false); });
         if (ctx?.kind === 'mall' && (seekAll().length || slug())) mallLoad();   // (the NC Mall: anything you want in it? — for the dot)
         paintBadge();
@@ -36737,6 +36795,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         if (!fill()) document.addEventListener('DOMContentLoaded', fill, { once: true });
     }
     function runNbSeek() {
+        window.__dtiNbSeek = true;   // (the Mini DTI's "On this page" opens its window too)
         const SLUG = /impress\.openneo\.net\/user\/([^/?#\s"'<>]+)\/closet/i, KEEP = 2 * 3600e3, MAX = 20, D = 'https://impress.openneo.net';
         const ICO = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.6"/><path d="M8 .9v2.2M8 12.9v2.2M.9 8h2.2M12.9 8h2.2"/></svg>';   // (Seeking's own)
         // (the pill — user asked: Seeking's orange symbol to start, a click opens it out to the counts. Its own shadow root: the board's
@@ -36866,7 +36925,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         }
         let pop = null;
         const closePop = () => { pop?.remove(); pop = null; };
-        function openPop(b, slug, focus) {
+        function openPop(b, slug, focus, at) {   // (at: from the Mini DTI — beside its window, level with the row clicked there)
             closePop();
             const r = results.get(slug);
             if (r === 'busy') return;
@@ -36882,12 +36941,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 : bs.mode === 'solid' ? { bg: 'var(--accent)', fg: 'var(--accent-fg)', bd: 'var(--accent)' }
                 : { bg: 'color-mix(in srgb, var(--accent) 14%, var(--surface))', fg: 'color-mix(in srgb, var(--accent) 82%, var(--text))', bd: 'color-mix(in srgb, var(--accent) 38%, var(--border))' };
             pop = document.createElement('div');
+            pop.id = 'dti-nb-pop';
             pop.dataset.style = tk.style || '';
             const sh = pop.attachShadow({ mode: 'open' });
             // (an item: its picture, name, NC / NP and cap value — how many and which of their lists on hover; a click opens their DTI page at it)
             const tile = x => `<a class="t" href="${noteEsc(home)}#dti-jump=${noteEsc(x.id)}" target="_blank" rel="noopener" data-id="${noteEsc(x.id)}" data-name="${noteEsc(x.name)}"${x.nc ? ' data-nc="1"' : ''}`
                 + ` title="${noteEsc(x.name)}&#10;In their \u201c${noteEsc(x.list)}\u201d${x.qty > 1 ? ` (\u00d7${x.qty})` : ''} \u2014 click to see it on DTI">`
-                + `<span class="pic">${x.img ? `<img src="${noteEsc(x.img)}" alt="" loading="lazy">` : ''}${x.qty > 1 ? `<i class="q">\u00d7${x.qty}</i>` : ''}</span>`
+                + `<span class="pic">${x.img ? `<img src="${noteEsc(x.img)}" alt="" loading="lazy">` : ''}${x.qty > 1 ? `<i class="q">\u00d7${x.qty > 99 ? '99+' : x.qty}</i>` : ''}</span>`
                 + `<span class="nm">${noteEsc(x.name || 'Item ' + x.id)}</span><span class="b"><i class="k${x.nc ? ' nc' : ''}">${x.nc ? 'NC' : 'NP'}</i><i class="v"></i></span><i class="ck" aria-hidden="true"></i></a>`;
             // (a group: its count as a badge in its colour, its title — nothing there: one quiet line)
             const group = (key, list, head, sub, none, unknown) => {
@@ -36990,9 +37050,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 <div class="body">${group('seek', r.seek, 'Seeking', 'they have', 'nothing from your Seeking list', '')}${group('want', r.want, 'Wanted', 'they have', 'nothing from your wishlist', NOT_KNOWN)}${group('they', r.they, 'They Want', 'you have', 'nothing you have', NOT_KNOWN)}</div>
                 <div class="ft"><button type="button" class="pick" role="switch" aria-checked="false" title="Pick the items a trade could take in \u2014 a Neomail to them then opens with their names in"><i class="sw" aria-hidden="true"></i>Select items</button><span class="said" role="status"></span><button type="button" class="offer" hidden disabled title="A Neomail to them with the picked items\u2019 names in: Seeking and Wanted, an empty line, then They Want \u2014 the rest is yours to write"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><rect x="1.8" y="3.2" width="12.4" height="9.6" rx="1.6"/><path d="m2.4 4.2 5.6 4.4 5.6-4.4"/></svg>Neomail</button></div></div>`;
             document.body.appendChild(pop);
-            const rect = b.getBoundingClientRect(), w = Math.min(392, innerWidth - 16), h = Math.min(innerHeight * .74, sh.querySelector('.card').offsetHeight || 400);
-            pop.style.left = Math.max(8, Math.min(rect.left, innerWidth - w - 8)) + 'px';
-            pop.style.top = (rect.bottom + 6 + h < innerHeight - 8 ? rect.bottom + 6 : Math.max(8, rect.top - 6 - h)) + 'px';
+            const w = Math.min(392, innerWidth - 16), h = Math.min(innerHeight * .74, sh.querySelector('.card').offsetHeight || 400);
+            if (at) {
+                pop.style.left = Math.max(8, at.left - w - 10) + 'px';
+                pop.style.top = Math.max(8, Math.min(at.top, innerHeight - h - 8)) + 'px';
+            } else {
+                const rect = b.getBoundingClientRect();
+                pop.style.left = Math.max(8, Math.min(rect.left, innerWidth - w - 8)) + 'px';
+                pop.style.top = (rect.bottom + 6 + h < innerHeight - 8 ? rect.bottom + 6 : Math.max(8, rect.top - 6 - h)) + 'px';
+            }
             sh.querySelector('.x').addEventListener('click', closePop);
             // (Select items (user asked — in place of a drafted offer): pick what a trade could take in. On, a click picks a tile instead of
             // opening it, All a whole group; Neomail opens a Neomail to them with the names in, a comma between: Seeking and Wanted, an empty
@@ -37071,6 +37137,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // (the popup closes on a click elsewhere, or Esc)
         document.addEventListener('mousedown', e => { if (pop && !pop.contains(e.target) && !e.target.closest?.('.dti-nbsk')) closePop(); }, true);
         document.addEventListener('keydown', e => { if (pop && e.key === 'Escape') closePop(); });
+        // (someone's row in the Mini DTI's "On this page" (user asked): this same window — their lists looked at first if they haven't
+        // been on this page)
+        document.addEventListener('dti-nb-open', async e => {
+            const { slug, at } = e.detail || {};
+            if (!slug) return;
+            for (let i = 0; i < 60 && results.get(slug) === 'busy'; i++) await new Promise(r => setTimeout(r, 250));
+            if (!results.get(slug) || ['busy', 'fail'].includes(results.get(slug))) await check(slug);
+            if (!['busy', 'fail'].includes(results.get(slug) || 'fail')) openPop(pillsOf(slug)[0] || null, slug, '', at);
+        });
         function scan(root) {
             root?.querySelectorAll?.('a[href*="impress.openneo.net"]').forEach(a => {   // (ours have the port in: :443)
                 const slug = (SLUG.exec(a.href) || [])[1];
@@ -37442,8 +37517,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         addEventListener('pagehide', () => { if (wearSaveT) wearSave(); });
         function onDti(name) {
             if (!wearKnown) { try { wearKnown = JSON.parse(GM_getValue(WEAR_KEY, '') || '{}') || {}; } catch (_) { wearKnown = {}; } }
-            const v = wearKnown[name.toLowerCase()];
-            return v === 1 ? true : v === 0 ? false : undefined;
+            const v = wearKnown[name.toLowerCase()];   // (0 not on DTI; its DTI id — or 1, from before ids were kept — on DTI)
+            return v === 0 ? false : v == null ? undefined : true;
         }
         function askDti(names) {
             names.forEach(n => { if (!dtiAsked.has(n)) { dtiAsked.add(n); dtiQueue.push(n); } });
@@ -37451,7 +37526,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 const name = dtiQueue.shift();
                 dtiBusy++;
                 const done = hit => {
-                    if (hit !== undefined) { wearKnown[name.toLowerCase()] = hit ? 1 : 0; if (!wearSaveT) wearSaveT = setTimeout(wearSave, 3000); }
+                    if (hit !== undefined) { wearKnown[name.toLowerCase()] = hit || 0; if (!wearSaveT) wearSaveT = setTimeout(wearSave, 3000); }
                     dtiBusy--;
                     if (dtiQueue.length || dtiBusy) {
                         if (!wearAddT) wearAddT = setTimeout(wearAdd, 1200);
@@ -37466,7 +37541,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     headers: { Accept: 'application/json' }, timeout: 15000,
                     onload: r => {
                         let hit;
-                        try { if (r.status === 200) hit = (JSON.parse(r.responseText).items || []).some(x => x.name.toLowerCase() === name.toLowerCase()); } catch (_) {}
+                        try { if (r.status === 200) { const it = (JSON.parse(r.responseText).items || []).find(x => x.name.toLowerCase() === name.toLowerCase()); hit = it ? String(it.id) : false; } } catch (_) {}
                         done(hit);
                     },
                     onerror: () => done(), ontimeout: () => done(),
