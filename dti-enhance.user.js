@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      3.2.2
+// @version      3.2.3
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -13667,6 +13667,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['3.2.3', [
+            'Customs editor: putting an item on in tile view keeps your place in the list \u2014 it no longer jumps back to the top',
+            'Neopets: the place=9999 switch turns randomfriend.phtml links into user lookups at place=9999 too',
+        ]],
         ['3.2.2', [
             'My Tokens: the tokens you own get lists of their own too (Keep, For trade, anything) \u2014 apart from your want lists, under the filters when Owned is picked, with Move all and drag onto a list',
             'Mini DTI: Tokens shows your owned lists as well as your want lists \u2014 grouped by list, a chip for just one, and a token\u2019s panel puts it in a list or a new one',
@@ -17991,7 +17995,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const lookupTg = document.createElement('button');   // (user asked: every userlookup link on Neopets at place=9999)
         lookupTg.type = 'button'; lookupTg.id = 'dti-lookup9999-toggle';
         lookupTg.className = 'dti-toggle-row' + (GM_getValue('dti_np_lookup9999', false) ? ' active' : '');
-        lookupTg.innerHTML = '<span class="dti-toggle-txt"><b>User lookups at place=9999</b><small>Every userlookup link on Neopets opens with place=9999 \u2014 the same page, without the captcha</small></span><span class="dti-ts"></span>';
+        lookupTg.innerHTML = '<span class="dti-toggle-txt"><b>User lookups at place=9999</b><small>Every user lookup link on Neopets (randomfriend ones too) opens with place=9999 \u2014 the same page, without the captcha</small></span><span class="dti-ts"></span>';
         lookupTg.addEventListener('click', () => {
             const next = !GM_getValue('dti_np_lookup9999', false);
             GM_setValue('dti_np_lookup9999', next);
@@ -31813,6 +31817,19 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 edLockKeep();
             }, true);
         }
+        // Putting an item on keeps your place in the list (user: "putting on an item while scrolled down brings me back to top of scroll"): a
+        // click on an item focuses its hidden tick box, which sits at the tile's top corner — with the tile's top scrolled out of sight the
+        // browser scrolled the list to show it (centred, so near the start: back to the top). It's focused here first without scrolling, so
+        // the click only ticks it. (A click the lock already handled, the tile's own buttons, and the keyboard: as before)
+        if (!window.__dtiKeepPlaceWired) {
+            window.__dtiKeepPlaceWired = true;
+            document.addEventListener('click', e => {
+                const t = e.target, r = document.getElementById('wardrobe-2020-root');
+                if (e.defaultPrevented || !r || !t?.closest || !r.contains(t) || t.closest('button, a, input, select, textarea, [role="button"]')) return;
+                const inp = t.closest('label')?.control;
+                if (inp && document.activeElement !== inp) inp.focus({ preventScroll: true });
+            }, true);
+        }
         function srPark() {   // (Custom items: the search kept, DTI's emptied by its own ✕ — then ours cleared: every one of the custom's items)
             srParked = srSnap();
             srWait = 'back'; srWaitAt = Date.now();   // (Back to search at once — greyed out till DTI's search has gone)
@@ -36892,10 +36909,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     // Userlookup links at place=9999 (user asked; ⚙ › Neopets, off till turned on): the same page, without the captcha — every one on the
     // page, and any that come later; the link's other parts kept, place=9999 first
     function runLookup9999() {
-        const fix = root => root?.querySelectorAll?.('a[href*="userlookup.phtml"]').forEach(a => {
+        const fix = root => root?.querySelectorAll?.('a[href*="userlookup.phtml"], a[href*="randomfriend.phtml"]').forEach(a => {
             let u;
             try { u = new URL(a.href, location.href); } catch (_) { return; }
-            if (!/(^|\.)neopets\.com$/i.test(u.hostname) || u.pathname !== '/userlookup.phtml' || u.searchParams.get('place') === '9999') return;
+            const rf = u.pathname === '/randomfriend.phtml' && !!u.searchParams.get('user');   // (randomfriend.phtml?user= — that person's lookup too; user asked)
+            if (!/(^|\.)neopets\.com$/i.test(u.hostname) || !(rf || u.pathname === '/userlookup.phtml') || (!rf && u.searchParams.get('place') === '9999')) return;
+            u.pathname = '/userlookup.phtml';
             u.search = '?' + new URLSearchParams([['place', '9999'], ...[...u.searchParams].filter(([k]) => k !== 'place')]).toString();
             a.href = u.href;
         });
