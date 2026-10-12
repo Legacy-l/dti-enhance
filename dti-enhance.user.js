@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      3.2.1
+// @version      3.2.2
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -558,11 +558,12 @@
         },
     };
     // ── Your own lists for the tokens you want ("Really want", "Just like"…): each wanted token in one of them, or in none.
-    // GM `dti_tok_lists` = { lists: [{ id, name, color }], of: { tokenKey: listId } } — the same lists for every account
+    // GM `dti_tok_lists` = { lists: [{ id, name, color }], of: { tokenKey: listId } } — the same lists for every account; `dti_tok_olists`
+    // the same, for the tokens you own (lists of their own, apart from the want lists — user asked)
     const TOK_LIST_COLORS = ['#ef4444', '#f59e0b', '#10b981', '#0ea5e9', '#6366f1', '#ec4899', '#a855f7', '#14b8a6'];
-    const TokLists = {
-        raw() { const d = GM_getValue('dti_tok_lists', null); return d && Array.isArray(d.lists) ? { lists: d.lists, of: d.of && typeof d.of === 'object' ? d.of : {} } : { lists: [], of: {} }; },
-        save(d) { GM_setValue('dti_tok_lists', d); },
+    const tokListStore = gm => ({
+        raw() { const d = GM_getValue(gm, null); return d && Array.isArray(d.lists) ? { lists: d.lists, of: d.of && typeof d.of === 'object' ? d.of : {} } : { lists: [], of: {} }; },
+        save(d) { GM_setValue(gm, d); },
         listOf(d, key) { const id = d.of[key]; return id ? d.lists.find(l => l.id === id) || null : null; },
         named(name) { const n = String(name || '').trim().toLowerCase(); return this.raw().lists.find(l => l.name.toLowerCase() === n) || null; },
         put(key, id) { const d = this.raw(); if (id && d.lists.some(l => l.id === id)) d.of[key] = id; else delete d.of[key]; this.save(d); },
@@ -583,26 +584,27 @@
             this.save(d);
         },
         drop(id) { const d = this.raw(); d.lists = d.lists.filter(x => x.id !== id); Object.keys(d.of).forEach(k => { if (d.of[k] === id) delete d.of[k]; }); this.save(d); },
-    };
-    // A token's want list (its card's list button, or the small popover on NC Styles pages): pick one, none, or make a new one
-    function openTokListMenu(anchor, key, after) {
+    });
+    const TokLists = tokListStore('dti_tok_lists'), TokOwnLists = tokListStore('dti_tok_olists');
+    // A token's want list — or (`own`) its owned list (its card's list button, or the small popover on NC Styles pages): pick one, none, or make a new one
+    function openTokListMenu(anchor, key, after, own) {
         const open = document.querySelector('.dti-tk-lmenu');
         if (open?._anchor === anchor) return open._close();
-        const d = TokLists.raw(), cur = d.of[key] && d.lists.some(l => l.id === d.of[key]) ? d.of[key] : '';
+        const S = own ? TokOwnLists : TokLists, d = S.raw(), cur = d.of[key] && d.lists.some(l => l.id === d.of[key]) ? d.of[key] : '';
         const tick = '<small>\u2713</small>';
         const menu = document.createElement('div');
         menu.className = 'dti-tk-lmenu';
-        menu.innerHTML = `<div class="dti-tk-tmhd">Want list</div>
+        menu.innerHTML = `<div class="dti-tk-tmhd">${own ? 'Owned list' : 'Want list'}</div>
             ${d.lists.length ? `<div class="dti-tk-lmlist">${d.lists.map(l => `<button type="button" data-put="${noteEsc(l.id)}" style="--lc:${noteEsc(l.color)}"${cur === l.id ? ' class="on"' : ''}><i class="dot"></i><span>${noteEsc(l.name)}</span>${cur === l.id ? tick : ''}</button>`).join('')}
-                <button type="button" data-put=""${!cur ? ' class="on"' : ''}><i class="dot none"></i><span>No list</span>${!cur ? tick : ''}</button></div>` : '<p class="dti-tk-lmnote">Make a list for the tokens you want \u2014 Really want, Just like, anything.</p>'}
-            <form class="dti-tk-lmnew"><input type="text" maxlength="40" placeholder="${d.lists.length ? 'New list\u2026' : 'Its name \u2014 e.g. Really want'}" autocomplete="off" spellcheck="false" aria-label="New list name"><button type="submit">Add</button></form>`;
+                <button type="button" data-put=""${!cur ? ' class="on"' : ''}><i class="dot none"></i><span>No list</span>${!cur ? tick : ''}</button></div>` : `<p class="dti-tk-lmnote">Make a list for the tokens you ${own ? 'own \u2014 Keep, For trade' : 'want \u2014 Really want, Just like'}, anything.</p>`}
+            <form class="dti-tk-lmnew"><input type="text" maxlength="40" placeholder="${d.lists.length ? 'New list\u2026' : `Its name \u2014 e.g. ${own ? 'Keep' : 'Really want'}`}" autocomplete="off" spellcheck="false" aria-label="New list name"><button type="submit">Add</button></form>`;
         const close = tokFloat(menu, anchor);
-        const put = id => { TokLists.put(key, id); close(); after?.(); };
+        const put = id => { S.put(key, id); close(); after?.(); };
         menu.addEventListener('click', e => { const b = e.target.closest('[data-put]'); if (b) put(b.dataset.put); });
         menu.querySelector('form').addEventListener('submit', e => {
             e.preventDefault();
             const v = menu.querySelector('.dti-tk-lmnew input').value.trim();
-            if (v) put(TokLists.create(v));
+            if (v) put(S.create(v));
         });
         if (!d.lists.length) menu.querySelector('.dti-tk-lmnew input').focus();
     }
@@ -1030,6 +1032,7 @@
         if (/^\/(inventory\.phtml|safetydeposit\.phtml|closet\.phtml|gallery\/index\.phtml|stylingchamber\/)/.test(location.pathname)) npSafe('NC values', runNeopetsNcValues);
         // NC gift tracking (optional, off unless turned on in DTI's ⚙ › Neopets) — starts at once, so fast clicks are caught
         if (window.top === window && GM_getValue('dti_track_gifts', false)) npSafe('NC gift tracking', runGiftTracker);
+        if (window.top === window && GM_getValue('dti_np_lookup9999', false)) npSafe('lookup links', runLookup9999);
         // A small DTI button on Neopets pages, with your trade reports, an item search and DTI's pages (optional — DTI's ⚙ › Neopets)
         if (window.top === window && GM_getValue('dti_np_fab', true)) {
             const go = () => npSafe('DTI button', runNeopetsFab);
@@ -4899,10 +4902,12 @@
                         <span class="dti-lp-step"><button type="button" data-d="-1" aria-label="One less"${info.want ? '' : ' disabled'}>−</button><input type="number" value="${info.want}" readonly tabindex="-1" aria-label="How many you want"><button type="button" data-d="1" aria-label="One more">+</button></span>
                     </div>
                     ${info.want ? (l => `<div class="dti-lp-row dti-lp-wl"><span class="dti-lp-name">Want list</span><button type="button" class="dti-tk-lbtn${l ? ' set' : ''}"${l ? ` style="--lc:${noteEsc(l.color)}"` : ''}>${l ? `<i class="dot"></i><span>${noteEsc(l.name)}</span>` : '<span>+ Add to a list</span>'}<em>\u25be</em></button></div>`)(TokLists.listOf(TokLists.raw(), key)) : ''}
+                    ${info.own ? (l => `<div class="dti-lp-row dti-lp-ol"><span class="dti-lp-name">Owned list</span><button type="button" class="dti-tk-lbtn${l ? ' set' : ''}"${l ? ` style="--lc:${noteEsc(l.color)}"` : ''}>${l ? `<i class="dot"></i><span>${noteEsc(l.name)}</span>` : '<span>+ Add to a list</span>'}<em>\u25be</em></button></div>`)(TokOwnLists.listOf(TokOwnLists.raw(), key)) : ''}
                 </div>
                 <div class="dti-lp-foot"><a class="dti-lp-mine" href="/items?q=dti-enhance#tokens">My Tokens ↗</a><span class="dti-lp-status">${noteEsc([info.series || (info.essence ? 'Essence' : ''), info.species || (info.anyPet ? 'any pet' : '')].filter(Boolean).join(' · '))}</span></div>`;
             pop.querySelector('.dti-lp-x').addEventListener('click', closeTokenPopover);
             pop.querySelector('.dti-lp-wl .dti-tk-lbtn')?.addEventListener('click', e => openTokListMenu(e.currentTarget, key, paint));
+            pop.querySelector('.dti-lp-ol .dti-tk-lbtn')?.addEventListener('click', e => openTokListMenu(e.currentTarget, key, paint, true));
             pop.querySelectorAll('.dti-lp-row').forEach(row => row.addEventListener('click', e => {
                 const b = e.target.closest('button[data-d]');
                 if (!b || b.disabled) return;
@@ -5509,9 +5514,9 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
     function mountTokensApp(host, { inModal = false, share = null } = {}) {
         const SEARCH = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14"/></svg>';
         const DOWN = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v8M4.8 7.6 8 10.8l3.2-3.2M3 13.5h10"/></svg>';
-        const ui = Object.assign({ view: 'mine', kind: '', state: '', q: '', species: '', series: '', color: '', pcolor: '', style: '', pz: '', ess: '', tlist: '', match: '', sort: 'name', group: false, size: 'big', avail: false, barMin: false }, GM_getValue('dti_tok_ui', {}) || {});   // (Big tiles until another size is picked)
+        const ui = Object.assign({ view: 'mine', kind: '', state: '', q: '', species: '', series: '', color: '', pcolor: '', style: '', pz: '', ess: '', tlist: '', olist: '', match: '', sort: 'name', group: false, size: 'big', avail: false, barMin: false }, GM_getValue('dti_tok_ui', {}) || {});   // (Big tiles until another size is picked)
         ui.q = '';
-        if (share) Object.assign(ui, { view: 'mine', kind: '', state: '', species: '', series: '', color: '', pcolor: '', style: '', pz: '', ess: '', tlist: '', match: '', sort: 'name', avail: false });   // (someone's shared list: from the start, with your tile size and grouping)
+        if (share) Object.assign(ui, { view: 'mine', kind: '', state: '', species: '', series: '', color: '', pcolor: '', style: '', pz: '', ess: '', tlist: '', olist: '', match: '', sort: 'name', avail: false });   // (someone's shared list: from the start, with your tile size and grouping)
         ui.pcolor = Picks.of(ui.pcolor);   // (by look: the colors picked — Picks; one color, as kept before, is read as one)
         const pcOn = () => Picks.on(ui.pcolor);
         if (ui.sort === 'group') { ui.sort = 'name'; ui.group = true; }   // (it was an order for a while)
@@ -5532,7 +5537,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 <div class="dti-tk-row">
                     <div class="dti-tk-seg" data-ui="view"><button type="button" data-v="mine">My tokens</button><button type="button" data-v="all">Browse all</button></div>
                     <label class="dti-tk-search">${SEARCH}<input type="search" placeholder="Search tokens…" autocomplete="off" spellcheck="false"></label>
-                    <div class="dti-tk-sort" title="Order">${TOK_SORT_ICO}<select class="dti-tk-sel" data-ui="sort"><option value="name">Name</option><option value="species">Species</option><option value="color">Color</option><option value="type">Type</option><option value="new">Newest</option><option value="own">Most owned</option><option value="list">Want list</option></select></div>
+                    <div class="dti-tk-sort" title="Order">${TOK_SORT_ICO}<select class="dti-tk-sel" data-ui="sort"><option value="name">Name</option><option value="species">Species</option><option value="color">Color</option><option value="type">Type</option><option value="new">Newest</option><option value="own">Most owned</option><option value="list">List</option></select></div>
                     <span class="dti-tk-cpk-slot"></span><span class="dti-tk-cpk-st" hidden></span>
                     <button type="button" class="dti-tk-grpbtn" aria-pressed="false" title="Group your tokens by type \u2014 a heading for each series and its styles (the order picked applies inside each group)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2.6h6"/><rect x="2" y="4.6" width="5" height="3.6" rx="1"/><rect x="9" y="4.6" width="5" height="3.6" rx="1"/><path d="M2 10.6h6"/><rect x="2" y="12.4" width="5" height="1.6" rx=".8"/></svg>Group by type</button>
                     <button type="button" class="dti-tk-selbtn" title="Pick several tokens to mark or remove together \u2014 Shift-click picks a run, Esc stops"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3"/><path d="m5.2 8.2 2 2 3.8-4.2"/></svg>Select</button>
@@ -5558,7 +5563,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 </div>
             </div>
             <div class="dti-tk-shbar" hidden></div>
-            <div class="dti-tk-wlists" hidden></div>
+            <div class="dti-tk-wlists" data-k="want" hidden></div><div class="dti-tk-wlists" data-k="own" hidden></div>
             <div class="dti-tk-types" hidden></div>
             <div class="dti-tk-studio" hidden></div>
             <div class="dti-tk-note" hidden></div>
@@ -5580,7 +5585,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         const $ = s => app.querySelector(s);
         const grid = $('.dti-tk-grid'), note = $('.dti-tk-note'), empty = $('.dti-tk-empty'), more = $('.dti-tk-more');
         let cat = tokenCatalogIfCached(), list = [], shown = 0;
-        let tl = share ? share.tl : TokLists.raw(), lastBase = [];   // (your want lists, read once a draw — or theirs)
+        let tl = share ? share.tl : TokLists.raw(), ol = share ? { lists: [], of: {} } : TokOwnLists.raw(), lastBase = [];   // (your want lists and owned lists, read once a draw — or their want lists)
         const myOwn = new Set(), myWant = new Set();   // (a shared list: what you have / want, to mark matches)
         let studioMap = null, studioState = '', studioStep = '';   // Available now: the Studio's tokens (key → row), reading it
         let groups = null;   // Grouped by type: token key → { s: series, t: style ('' = one of the series' other styles) }
@@ -5658,37 +5663,48 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 + (showVers ? `<div class="dti-tk-trow sub" title="${noteEsc(style)}"><b>Prismatic</b>${chip('pz', '', 'All', inStyle.length, 'all')}${orig ? chip('pz', '-', 'Original', orig) : ''}`
                     + [...vers.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([p, n]) => chip('pz', p, p, n, 'pz')).join('') + '</div>' : '');
         }
-        // Your want lists: under the filters when Wanted is picked (and with Any, once you have lists) — each with how many of
-        // the tokens shown are in it; a click shows just that list. A token goes in one from its card, or dragged onto it.
-        const inTList = (key, v) => v === '-' ? !TokLists.listOf(tl, key) : tl.of[key] === v;
-        const tlRank = i => { if (!i.want) return 1e4; const l = TokLists.listOf(tl, i.key); return l ? tl.lists.indexOf(l) : 999; };
-        function paintWantLists(base) {
-            const box = $('.dti-tk-wlists');
-            box.hidden = !(ui.view === 'mine' && (ui.state === 'want' && (!share || tl.lists.length) || (!ui.state && tl.lists.length)));
+        // Your lists — want lists (Wanted picked, or Any once you have some) and, apart, lists for the tokens you own (Owned picked, or Any
+        // once you have some; user asked): each with how many of the tokens shown are in it; a click shows just that list. A token goes in
+        // one from its card, or dragged onto it. (A shared list: their want lists only.)
+        const LK = {
+            want: { S: TokLists, d: () => tl, u: 'tlist', has: i => !!i.want, state: 'want', name: 'Want lists', all: 'All wanted', what: 'you want' },
+            own: { S: TokOwnLists, d: () => ol, u: 'olist', has: i => !!i.own, state: 'own', name: 'Owned lists', all: 'All owned', what: 'you own' },
+        };
+        const inList = (k, key, v) => { const d = LK[k].d(); return v === '-' ? !LK[k].S.listOf(d, key) : d.of[key] === v; };
+        const listRank = (k, i) => { if (!LK[k].has(i)) return 1e4; const d = LK[k].d(), l = LK[k].S.listOf(d, i.key); return l ? d.lists.indexOf(l) : 999; };
+        const tlRank = i => listRank('want', i);
+        const lbar = k => $(`.dti-tk-wlists[data-k="${k}"]`);
+        const kindNow = () => ui.view === 'mine' && ui.state === 'own' ? 'own' : 'want';   // (Select's and Move all's lists: the kind shown)
+        function paintWantLists(base) { paintList('want', base); paintList('own', base); }
+        function paintList(k, base) {
+            const K = LK[k], box = lbar(k), d = K.d();
+            box.hidden = !(ui.view === 'mine' && !(share && k === 'own') && (ui.state === K.state && (!share || d.lists.length) || (!ui.state && d.lists.length)));
             if (box.hidden) return;
-            if (ui.tlist && ui.tlist !== '-' && !tl.lists.some(l => l.id === ui.tlist)) ui.tlist = '';
-            const wanted = base.filter(i => i.want), on = v => ui.state === 'want' && ui.tlist === v;
-            const n = v => wanted.filter(i => inTList(i.key, v)).length;
-            const chip = (v, label, cnt, cls, color) => `<button type="button" class="${cls}${on(v) ? ' on' : ''}" data-tl="${noteEsc(v)}"${color ? ` style="--lc:${noteEsc(color)}"` : ''}${v && v !== '-' ? ' title="Just this list \u2014 or drag a token onto it"' : v === '-' ? ' title="The tokens you want that aren\u2019t in a list \u2014 or drag one here to take it out of its list"' : ''}>${color ? '<i class="dot"></i>' : ''}${noteEsc(label)}<i>${cnt}</i></button>`;
-            box.innerHTML = `<b>${share ? 'Their want lists' : 'Want lists'}</b>${chip('', 'All wanted', wanted.length, 'all')}${tl.lists.map(l => chip(l.id, l.name, n(l.id), 'wl', l.color)).join('')}${tl.lists.length ? chip('-', 'Not in a list', n('-'), 'none') : ''}`
+            if (ui[K.u] && ui[K.u] !== '-' && !d.lists.some(l => l.id === ui[K.u])) ui[K.u] = '';
+            const these = base.filter(K.has), on = v => ui.state === K.state && ui[K.u] === v;
+            const n = v => these.filter(i => inList(k, i.key, v)).length;
+            const chip = (v, label, cnt, cls, color) => `<button type="button" class="${cls}${on(v) ? ' on' : ''}" data-tl="${noteEsc(v)}"${color ? ` style="--lc:${noteEsc(color)}"` : ''}${v && v !== '-' ? ' title="Just this list \u2014 or drag a token onto it"' : v === '-' ? ` title="The tokens ${K.what} that aren\u2019t in a list \u2014 or drag one here to take it out of its list"` : ''}>${color ? '<i class="dot"></i>' : ''}${noteEsc(label)}<i>${cnt}</i></button>`;
+            box.innerHTML = `<b>${share ? 'Their want lists' : K.name}</b>${chip('', K.all, these.length, 'all')}${d.lists.map(l => chip(l.id, l.name, n(l.id), 'wl', l.color)).join('')}${d.lists.length ? chip('-', 'Not in a list', n('-'), 'none') : ''}`
                 + (share ? '' : `<button type="button" class="dti-tk-wlnew">+ New list</button>`
-                + (tl.lists.length ? '<button type="button" class="dti-tk-wledit" title="Rename, recolor, reorder or delete your lists">Edit lists</button>' : '<span class="dti-tk-wlhint">Sort the tokens you want into lists of your own \u2014 Really want, Just like, anything</span>'));
+                + (d.lists.length ? '<button type="button" class="dti-tk-wledit" title="Rename, recolor, reorder or delete your lists">Edit lists</button>'
+                    : `<span class="dti-tk-wlhint">${k === 'own' ? 'Sort the tokens you own into lists of your own \u2014 Keep, For trade, anything' : 'Sort the tokens you want into lists of your own \u2014 Really want, Just like, anything'}</span>`));
         }
-        $('.dti-tk-wlists').addEventListener('click', e => {
+        app.querySelectorAll('.dti-tk-wlists').forEach(box => box.addEventListener('click', e => {
+            const k = box.dataset.k, K = LK[k];
             const bb = e.target.closest('.dti-tk-wlbulk');
-            if (bb) return openBulkMenu(bb);
+            if (bb) return openBulkMenu(bb, k);
             const nb = e.target.closest('.dti-tk-wlnew');
-            if (nb) return newListInline(nb);
+            if (nb) return newListInline(nb, k);
             const eb = e.target.closest('.dti-tk-wledit');
-            if (eb) return openListEditor(eb);
+            if (eb) return openListEditor(eb, k);
             const b = e.target.closest('button[data-tl]');
             if (!b) return;
             const v = b.dataset.tl;
-            if (ui.state !== 'want') { ui.state = 'want'; ui.tlist = v; }   // (from Any: the wanted ones, in that list)
-            else ui.tlist = ui.tlist === v ? '' : v;
+            if (ui.state !== K.state) { ui.state = K.state; ui.tlist = ui.olist = ''; ui[K.u] = v; }   // (from Any: the ones of its kind, in that list)
+            else ui[K.u] = ui[K.u] === v ? '' : v;
             saveUi(); render();
-        });
-        function newListInline(btn) {   // "+ New list" → a name box in its place
+        }));
+        function newListInline(btn, k) {   // "+ New list" → a name box in its place
             const f = document.createElement('form');
             f.className = 'dti-tk-wlform';
             f.innerHTML = '<input type="text" maxlength="40" placeholder="Name the list\u2026" autocomplete="off" spellcheck="false" aria-label="New list name"><button type="submit">Add</button>';
@@ -5696,26 +5712,25 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             const inp = f.querySelector('input');
             inp.focus();
             let done = false;
-            const finish = keep => { if (done) return; done = true; if (keep && inp.value.trim()) TokLists.create(inp.value); render(); };
+            const finish = keep => { if (done) return; done = true; if (keep && inp.value.trim()) LK[k].S.create(inp.value); render(); };
             f.addEventListener('submit', e => { e.preventDefault(); finish(true); });
             inp.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); } });
             f.addEventListener('focusout', e => { if (!f.contains(e.relatedTarget)) finish(true); });
         }
         // A token's list (its card's "+ Add to a list" / list name): pick one, none, or make a new one
-        const openListMenu = (anchor, key) => openTokListMenu(anchor, key, () => afterPut(key));
+        const openListMenu = (anchor, key, k) => openTokListMenu(anchor, key, () => afterPut(key), k === 'own');
         function afterPut(key) {   // (the card and the counts — the card stays where it is until the next redraw)
             refreshCard(key);
             paintWantLists(lastBase);
             paintWlBulk();
         }
-        // Wanted: "Move all N ▾" — the tokens shown (a list, or whatever the filters leave): to another list or a new one,
-        // out of their lists (still wanted), or off your Want list. Each with Undo. (Some of them: Select.)
+        // "Move all N ▾" on the lists of the kind shown — the tokens shown (a list, or whatever the filters leave): to another list or a new
+        // one, out of their lists (still yours / still wanted), or (wanted) off your Want list. Each with Undo. (Some of them: Select.)
         function paintWlBulk() {
-            const box = $('.dti-tk-wlists');
-            box.querySelector('.dti-tk-wlacts')?.remove();
-            const all = list.filter(i => i.want).length;
-            if (box.hidden || share || selecting || ui.view !== 'mine' || ui.state !== 'want' || !all) return;
-            box.insertAdjacentHTML('beforeend', `<span class="dti-tk-wlacts"><button type="button" class="dti-tk-wlbulk" title="All ${all} token${all === 1 ? '' : 's'} shown: move them to another list, take them out of their list, or remove them from your Want list">Move all ${all} \u25be</button></span>`);
+            app.querySelectorAll('.dti-tk-wlacts').forEach(x => x.remove());
+            const k = kindNow(), K = LK[k], box = lbar(k), all = list.filter(K.has).length;
+            if (box.hidden || share || selecting || ui.view !== 'mine' || ui.state !== K.state || !all) return;
+            box.insertAdjacentHTML('beforeend', `<span class="dti-tk-wlacts"><button type="button" class="dti-tk-wlbulk" title="All ${all} token${all === 1 ? '' : 's'} shown: move them to another list${k === 'own' ? ', or take them out of their list' : ', take them out of their list, or remove them from your Want list'}">Move all ${all} \u25be</button></span>`);
         }
         // Select (the bar's button): a click on a card picks it, Shift-click a run; the bar at the bottom marks them owned or
         // wanted, puts them in a want list, or takes them off your owned / wanted — each with Undo. Esc or Done stops.
@@ -5746,7 +5761,10 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             allB.hidden = !list.length;
             allB.textContent = allIn ? 'Select none' : `Select all ${list.length}`;
             const off = (a, x) => { bar.querySelector(`[data-sa="${a}"]`).disabled = x; };
-            off('own', !infos.some(i => !i.own)); off('want', !infos.some(i => !i.want)); off('list', !n);
+            const lb = bar.querySelector('[data-sa="list"]'), own = kindNow() === 'own';   // (Owned shown: your owned lists)
+            lb.textContent = own ? 'Owned list \u25be' : 'Want list \u25be';
+            lb.title = own ? 'Put the ones you own in one of your owned lists' : 'Put them in one of your want lists (they\u2019re wanted too)';
+            off('own', !infos.some(i => !i.own)); off('want', !infos.some(i => !i.want)); off('list', own ? !infos.some(i => i.own) : !n);
             off('unown', !infos.some(i => i.own)); off('unwant', !infos.some(i => i.want));
             off('uft', !infos.some(i => i.own && !i.uft)); off('unuft', !infos.some(i => i.uft));
         }
@@ -5794,18 +5812,21 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             selLast = key;
             paintSelBar();
         }
-        function moveKeys(keys, to) {
-            const snap = TokLists.raw(), snapT = DTITokens.raw(), next = TokLists.raw(), n = keys.length, s = n === 1 ? '' : 's';
-            if (to) {   // (into a list: wanted too, if they weren't)
+        function moveKeys(keys, to, k = 'want') {
+            const S = LK[k].S, snap = S.raw(), snapT = DTITokens.raw(), next = S.raw();
+            if (k === 'own') { const mine = DTITokens.read().mine, imported = tokImported(cat); keys = keys.filter(key => tokInfo(key, cat, mine, imported).own); }   // (only the ones you own)
+            const n = keys.length, s = n === 1 ? '' : 's';
+            if (!n) return;
+            if (to && k === 'want') {   // (into a list: wanted too, if they weren't)
                 const mine = DTITokens.read().mine, imported = tokImported(cat);
-                keys.forEach(k => { if (!(mine[k]?.want > 0)) { const i = tokInfo(k, cat, mine, imported); DTITokens.bump(k, 'want', 1, { name: i.name, img: i.img }); } });
+                keys.forEach(key => { if (!(mine[key]?.want > 0)) { const i = tokInfo(key, cat, mine, imported); DTITokens.bump(key, 'want', 1, { name: i.name, img: i.img }); } });
             }
-            keys.forEach(k => { if (to) next.of[k] = to; else delete next.of[k]; });
-            TokLists.save(next);
+            keys.forEach(key => { if (to) next.of[key] = to; else delete next.of[key]; });
+            S.save(next);
             const l = to && next.lists.find(x => x.id === to);
             sel.clear();
             render();
-            dtiToast(l ? `${n} token${s} in \u201c${l.name}\u201d` : `${n} token${s} taken out of ${n === 1 ? 'its list' : 'their lists'} \u2014 still wanted`, { duration: 6000, undo: () => { TokLists.save(snap); GM_setValue('dti_tokens', snapT); render(); } });
+            dtiToast(l ? `${n} token${s} in \u201c${l.name}\u201d` : `${n} token${s} taken out of ${n === 1 ? 'its list' : 'their lists'} \u2014 still ${k === 'own' ? 'yours' : 'wanted'}`, { duration: 6000, undo: () => { S.save(snap); GM_setValue('dti_tokens', snapT); render(); } });
         }
         function unwantKeys(keys) {
             const wantOf = k => DTITokens.read().mine[k]?.want || 0;
@@ -5818,21 +5839,22 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             render();
             dtiToast(`${n} token${n === 1 ? '' : 's'} removed from your Want list`, { duration: 8000, undo: () => { GM_setValue('dti_tokens', snapT); TokLists.save(snapL); render(); } });
         }
-        function openBulkMenu(anchor) {
+        function openBulkMenu(anchor, k = kindNow()) {
             const open = document.querySelector('.dti-tk-lmenu');
             if (open?._anchor === anchor) return open._close();
-            const keys = selecting ? [...sel] : list.filter(i => i.want).map(i => i.key), n = keys.length, d = TokLists.raw();
+            const K = LK[k], S = K.S, own = k === 'own';
+            const keys = selecting ? [...sel] : list.filter(K.has).map(i => i.key), n = keys.length, d = S.raw();
             if (!n) return;
-            const s = n === 1 ? '' : 's', allIn = id => keys.every(k => d.of[k] === id), anyIn = keys.some(k => TokLists.listOf(d, k));
+            const s = n === 1 ? '' : 's', allIn = id => keys.every(key => d.of[key] === id), anyIn = keys.some(key => S.listOf(d, key));
             const menu = document.createElement('div');
             menu.className = 'dti-tk-lmenu';
-            menu.innerHTML = `<div class="dti-tk-tmhd">${selecting ? `Put the ${n} selected in` : `Move the ${n} token${s} shown to`}</div>
+            menu.innerHTML = `<div class="dti-tk-tmhd">${selecting ? `Put the ${n} selected in${own ? ' (the ones you own)' : ''}` : `Move the ${n} token${s} shown to`}</div>
                 <div class="dti-tk-lmlist">${d.lists.map(l => `<button type="button" data-to="${noteEsc(l.id)}" style="--lc:${noteEsc(l.color)}"${allIn(l.id) ? ' disabled title="They\u2019re all in it"' : ''}><i class="dot"></i><span>${noteEsc(l.name)}</span>${allIn(l.id) ? '<small>\u2713</small>' : ''}</button>`).join('')}
-                    ${anyIn ? `<button type="button" data-to="" title="Out of their list${s} \u2014 they stay on your Want list"><i class="dot none"></i><span>No list <em>\u00b7 still wanted</em></span></button>` : ''}</div>
+                    ${anyIn ? `<button type="button" data-to="" title="Out of their list${s} \u2014 they stay ${own ? 'yours' : 'on your Want list'}"><i class="dot none"></i><span>No list <em>\u00b7 still ${own ? 'yours' : 'wanted'}</em></span></button>` : ''}</div>
                 <form class="dti-tk-lmnew"><input type="text" maxlength="40" placeholder="Or a new list\u2026" autocomplete="off" spellcheck="false" aria-label="New list name"><button type="submit">Move</button></form>
-                ${keys.some(k => (DTITokens.read().mine[k]?.want || 0) > 0) ? `<div class="dti-tk-lmsep"></div><div class="dti-tk-lmlist"><button type="button" class="warn" data-unwant title="Their Want goes to 0 (Undo puts it back)"><span>Remove from your Want list</span></button></div>` : ''}`;
+                ${!own && keys.some(key => (DTITokens.read().mine[key]?.want || 0) > 0) ? `<div class="dti-tk-lmsep"></div><div class="dti-tk-lmlist"><button type="button" class="warn" data-unwant title="Their Want goes to 0 (Undo puts it back)"><span>Remove from your Want list</span></button></div>` : ''}`;
             const close = tokFloat(menu, anchor);
-            const move = to => { close(); moveKeys(keys, to); };
+            const move = to => { close(); moveKeys(keys, to, k); };
             menu.addEventListener('click', e => {
                 const b = e.target.closest('[data-to]');
                 if (b && !b.disabled) return move(b.dataset.to);
@@ -5841,42 +5863,43 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             menu.querySelector('form').addEventListener('submit', e => {
                 e.preventDefault();
                 const v = menu.querySelector('.dti-tk-lmnew input').value.trim();
-                if (v) move(TokLists.create(v));
+                if (v) move(S.create(v));
             });
         }
         // Edit lists: rename, recolor (the dot), up / down, delete (Undo puts it back, with its tokens)
-        function openListEditor(anchor) {
+        function openListEditor(anchor, k = 'want') {
             const open = document.querySelector('.dti-tk-lmenu');
             if (open?._anchor === anchor) return open._close();
+            const S = LK[k].S, own = k === 'own';
             const menu = document.createElement('div');
             menu.className = 'dti-tk-lmenu edit';
             const paint = () => {
-                const d = TokLists.raw();
-                menu.innerHTML = `<div class="dti-tk-tmhd">Your want lists</div><div class="dti-tk-lmrows">${d.lists.map((l, i) => `<div class="dti-tk-lmrow" data-id="${noteEsc(l.id)}" style="--lc:${noteEsc(l.color)}">
+                const d = S.raw();
+                menu.innerHTML = `<div class="dti-tk-tmhd">${own ? 'Your lists for the tokens you own' : 'Your want lists'}</div><div class="dti-tk-lmrows">${d.lists.map((l, i) => `<div class="dti-tk-lmrow" data-id="${noteEsc(l.id)}" style="--lc:${noteEsc(l.color)}">
                         <button type="button" class="col" data-col title="Its color (click for the next one)" aria-label="Change its color"><i class="dot"></i></button>
                         <input type="text" value="${noteEsc(l.name)}" maxlength="40" spellcheck="false" aria-label="List name">
                         <button type="button" data-mv="-1" title="Move up" aria-label="Move up"${i ? '' : ' disabled'}>\u2191</button><button type="button" data-mv="1" title="Move down" aria-label="Move down"${i < d.lists.length - 1 ? '' : ' disabled'}>\u2193</button>
                         <button type="button" class="del" data-del title="Delete this list" aria-label="Delete this list">${POP_ICO.close}</button></div>`).join('') || '<p class="dti-tk-lmnote">No lists now.</p>'}</div>
-                    <p class="dti-tk-lmnote">Deleting a list doesn\u2019t touch your Want counts \u2014 its tokens are just in no list.</p>`;
+                    <p class="dti-tk-lmnote">${own ? 'Deleting a list doesn\u2019t touch what you own \u2014 its tokens are just in no list.' : 'Deleting a list doesn\u2019t touch your Want counts \u2014 its tokens are just in no list.'}</p>`;
             };
             paint();
             const close = tokFloat(menu, anchor);
             menu.addEventListener('click', e => {
                 const row = e.target.closest('[data-id]');
                 if (!row) return;
-                const id = row.dataset.id, d = TokLists.raw(), l = d.lists.find(x => x.id === id);
+                const id = row.dataset.id, d = S.raw(), l = d.lists.find(x => x.id === id);
                 if (!l) return;
                 if (e.target.closest('[data-col]')) {   // (the next color no other list has, if there is one)
                     const used = new Set(d.lists.filter(x => x !== l).map(x => x.color)), at = TOK_LIST_COLORS.indexOf(l.color);
-                    const next = [1, 2, 3, 4, 5, 6, 7].map(k => TOK_LIST_COLORS[(at + k) % TOK_LIST_COLORS.length]);
-                    TokLists.edit(id, { color: next.find(c => !used.has(c)) || next[0] });
+                    const next = [1, 2, 3, 4, 5, 6, 7].map(n => TOK_LIST_COLORS[(at + n) % TOK_LIST_COLORS.length]);
+                    S.edit(id, { color: next.find(c => !used.has(c)) || next[0] });
                 }
-                else if (e.target.closest('[data-mv]')) TokLists.move(id, +e.target.closest('[data-mv]').dataset.mv);
+                else if (e.target.closest('[data-mv]')) S.move(id, +e.target.closest('[data-mv]').dataset.mv);
                 else if (e.target.closest('[data-del]')) {
                     const n = Object.values(d.of).filter(x => x === id).length;
-                    TokLists.drop(id);
-                    dtiToast(`\u201c${l.name}\u201d deleted${n ? ` \u2014 its ${n} token${n === 1 ? '' : 's'} are still wanted` : ''}`, { duration: 6000, undo: () => { TokLists.save(d); render(); } });
-                    if (!TokLists.raw().lists.length) close();
+                    S.drop(id);
+                    dtiToast(`\u201c${l.name}\u201d deleted${n ? ` \u2014 its ${n} token${n === 1 ? '' : 's'} are still ${own ? 'yours' : 'wanted'}` : ''}`, { duration: 6000, undo: () => { S.save(d); render(); } });
+                    if (!S.raw().lists.length) close();
                 } else return;
                 paint(); render();
             });
@@ -5884,34 +5907,38 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 const inp = e.target.closest('input'), id = inp?.closest('[data-id]')?.dataset.id;
                 if (!id) return;
                 const v = inp.value.trim();
-                if (v) TokLists.edit(id, { name: v.slice(0, 40) }); else inp.value = TokLists.raw().lists.find(x => x.id === id)?.name || '';
+                if (v) S.edit(id, { name: v.slice(0, 40) }); else inp.value = S.raw().lists.find(x => x.id === id)?.name || '';
                 render();
             });
             menu.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('input')) { e.preventDefault(); e.target.blur(); } });
         }
-        // Drag a token you want onto a list (or onto "Not in a list")
-        const wlBox = $('.dti-tk-wlists'), DRAG = 'text/x-dti-tok';
-        const unDrop = () => wlBox.querySelectorAll('.drop').forEach(x => x.classList.remove('drop'));
-        wlBox.addEventListener('dragover', e => {
-            const b = e.target.closest('button[data-tl]');
-            if (!b || !b.dataset.tl || !e.dataTransfer.types.includes(DRAG)) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            if (!b.classList.contains('drop')) { unDrop(); b.classList.add('drop'); }
-        });
-        wlBox.addEventListener('dragleave', e => { const b = e.target.closest('button[data-tl]'); if (b && !b.contains(e.relatedTarget)) b.classList.remove('drop'); });
-        wlBox.addEventListener('drop', e => {
-            const b = e.target.closest('button[data-tl]'), key = e.dataTransfer.getData(DRAG);
-            unDrop();
-            app.classList.remove('tk-drag');   // (its card is redrawn, so its dragend never reaches the grid)
-            if (!b || !b.dataset.tl || !key) return;
-            e.preventDefault();
-            const to = b.dataset.tl === '-' ? '' : b.dataset.tl;
-            if (selecting && sel.has(key) && sel.size > 1) return moveKeys([...sel], to);   // (one of the picked: all of them)
-            TokLists.put(key, to);
-            afterPut(key);
-            const l = to && TokLists.listOf(tl, key), name = list.find(x => x.key === key)?.name || 'Token';
-            dtiToast(l ? `${name} \u2192 ${l.name}` : `${name} taken out of its list`, { duration: 1800 });
+        // Drag a token onto a list (or onto "Not in a list") — one you want onto a want list, one you own onto one of yours
+        const DRAG = 'text/x-dti-tok';
+        const unDrop = () => app.querySelectorAll('.dti-tk-wlists .drop').forEach(x => x.classList.remove('drop'));
+        app.querySelectorAll('.dti-tk-wlists').forEach(box => {
+            box.addEventListener('dragover', e => {
+                const b = e.target.closest('button[data-tl]');
+                if (!b || !b.dataset.tl || !e.dataTransfer.types.includes(`${DRAG}-${box.dataset.k}`)) return;   // (a token of its kind)
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (!b.classList.contains('drop')) { unDrop(); b.classList.add('drop'); }
+            });
+            box.addEventListener('dragleave', e => { const b = e.target.closest('button[data-tl]'); if (b && !b.contains(e.relatedTarget)) b.classList.remove('drop'); });
+            box.addEventListener('drop', e => {
+                const b = e.target.closest('button[data-tl]'), key = e.dataTransfer.getData(DRAG), k = box.dataset.k, K = LK[k];
+                unDrop();
+                app.classList.remove('tk-drag');   // (its card is redrawn, so its dragend never reaches the grid)
+                if (!b || !b.dataset.tl || !key) return;
+                e.preventDefault();
+                const info = list.find(x => x.key === key);
+                if (!info || !K.has(info)) return;   // (one you don't own onto your lists — or don't want onto a want list: not there)
+                const to = b.dataset.tl === '-' ? '' : b.dataset.tl;
+                if (selecting && sel.has(key) && sel.size > 1) return moveKeys([...sel], to, k);   // (one of the picked: all of them)
+                K.S.put(key, to);
+                afterPut(key);
+                const l = to && K.S.listOf(K.d(), key);
+                dtiToast(l ? `${info.name} \u2192 ${l.name}` : `${info.name} taken out of its list`, { duration: 1800 });
+            });
         });
         // Essences: Essence / All-Star Essence / Treasured, and the ones any pet can wear (Brain Tree, Esophagor, Pant Devil…)
         function paintEssKinds(pre) {
@@ -5950,7 +5977,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             const b = e.target.closest('button[data-v]');
             if (!b) return;
             ui[seg.dataset.ui] = b.dataset.v;
-            if (seg.dataset.ui === 'state') ui.tlist = '';   // (back to all of them)
+            if (seg.dataset.ui === 'state') ui.tlist = ui.olist = '';   // (back to all of them)
             if (seg.dataset.ui === 'kind') {
                 ui.ess = '';
                 if (ui.kind === 'essence' && (ui.series || ui.color)) { ui.series = ui.color = ui.style = ui.pz = ''; saveUi(); fillSelects(); }   // (styles' filters: no essence has them)
@@ -5984,7 +6011,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         }
         ItemColors.ready().then(() => { if (pcOn()) render(); });
         $('.dti-tk-clear').addEventListener('click', () => {   // (every filter back to all; the view, order and tile size stay)
-            Object.assign(ui, { kind: '', state: '', species: '', series: '', color: '', pcolor: Picks.none(), style: '', pz: '', ess: '', tlist: '', match: '', q: '', avail: false });
+            Object.assign(ui, { kind: '', state: '', species: '', series: '', color: '', pcolor: Picks.none(), style: '', pz: '', ess: '', tlist: '', olist: '', match: '', q: '', avail: false });
             tkCpk.set(ui.pcolor);
             searchInp.value = ''; saveUi(); fillSelects(); render();
         });
@@ -6057,7 +6084,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         function card(info) {
             const meta = [info.series || (info.essence ? 'Essence' : ''), info.species || (info.anyPet ? 'any pet' : '')].filter(Boolean).join(' · ') || 'Style token';
             const wl = info.want && TokLists.listOf(tl, info.key);
-            return `<div class="dti-tk-card${info.own ? ' own' : ''}${info.want ? ' want' : ''}${sel.has(info.key) ? ' picked' : ''}" data-key="${noteEsc(info.key)}"${info.want && tl.lists.length && !share ? ' draggable="true"' : ''}><span class="dti-tk-pick" aria-hidden="true">\u2713</span>
+            const lk = share ? '' : ui.view === 'mine' && ui.state === 'own' ? 'own' : info.want ? 'want' : info.own && ol.lists.length ? 'own' : '';
+            return `<div class="dti-tk-card${info.own ? ' own' : ''}${info.want ? ' want' : ''}${sel.has(info.key) ? ' picked' : ''}" data-key="${noteEsc(info.key)}"${(info.want && tl.lists.length || info.own && ol.lists.length) && !share ? ' draggable="true"' : ''}><span class="dti-tk-pick" aria-hidden="true">\u2713</span>
                 ${(() => {   // corner tags: New, Available — and Up for trade (yours: a switch on the ones you own; a shared list: a mark)
                     const uft = share ? (info.uft ? '<span class="dti-tk-uft on static" title="Up for trade">UFT</span>' : '')
                         : info.own ? `<button type="button" class="dti-tk-uft${info.uft ? ' on' : ''}" aria-pressed="${!!info.uft}" title="${info.uft ? 'Up for trade \u2014 click if it isn\u2019t any more' : 'Mark it up for trade \u2014 anyone you share your tokens with sees it'}">${info.uft ? 'UFT' : '+ UFT'}</button>` : '';
@@ -6075,7 +6103,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 ${share ? shareBits(info, wl) : `<div class="dti-tk-steps">
                     <div class="dti-tk-step${info.own ? ' on' : ''}" data-f="own"${info.own || info.gone ? ` title="${noteEsc(tokOwnTitle(info))}"` : ''}><span>Own</span><button type="button" data-d="-1" aria-label="One less"${info.own ? (!info.hand && info.imp ? ' title="One less (traded it?) \u2014 an import of that place again counts afresh"' : '') : ' disabled'}>−</button><b>${info.own}</b><button type="button" data-d="1" aria-label="One more">+</button></div>
                     <div class="dti-tk-step${info.want ? ' on' : ''}" data-f="want"><span>Want</span><button type="button" data-d="-1" aria-label="One less"${info.want ? '' : ' disabled'}>−</button><b>${info.want}</b><button type="button" data-d="1" aria-label="One more">+</button></div>
-                    ${info.want ? `<button type="button" class="dti-tk-lbtn${wl ? ' set' : ''}"${wl ? ` style="--lc:${noteEsc(wl.color)}" title="In your \u201c${noteEsc(wl.name)}\u201d list \u2014 click to change"` : ' title="Put it in one of your want lists"'}>${wl ? `<i class="dot"></i><span>${noteEsc(wl.name)}</span>` : '<span>+ Add to a list</span>'}<em>\u25be</em></button>` : ''}
+                    ${lk ? (l => `<button type="button" class="dti-tk-lbtn${l ? ' set' : ''}" data-k="${lk}"${l ? ` style="--lc:${noteEsc(l.color)}" title="In your \u201c${noteEsc(l.name)}\u201d list${lk === 'own' ? ' of tokens you own' : ''} \u2014 click to change"` : ` title="Put it in one of your ${lk === 'own' ? 'owned' : 'want'} lists"`}>${l ? `<i class="dot"></i><span>${noteEsc(l.name)}</span>` : '<span>+ Add to a list</span>'}<em>\u25be</em></button>`)(lk === 'own' ? TokOwnLists.listOf(ol, info.key) : wl) : ''}
                 </div>`}
             </div>`;
         }
@@ -6122,7 +6150,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 return;
             }
             const lb = e.target.closest('.dti-tk-lbtn');
-            if (lb) return share ? undefined : openListMenu(lb, lb.closest('.dti-tk-card').dataset.key);
+            if (lb) return share ? undefined : openListMenu(lb, lb.closest('.dti-tk-card').dataset.key, lb.dataset.k);
             const tryBtn = e.target.closest('.dti-tk-try');
             if (tryBtn) return tokStartCustom(tryBtn, tryBtn.closest('.dti-tk-card').dataset.key, cat);
             const pic = e.target.closest('.dti-tk-pic');
@@ -6139,17 +6167,21 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             else DTITokens.bump(key, f, Number(b.dataset.d), { name: info?.name, img: info?.img });
             refreshCard(key);
         });
-        grid.addEventListener('dragstart', e => {   // (a token you want → onto one of your lists)
-            const c = e.target.closest?.('.dti-tk-card.want');
-            if (share || !c || wlBox.hidden || !tl.lists.length) return;
+        grid.addEventListener('dragstart', e => {   // (a token you want → onto one of your want lists; one you own → onto one of your owned lists)
+            const c = e.target.closest?.('.dti-tk-card'), info = c && list.find(x => x.key === c.dataset.key);
+            const ks = info && !share ? ['want', 'own'].filter(k => LK[k].has(info) && !lbar(k).hidden && LK[k].d().lists.length) : [];
+            if (!ks.length) return;
             e.dataTransfer.setData(DRAG, c.dataset.key);
+            ks.forEach(k => e.dataTransfer.setData(`${DRAG}-${k}`, '1'));   // (the bars that take it — a drag's types are all a dragover can read)
             e.dataTransfer.effectAllowed = 'move';
+            app.dataset.drag = ks.join(' ');
             app.classList.add('tk-drag');
         });
         grid.addEventListener('dragend', () => { app.classList.remove('tk-drag'); unDrop(); });
         app.addEventListener('drop', () => app.classList.remove('tk-drag'));   // (dropped anywhere else in My Tokens)
         function refreshCard(key) {
             tl = share ? share.tl : TokLists.raw();
+            if (!share) ol = TokOwnLists.raw();
             const fresh = share ? tokInfo(key, cat, share.mine, NO_IMP) : tokInfo(key, cat, DTITokens.read().mine, tokImported(cat));
             const i = list.findIndex(x => x.key === key);
             if (i >= 0) list[i] = fresh;
@@ -6212,6 +6244,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             app.classList.toggle('full', ui.size === 'full');
             const q = ui.q;
             tl = share ? share.tl : TokLists.raw();
+            if (!share) ol = TokOwnLists.raw();
             if (share) {   // (what you have and want — for the marks)
                 const mm = DTITokens.read().mine, im = tokImported(cat);
                 myOwn.clear(); myWant.clear();
@@ -6243,7 +6276,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             if (tkNeed.size) setTimeout(tkReadColors, 0);
             lastBase = base;
             paintWantLists(base);
-            const pre = ui.view === 'mine' && ui.state === 'want' && ui.tlist ? base.filter(i => inTList(i.key, ui.tlist)) : base;   // (one of your want lists)
+            const lku = ui.view !== 'mine' ? '' : ui.state === 'want' ? 'want' : ui.state === 'own' ? 'own' : '', lv = lku && ui[LK[lku].u];
+            const pre = lv ? base.filter(i => inList(lku, i.key, lv)) : base;   // (one of your lists — want or owned)
             paintTypes(pre);
             if (ui.kind === 'essence' && ui.ess) list = pre.filter(i => ui.ess === 'any' ? i.anyPet : i.series === ui.ess);
             else list = ui.style || ui.pz ? pre.filter(i => (!ui.style || i.base === ui.style) && (!ui.pz || (ui.pz === '-' ? i.base && !i.prismatic : i.prismatic === ui.pz))) : pre;
@@ -6255,7 +6289,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                     return x[0].localeCompare(y[0]) || (!!x[1] - !!y[1]) || x[1].localeCompare(y[1]) || (a.species || '~').localeCompare(b.species || '~') || a.name.localeCompare(b.name); },
                 new: (a, b) => (b.sid || 0) - (a.sid || 0) || a.name.localeCompare(b.name),
                 own: (a, b) => b.own - a.own || b.want - a.want || a.name.localeCompare(b.name),
-                list: (a, b) => tlRank(a) - tlRank(b) || a.name.localeCompare(b.name),   // (your want lists in their order; no list, then not wanted, after)
+                list: (a, b) => (ui.view === 'mine' && ['own', 'uft'].includes(ui.state) ? listRank('own', a) - listRank('own', b) : tlRank(a) - tlRank(b)) || a.name.localeCompare(b.name),   // (your want lists in their order — Owned / UFT: your owned lists; no list, then not in that kind, after)
             }[ui.sort] || ((a, b) => a.name.localeCompare(b.name));
             groups = ui.group ? buildGroups(list) : null;
             list.sort(groups ? (a, b) => {   // grouped: series, then style (each style's own tokens before its Prismatic versions), then the order picked
@@ -6280,13 +6314,13 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             empty.hidden = list.length > 0;
             if (!list.length) {
                 const filtered = ui.kind || ui.species || ui.series || ui.color || pcOn() || ui.style || ui.pz || ui.q || (ui.view === 'mine' && ui.state) || ui.avail;
-                const listOnly = !share && ui.view === 'mine' && ui.state === 'want' && ui.tlist && ui.tlist !== '-' && !(ui.kind || ui.species || ui.series || ui.color || pcOn() || ui.style || ui.pz || ui.q);
-                const stateOnly = !share && ui.view === 'mine' && ui.state && !ui.tlist && !(ui.kind || ui.species || ui.series || ui.color || pcOn() || ui.style || ui.pz || ui.q);
+                const listOnly = !share && ui.view === 'mine' && lv && lv !== '-' && !(ui.kind || ui.species || ui.series || ui.color || pcOn() || ui.style || ui.pz || ui.q);
+                const stateOnly = !share && ui.view === 'mine' && ui.state && !lv && !(ui.kind || ui.species || ui.series || ui.color || pcOn() || ui.style || ui.pz || ui.q);
                 empty.innerHTML = ui.avail && !studioMap ? (studioState === 'error' ? '<b>Couldn\u2019t read the Studio\u2019s rotation</b><span>itemdb didn\u2019t answer \u2014 try again in a moment.</span>' : '<b>Reading the Styling Studio\u2019s rotation\u2026</b>')
                     : ui.avail && ui.view === 'mine' && !(ui.kind || ui.species || ui.series || ui.color || ui.style || ui.pz || ui.q) ? '<b>None of yours are in the Studio now</b><span>Nothing you own or want is in its current rotation.</span><div><button type="button" class="dti-tk-btn" data-go="all">See everything in the Studio</button></div>'
                     : share ? (filtered || ui.match ? '<b>Nothing matches</b><span>Try another search or filter.</span>' : '<b>Nothing in this share</b>')
                     : listOnly
-                    ? '<b>Nothing in this list yet</b><span>Use \u201c+ Add to a list\u201d on a token you want \u2014 or drag one onto the list above.</span>'
+                    ? `<b>Nothing in this list yet</b><span>Use \u201c+ Add to a list\u201d on a token you ${lku === 'own' ? 'own' : 'want'} \u2014 or drag one onto the list above.</span>`
                     : stateOnly && ui.state === 'uft'
                     ? '<b>Nothing up for trade yet</b><span>Hover a token you own and click \u201c+ UFT\u201d \u2014 or Select several and press UFT. Anyone you share your tokens with sees them marked.</span>'
                     : stateOnly
@@ -6581,7 +6615,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         const statGo = el => {
             const go = el?.dataset.go;
             if (!go) return;
-            Object.assign(ui, { view: 'mine', state: go === 'want' ? 'want' : go === 'uft' ? 'uft' : 'own', kind: go === 'ess' ? 'essence' : '', tlist: '', style: '', pz: '', ess: '' });
+            Object.assign(ui, { view: 'mine', state: go === 'want' ? 'want' : go === 'uft' ? 'uft' : 'own', kind: go === 'ess' ? 'essence' : '', tlist: '', olist: '', style: '', pz: '', ess: '' });
             if (go === 'ess') ui.series = ui.color = '';
             saveUi(); fillSelects(); render();
         };
@@ -6592,6 +6626,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         // Another tab changed tokens or brought an import back — show it
         gmWatch('dti_tokens', app, (n, o, v, remote) => { if (remote) render(); });
         gmWatch('dti_tok_lists', app, (n, o, v, remote) => { if (remote) render(); });
+        gmWatch('dti_tok_olists', app, (n, o, v, remote) => { if (remote) render(); });
         gmWatch('dti_acct_active', app, () => render());
         gmWatch('dti_tok_cap', app, () => { render(); app.querySelector('.dti-tk-imp')?.remove(); });
 
@@ -7270,12 +7305,14 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             #dti-tokens-app .dti-tk-wlists button:hover { color: var(--accent-text, var(--accent)); border-color: color-mix(in srgb, var(--lc, var(--accent)) 55%, var(--border)); }
             #dti-tokens-app .dti-tk-wlists button.on { background: var(--lc, #ec4899); border-color: var(--lc, #ec4899); color: #fff; }
             #dti-tokens-app .dti-tk-wlists button.on .dot { background: #fff; }
+            #dti-tokens-app .dti-tk-wlists[data-k="own"] button.on:not(.wl) { background: var(--accent); border-color: var(--accent); color: var(--accent-fg, #fff); }   /* (owned: your accent, as Own is — pink is for wanting) */
             .dti-tk-wlists button i:not(.dot) { font-style: normal; font-size: 10.5px; font-weight: 800; opacity: .6; }
             #dti-tokens-app .dti-tk-wlists .dti-tk-wlnew { border-style: dashed; background: transparent; color: var(--text-muted); }
             #dti-tokens-app .dti-tk-wlists .dti-tk-wledit { border-color: transparent; background: transparent; color: var(--text-muted); padding: 0 8px; }
             #dti-tokens-app .dti-tk-wlists .dti-tk-wledit:hover { text-decoration: underline; border-color: transparent; }
             .dti-tk-wlhint { font-size: 12px; color: var(--text-muted); }
-            #dti-tokens-app.tk-drag .dti-tk-wlists button[data-tl]:not([data-tl=""]) { border-style: dashed; border-color: var(--lc, var(--accent)); }
+            #dti-tokens-app.tk-drag[data-drag~="want"] .dti-tk-wlists[data-k="want"] button[data-tl]:not([data-tl=""]),
+            #dti-tokens-app.tk-drag[data-drag~="own"] .dti-tk-wlists[data-k="own"] button[data-tl]:not([data-tl=""]) { border-style: dashed; border-color: var(--lc, var(--accent)); }
             #dti-tokens-app .dti-tk-wlists button.drop { transform: scale(1.06); background: color-mix(in srgb, var(--lc, var(--accent)) 18%, var(--surface)); border-style: solid !important; }
             .dti-tk-wlform { display: inline-flex; gap: 4px; }
             #dti-tokens-app .dti-tk-wlform input { width: 150px; height: 30px; box-sizing: border-box; padding: 0 11px; border-radius: 99px; border: 1px solid var(--accent); background: var(--surface); color: var(--text); font-family: inherit; font-size: 12px; outline: none; box-shadow: 0 0 0 3px var(--accent-glow); }
@@ -13630,6 +13667,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['3.2.2', [
+            'My Tokens: the tokens you own get lists of their own too (Keep, For trade, anything) \u2014 apart from your want lists, under the filters when Owned is picked, with Move all and drag onto a list',
+            'Mini DTI: Tokens shows your owned lists as well as your want lists \u2014 grouped by list, a chip for just one, and a token\u2019s panel puts it in a list or a new one',
+            'Mini DTI: a pin in its top bar keeps it open \u2014 a click outside, or Esc meant for the page, won\u2019t close it',
+            'Customs editor: in tile view the zones fit together like bricks \u2014 a long zone no longer leaves empty space under the short ones beside it',
+            'Neopets: a switch in \u2699 \u203a Neopets opens every user lookup at place=9999 \u2014 the same page, without the captcha',
+        ]],
         ['3.2.1', [
             'Customs editor: a Reset button by the padlock puts the custom back to how it was when you opened it \u2014 with Undo',
             'Customs editor: the lock keeps what was on when you locked it \u2014 those can\u2019t be taken off or replaced, while anything you add after still goes on and comes off',
@@ -17944,6 +17988,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             nbSeekTg.classList.toggle('active', next);
         });
         linkifyRow.appendChild(nbSeekTg);
+        const lookupTg = document.createElement('button');   // (user asked: every userlookup link on Neopets at place=9999)
+        lookupTg.type = 'button'; lookupTg.id = 'dti-lookup9999-toggle';
+        lookupTg.className = 'dti-toggle-row' + (GM_getValue('dti_np_lookup9999', false) ? ' active' : '');
+        lookupTg.innerHTML = '<span class="dti-toggle-txt"><b>User lookups at place=9999</b><small>Every userlookup link on Neopets opens with place=9999 \u2014 the same page, without the captcha</small></span><span class="dti-ts"></span>';
+        lookupTg.addEventListener('click', () => {
+            const next = !GM_getValue('dti_np_lookup9999', false);
+            GM_setValue('dti_np_lookup9999', next);
+            lookupTg.classList.toggle('active', next);
+        });
+        linkifyRow.appendChild(lookupTg);
 
         const npFabToggle = document.createElement('button');
         npFabToggle.id = 'dti-np-fab-toggle';
@@ -30595,6 +30649,32 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 cancelAnimationFrame(_layRaf);
                 _layRaf = requestAnimationFrame(() => { _applyEdLayout(); _paintLayFit(); });
             });
+            // Zones packed like bricks (user: "instead of this giant blank space just because one zone has a long list … still be separated
+            // by zone but fill in the space as available"): in tile view each zone goes, in order, into the column that's shortest so far,
+            // on rows 2px tall — as many as it is high — so a long zone no longer leaves blank space under the short ones beside it
+            let _zBox = null, _zRaf = 0, _zSeen = new WeakSet();
+            const _zRO = new ResizeObserver(() => { cancelAnimationFrame(_zRaf); _zRaf = requestAnimationFrame(_packZones); });   // (a zone or the window resized)
+            function _packZones() {
+                const zb = root.querySelector('.dti-zone-2col');
+                if (zb !== _zBox) { _zRO.disconnect(); _zSeen = new WeakSet(); _zBox = zb; if (zb) _zRO.observe(zb); }
+                if (!zb) return;
+                const kids = [...zb.children];
+                kids.forEach(z => { if (!_zSeen.has(z)) { _zSeen.add(z); _zRO.observe(z); } });
+                const cols = root.classList.contains('dti-tile-mode') ? getComputedStyle(zb).gridTemplateColumns.split(' ').filter(w => parseFloat(w) > 0).length : 0;
+                const hs = kids.map(z => { if (!cols || !z.offsetHeight) return 0; const cs = getComputedStyle(z); return z.offsetHeight + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom); });   // (all measured, then all placed)
+                const tops = new Array(cols).fill(0);
+                kids.forEach((z, i) => {
+                    let col = '', row = '';
+                    if (hs[i]) {
+                        const n = Math.ceil((hs[i] + 4) / 2), c = tops.indexOf(Math.min(...tops));   // (its height and the 4px gap under it; the shortest column — the leftmost of those)
+                        col = String(c + 1); row = `${tops[c] + 1} / span ${n}`;
+                        tops[c] += n;
+                    }
+                    if (z.style.gridColumn !== col) z.style.gridColumn = col;
+                    if (z.style.gridRow !== row) z.style.gridRow = row;
+                });
+                zb.classList.toggle('dti-zpack', cols > 0);
+            }
             // ── Cap values on the tiles (user asked): an NC item's value in caps — a badge on its picture on DTI's tiles, beside its labels
             // on every page's — once "Cap values" is on in the layout menu (no values looked up while it's off) ──
             function _paintCapsSoon() { if (_edLay.caps && !root._dtiCapT) root._dtiCapT = setTimeout(() => { root._dtiCapT = 0; _paintCaps(); }, 250); }
@@ -30679,6 +30759,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         : items > 0 ? `repeat(auto-fill, ${zoneW}px)` : `repeat(auto-fit, minmax(${Math.round((TW * 2 + 12) * z)}px, 1fr))`,
                 };
                 Object.entries(css).forEach(([k, v]) => root.style.setProperty(k, String(v)));
+                _packZones();   // (packed again for the new sizes, before the page is drawn)
             }
             _applyEdLayout();
             const layBtn = bar.querySelector('.dti-lay-btn');
@@ -30861,6 +30942,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 let fresh = false;
                 zoneBoxes.forEach((n, zb) => { if (n > 1 && !zb.classList.contains('dti-zone-2col')) { zb.classList.add('dti-zone-2col'); fresh = true; } });
                 if (fresh && (_edLay.zones > 0 || _edLay.items > 0)) _applyEdLayout();   // (fit to the new box)
+                _packZones();
             }
             document.getElementById('dti-view-toggle').addEventListener('click', e => {
                 const btn = e.target.closest('.dti-vt-btn[data-view]');
@@ -33701,6 +33783,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 display: grid !important; grid-template-columns: var(--dti-zcols, repeat(auto-fit, minmax(280px, 1fr))) !important;
                 align-items: start !important; gap: 4px !important;
             }
+            /* (zones packed like bricks: each placed by the script on 2px rows, in the shortest column — _packZones) */
+            #wardrobe-2020-root.dti-tile-mode .dti-zone-2col.dti-zpack { grid-auto-rows: 2px !important; row-gap: 0 !important; }
+            #wardrobe-2020-root.dti-tile-mode .dti-zone-2col.dti-zpack > * { align-self: start !important; }
             /* .dti-tile-grid: the box holding a zone's items (stamped via JS) */
             #wardrobe-2020-root.dti-tile-mode .dti-tile-grid {
                 display: grid !important; grid-template-columns: repeat(var(--dti-ipr, auto-fill), calc(var(--dti-tw, 134px) * var(--dti-tz, 1))) !important;
@@ -34256,6 +34341,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             back: svg('<path d="M10 3 5 8l5 5"/>', 2),
             ext: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5h5v5M9.5 2.5 3 9"/></svg>',
             x: svg('<path d="M4 4l8 8M12 4l-8 8"/>', 1.9),
+            pin: svg('<path d="M8 11.3v3.4"/><path d="M3.4 11.3h9.2v-1.2a1.3 1.3 0 0 0-.7-1.2l-1.2-.6a1.3 1.3 0 0 1-.7-1.2V4h.6a1.3 1.3 0 0 0 0-2.6H5.4a1.3 1.3 0 0 0 0 2.6H6v3.1a1.3 1.3 0 0 1-.7 1.2l-1.2.6a1.3 1.3 0 0 0-.7 1.2z"/>', 1.5),
             grid: svg('<rect x="2.5" y="2.5" width="4.4" height="4.4" rx="1.2"/><rect x="9.1" y="2.5" width="4.4" height="4.4" rx="1.2"/><rect x="2.5" y="9.1" width="4.4" height="4.4" rx="1.2"/><rect x="9.1" y="9.1" width="4.4" height="4.4" rx="1.2"/>', 1.5),
             gift: svg('<rect x="2" y="5.6" width="12" height="3.2" rx=".8"/><path d="M3 8.8v4.4c0 .5.3.8.8.8h8.4c.5 0 .8-.3.8-.8V8.8M8 5.6V14M8 5.6S6.9 2.4 5.2 3c-1.3.5-.7 2.6 2.8 2.6zm0 0s1.1-3.2 2.8-2.6c1.3.5.7 2.6-2.8 2.6z"/>', 1.5),
             pin: svg('<path d="M6 2.5h4l-.6 4 2.1 2.2H4.5l2.1-2.2z"/><path d="M8 8.7V14"/>', 1.6),
@@ -34512,6 +34598,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .nbtn { width: 34px; height: 34px; flex: none; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 10px; background: none; color: var(--nvfg2); cursor: pointer; }
             .nbtn svg { width: 15px; height: 15px; }
             .nbtn:hover, .nbtn.on { background: var(--nvh); color: var(--nvfg); }
+            .nbtn.pin svg { transition: transform .15s; transform: rotate(35deg); }
+            .nbtn.pin.on svg { transform: none; }
+            .nbtn.pin.on svg path:last-child { fill: currentColor; }
             /* (narrower: the parts as icons, the one you're on still named; narrower still: icons only) */
             @container win (max-width: 610px) { .links button svg { display: block; } .links button:not(.on) span { display: none; } .links button { padding: 0 8px; } }
             @container win (max-width: 470px) { .links button span { display: none; } .brand b { display: none; } }
@@ -34893,6 +34982,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .tkstep button:disabled { opacity: .35; cursor: default; }
             .tkstep b { min-width: 18px; text-align: center; font-size: 13px; }
             .tklist { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--m); }
+            .tknew .inp { width: 150px; height: 30px; text-transform: none; letter-spacing: 0; }
+            .tkl .chip { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; }
+            .tkl .chip > i:not(.ldot) { font-style: normal; font-size: 10.5px; font-weight: 800; opacity: .6; }
             .tkuft { height: 32px; padding: 0 12px; border-radius: 99px; border: 1px dashed #0d9488; background: var(--s); color: #0d9488; cursor: pointer; font-size: 11px; font-weight: 800; letter-spacing: .04em; }
             .tkuft.on { border-style: solid; background: #0d9488; color: #fff; }
             .tkfrom { flex-basis: 100%; font-size: 10.5px; color: var(--m); }
@@ -34920,14 +35012,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             q: '', chip: '', scope: GM_getValue('dti_np_items_scope', 'search') === 'mine' ? 'mine' : 'search', mine: { seg: 'own', q: '', all: {} },
             view: 'list', key: '', stFor: '', openGift: '', gdel: '', allGifts: false, showDone: false, allAcct: false, undo: null,
             draft: null,   // (a new trade report's trader, before anything's saved: { key, partner })
-            tk: { seg: ['want', 'own', 'studio'].includes(savedSeg) ? savedSeg : 'want', q: '', open: '' },
+            tk: { seg: ['want', 'own', 'studio'].includes(savedSeg) ? savedSeg : 'want', q: '', open: '', list: '' },
             nt: { seg: '', q: '', key: '' },
             mallTab: 'new',
         };
         let tkCat = null, tkCatState = '', studioFail = false, studioBusy = false;
         let mallItems = null, mallFail = false, mallBusy = false, mallP = null;
         let boardRows = null, boardBusy = false, boardAgain = false, hereLast = '', hereT = 0;
-        let win = null, body = null, menu = null;
+        let win = null, body = null, menu = null, pinned = false;   // (pinned: only the X, the tab or Esc in it close it)
 
         // ════ The tab — the only thing made with the page ════
         let theme = themeOf();
@@ -34971,6 +35063,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 <header class="nav">
                     <button type="button" class="brand" data-v="home" title="Home"><i class="gem">${GEM}</i><b>DTI</b></button>
                     <nav class="links">${VIEWS().map(([v, l]) => `<button type="button" data-v="${v}" title="${l}">${ICO[v]}<span>${l}</span><b class="nb${v === 'seeking' ? ' sk' : ''}"></b></button>`).join('')}</nav>
+                    <button type="button" class="nbtn pin" aria-pressed="false">${ICO.pin}</button>
                     <button type="button" class="nbtn pages" title="DTI’s pages" aria-haspopup="true" aria-expanded="false">${ICO.grid}</button>
                     <button type="button" class="nbtn shut" title="Close (Esc)" aria-label="Close">${ICO.x}</button>
                 </header>
@@ -34989,6 +35082,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (on) menu.innerHTML = `<div class="mh">DTI’s pages</div>${LINKS().map(([l, u, d]) => `<a class="lnk" href="${esc(u)}" target="_blank" rel="noopener"><span><b>${l}</b><small>${d}</small></span>${ICO.ext}</a>`).join('')}
                 <p class="mhint">Drag the DTI tab up or down to move it, and this window’s left edge to make it wider. Turn it off in DTI’s ⚙ › Neopets.</p>`;
         }
+        function paintPin() {
+            const b = win.querySelector('.pin');
+            b.classList.toggle('on', pinned);
+            b.setAttribute('aria-pressed', String(pinned));
+            b.title = pinned ? 'Pinned open — a click outside won’t close it (click to unpin)' : 'Pin it open — so a click outside doesn’t close it';
+        }
         function openWin(open) {
             if (open && !win) build();
             if (!win) return;
@@ -34996,6 +35095,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             tab.classList.toggle('open', open);
             showMenu(false);
             if (!open) { ui.stFor = ''; return; }
+            pinned = !!GM_getValue('dti_np_pin', false);   // (as it was left — in any tab)
+            paintPin();
             fit();
             render();
         }
@@ -35867,20 +35968,24 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const tokItem = i => ({ id: TOK_TRADE_ID + i.key, name: i.name, img: i.img || '', tok: 1 });
         const tokMeta = i => [i.series || (i.essence ? 'Essence' : ''), i.species || (i.anyPet ? 'any pet' : '')].filter(Boolean).join(' · ');
         const tkEditHtml = (i, solo) => {
-            const lists = TokLists.raw(), l = TokLists.listOf(lists, i.key);
+            const pick = (k, S) => {   // (its want list / owned list — "+ New list…" puts a name box in the select's place)
+                const d = S.raw(), l = S.listOf(d, i.key);
+                return `<label class="tklist"><span>${k === 'own' ? 'Owned list' : 'Want list'}</span><select class="sel" data-tklist="${k}">${['<option value="">No list</option>', ...d.lists.map(x => `<option value="${esc(x.id)}"${l?.id === x.id ? ' selected' : ''}>${esc(x.name)}</option>`), '<option value="+">+ New list…</option>'].join('')}</select></label>`;
+            };
             return `<div class="tkedit${solo ? ' solo' : ''}" data-tk="${esc(i.key)}"${solo ? ` data-tkname="${esc(i.name)}" data-tkimg="${esc(i.img || '')}"` : ''}>
                 <div class="tkstep"><span>Own</span><button type="button" data-tkstep="own" data-d="-1"${i.own ? '' : ' disabled'} aria-label="One less">−</button><b>${i.own}</b><button type="button" data-tkstep="own" data-d="1" aria-label="One more">+</button></div>
                 <div class="tkstep"><span>Want</span><button type="button" data-tkstep="want" data-d="-1"${i.want ? '' : ' disabled'} aria-label="One less">−</button><b>${i.want}</b><button type="button" data-tkstep="want" data-d="1" aria-label="One more">+</button></div>
                 ${i.own ? `<button type="button" class="tkuft${i.uft ? ' on' : ''}" data-tkuft aria-pressed="${!!i.uft}" title="${i.uft ? 'Up for trade — click if it isn’t any more' : 'Mark it up for trade — people you share your tokens with see it'}">${i.uft ? 'UFT' : '+ UFT'}</button>` : ''}
-                ${i.want ? `<label class="tklist"><span>List</span><select class="sel" data-tklist>${['<option value="">No list</option>', ...lists.lists.map(x => `<option value="${esc(x.id)}"${l?.id === x.id ? ' selected' : ''}>${esc(x.name)}</option>`)].join('')}</select></label>` : ''}
+                ${i.want ? pick('want', TokLists) : ''}${i.own ? pick('own', TokOwnLists) : ''}
                 ${i.from || i.gone ? `<small class="tkfrom">${esc(tokOwnTitle(i))}</small>` : ''}
             </div>`;
         };
         // a token's tile: in Tokens it opens out (inline); anywhere else it opens its page here
-        function tokTile(i, st = tokStudioKeys(), lists = TokLists.raw(), inline = false) {
-            const l = i.want ? TokLists.listOf(lists, i.key) : null, open = inline && ui.tk.open === i.key, meta = tokMeta(i);
-            const marks = (st?.has(i.key) ? '<i class="av" title="In the Styling Studio right now">In Studio</i>' : '') + (l ? `<i class="ll" style="--lc:${esc(l.color)}">${esc(l.name)}</i>` : '')
-                + (i.own ? `<i class="ow">Owned${i.own > 1 ? ' ×' + i.own : ''}</i>` : '') + (i.uft ? '<i class="uf" title="Up for trade">UFT</i>' : '') + (i.want && !l ? '<i class="wa">Wanted</i>' : '');
+        function tokTile(i, st = tokStudioKeys(), lists = TokLists.raw(), inline = false, olists = TokOwnLists.raw()) {
+            const l = i.want ? TokLists.listOf(lists, i.key) : null, ol = i.own ? TokOwnLists.listOf(olists, i.key) : null, open = inline && ui.tk.open === i.key, meta = tokMeta(i);
+            const ow = i.own ? `Owned${i.own > 1 ? ' ×' + i.own : ''}` : '';
+            const marks = (st?.has(i.key) ? '<i class="av" title="In the Styling Studio right now">In Studio</i>' : '') + (l ? `<i class="ll" style="--lc:${esc(l.color)}" title="Wanted — in your “${esc(l.name)}” list">${esc(l.name)}</i>` : '')
+                + (ol ? `<i class="ll" style="--lc:${esc(ol.color)}" title="${ow} — in your “${esc(ol.name)}” list">${esc(ol.name)}${i.own > 1 ? ' ×' + i.own : ''}</i>` : ow ? `<i class="ow">${ow}</i>` : '') + (i.uft ? '<i class="uf" title="Up for trade">UFT</i>' : '') + (i.want && !l ? '<i class="wa">Wanted</i>' : '');
             return `<button type="button" class="tile${open ? ' open' : ''}" ${inline ? `data-tkopen="${esc(i.key)}" aria-expanded="${open}"` : `data-item="${itemAttr(tokItem(i))}"`} title="${esc(i.name)}${meta ? ' — ' + esc(meta) : ''}">
                 ${i.img ? `<img class="pic" src="${esc(i.img)}" alt="" loading="lazy">` : '<span class="pic none"></span>'}<span class="nm">${esc(i.name)}</span>${marks ? `<span class="tkm">${marks}</span>` : ''}</button>`;
         }
@@ -35894,19 +35999,23 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const yours = [...yourKeys].map(info), byKey = new Map(yours.map(i => [i.key, i]));
             const own = yours.filter(i => i.own).sort((a, b) => a.name.localeCompare(b.name)), want = yours.filter(i => i.want).sort((a, b) => a.name.localeCompare(b.name));
             const studio = st ? [...st.keys()].map(k => byKey.get(k) || info(k)) : [];
-            const seg = ui.tk.seg, q = ui.tk.q.trim().toLowerCase(), lists = TokLists.raw();
+            const seg = ui.tk.seg, q = ui.tk.q.trim().toLowerCase(), lists = TokLists.raw(), olists = TokOwnLists.raw();
             const hit = i => !q || `${i.name} ${i.series} ${i.species}`.toLowerCase().includes(q);
             const list = (seg === 'own' ? own : seg === 'studio' ? studio : want).filter(hit);
             // a search also looks through every token (to mark one you just saw)
             const listed = new Set(list.map(i => i.key));
             const more = q.length >= 2 && tkCat && seg !== 'studio' ? [...tkCat.byKey.keys()].filter(k => !listed.has(k) && k.includes(q)).slice(0, 40).map(k => byKey.get(k) || info(k)) : [];
-            const grid = arr => `<div class="grid">${arr.map(i => tokTile(i, st, lists, true) + (ui.tk.open === i.key ? tkPanel(i) : '')).join('')}</div>`;
+            const grid = arr => `<div class="grid">${arr.map(i => tokTile(i, st, lists, true, olists) + (ui.tk.open === i.key ? tkPanel(i) : '')).join('')}</div>`;
             let main = '';
-            if (seg === 'want' && !q && lists.lists.length && list.length) {   // (by your want lists)
-                const by = new Map(lists.lists.map(l => [l.id, []])), none = [];
-                list.forEach(i => { const l = TokLists.listOf(lists, i.key); (l ? by.get(l.id) : none).push(i); });
-                main = lists.lists.filter(l => by.get(l.id).length).map(l => card(`<i class="ldot" style="background:${esc(l.color)}"></i>`, esc(l.name), by.get(l.id).length, '', `<div class="cb tight">${grid(by.get(l.id))}</div>`)).join('')
-                    + (none.length ? card(ICO.tokens, 'Not in a list', none.length, '', `<div class="cb tight">${grid(none)}</div>`) : '');
+            const GS = seg === 'own' ? TokOwnLists : TokLists, gl = seg === 'own' ? olists : lists;   // (Wanted: your want lists; Owned: your owned lists)
+            if (seg !== 'studio' && !q && gl.lists.length && list.length) {   // (by your lists — a chip shows just one)
+                const by = new Map(gl.lists.map(l => [l.id, []])), none = [];
+                list.forEach(i => { const l = GS.listOf(gl, i.key); (l ? by.get(l.id) : none).push(i); });
+                const only = ui.tk.list === '-' || by.has(ui.tk.list) ? ui.tk.list : '';
+                main = `<div class="chips tkl">${[['', 'All', list.length], ...gl.lists.map(l => [l.id, l.name, by.get(l.id).length, l.color]), ['-', 'Not in a list', none.length]].map(([v, n, c, col]) => `<button type="button" class="chip${only === v ? ' on' : ''}" data-tkl="${esc(v)}">${col ? `<i class="ldot" style="background:${esc(col)}"></i>` : ''}${esc(n)}<i>${c}</i></button>`).join('')}</div>`
+                    + (only && !(only === '-' ? none : by.get(only)).length ? '<div class="msg">Nothing in this list yet</div>' : '')
+                    + gl.lists.filter(l => by.get(l.id).length && (!only || only === l.id)).map(l => card(`<i class="ldot" style="background:${esc(l.color)}"></i>`, esc(l.name), by.get(l.id).length, '', `<div class="cb tight">${grid(by.get(l.id))}</div>`)).join('')
+                    + (none.length && (!only || only === '-') ? card(ICO.tokens, 'Not in a list', none.length, '', `<div class="cb tight">${grid(none)}</div>`) : '');
             } else if (list.length) main = grid(list);
             const empty = q ? (more.length ? '' : '<div class="msg">No tokens match</div>')
                 : seg === 'want' ? emptyBox(ICO.tokens, 'No tokens wanted yet', 'Search any token above and press Want on it — the same Want list as My Tokens.')
@@ -36017,13 +36126,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             '[data-skrm]', '[data-skcopy]', '[data-sktog]', '[data-seenrm]', '[data-seenclr]',
             '[data-open]', '[data-st]', '[data-set]', '[data-g]', '[data-gact]', '[data-gtickall]', '[data-undo]', '[data-gifton]', '[data-seg]', '[data-q]', '[data-gbc]', '[data-rm]',
             '.newbtn', '.morebtn', '.acctall', '.seekoff', '.back', '.del', '[data-trpin]', '[data-gview]',
-            '[data-tkseg]', '[data-tkopen]', '[data-tkstep]', '[data-tkuft]',
+            '[data-tkseg]', '[data-tkopen]', '[data-tkstep]', '[data-tkuft]', '[data-tkl]',
             '[data-ntkey]', '[data-ntnew]', '[data-ntseg]', '[data-ntback]', '[data-ntpin]', '[data-ntdel]'].join(', ');
         function wire() {
             win.querySelector('.nav').addEventListener('click', e => {
                 const v = e.target.closest('[data-v]');
                 if (v) { showMenu(false); return goTab(v.dataset.v); }
                 if (e.target.closest('.pages')) return showMenu(menu.hidden);
+                if (e.target.closest('.pin')) { pinned = !pinned; GM_setValue('dti_np_pin', pinned); return paintPin(); }
                 if (e.target.closest('.shut')) openWin(false);
             });
             win.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.menu, .pages')) showMenu(false); });
@@ -36073,9 +36183,21 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         }
         function onChange(e) {
             const t = e.target;
-            if (t.matches('[data-tklist]')) {   // (a wanted token's list)
-                const key = t.closest('[data-tk]')?.dataset.tk;
-                if (key) { TokLists.put(key, t.value); tkRefresh(key); }
+            if (t.matches('[data-tklist]')) {   // (a token's want list or owned list — "+ New list…": a name box in the select's place)
+                const key = t.closest('[data-tk]')?.dataset.tk, S = t.dataset.tklist === 'own' ? TokOwnLists : TokLists;
+                if (!key) return;
+                if (t.value !== '+') { S.put(key, t.value); return tkRefresh(key); }
+                const f = document.createElement('form');
+                f.className = 'tknew';
+                f.innerHTML = '<input class="inp" type="text" maxlength="40" placeholder="Name the list…" autocomplete="off" spellcheck="false" aria-label="New list name">';
+                t.replaceWith(f);
+                const inp = f.querySelector('input');
+                inp.focus();
+                let done = false;
+                const finish = keep => { if (done) return; done = true; if (keep && inp.value.trim()) S.put(key, S.create(inp.value)); tkRefresh(key); };
+                f.addEventListener('submit', ev => { ev.preventDefault(); finish(true); });
+                inp.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); finish(false); } });
+                inp.addEventListener('blur', () => finish(true));
             } else if (t.matches('[data-isp]')) {   // (an item's picture on another species)
                 const id = String(ui.item?.id || '');
                 if (isDtiId(id)) { body.querySelector('.stage')?.classList.add('busy'); loadItemPage(id, t.value); }
@@ -36235,8 +36357,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (d.rm) { patchTrade(t => { t[d.side].splice(+d.rm, 1); }); return rerenderEditor(); }
             if (d.gbc) { patchTrade(t => { const ex = t[d.side].find(o => o.id === d.gbc); if (ex) ex.qty++; else t[d.side].push({ id: d.gbc, name: GBC_KINDS[d.gbc].name, img: '', qty: 1 }); }); return rerenderEditor(); }
             // ── Tokens ──
-            if (d.tkseg) { ui.tk.seg = d.tkseg; ui.tk.open = ''; GM_setValue('dti_np_tk_seg', d.tkseg); render(); body.scrollTop = 0; return; }
+            if (d.tkseg) { ui.tk.seg = d.tkseg; ui.tk.open = ui.tk.list = ''; GM_setValue('dti_np_tk_seg', d.tkseg); render(); body.scrollTop = 0; return; }
             if (d.tkopen) { ui.tk.open = ui.tk.open === d.tkopen ? '' : d.tkopen; return rerender(); }
+            if ('tkl' in d) { ui.tk.list = ui.tk.list === d.tkl ? '' : d.tkl; ui.tk.open = ''; return rerender(); }   // (just one of your lists — All: every one)
             if ('tkuft' in d) {   // (up for trade, on / off)
                 const box = b.closest('[data-tk]'), key = box?.dataset.tk;
                 if (!key) return;
@@ -36296,7 +36419,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (!win || win.hidden || ui.stFor || ui.item || typing() || (ui.tab === 'trades' && ui.view === 'edit') || (ui.tab === 'notes' && ui.nt.key)) return;
                 rerender();
             };
-            ['dti_notes', 'dti_tokens', 'dti_tok_cap', 'dti_tok_lists', 'dti_tok_studio', 'dti_seeking', 'dti_sk_new', 'dti_nb_seen'].forEach(k => GM_addValueChangeListener(k, (kk, o, n, remote) => { if (remote) relist(); }));
+            ['dti_notes', 'dti_tokens', 'dti_tok_cap', 'dti_tok_lists', 'dti_tok_olists', 'dti_tok_studio', 'dti_seeking', 'dti_sk_new', 'dti_nb_seen'].forEach(k => GM_addValueChangeListener(k, (kk, o, n, remote) => { if (remote) relist(); }));
             ['dti_np_gifts', 'dti_track_gifts'].forEach(k => GM_addValueChangeListener(k, relist));
             GM_addValueChangeListener('dti_np_here_seen', (k, o, n, remote) => { if (remote) paintBadge(); });
             GM_addValueChangeListener('dti_theme_tokens', () => {
@@ -36336,8 +36459,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         tab.addEventListener('pointercancel', endDrag);
         tab.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openWin(!win || win.hidden); } });
         // a click anywhere else, or Esc, closes it
-        document.addEventListener('pointerdown', e => { if (win && !win.hidden && !e.composedPath().some(n => n === host || n?.id === 'dti-nb-pop')) openWin(false); }, true);   // (the Seeking window it opened: not "outside")
-        document.addEventListener('keydown', e => { if (e.key === 'Escape' && win && !win.hidden) openWin(false); });
+        document.addEventListener('pointerdown', e => { if (win && !win.hidden && !pinned && !e.composedPath().some(n => n === host || n?.id === 'dti-nb-pop')) openWin(false); }, true);   // (the Seeking window it opened: not "outside")
+        document.addEventListener('keydown', e => { if (e.key === 'Escape' && win && !win.hidden && (!pinned || e.composedPath().includes(host))) openWin(false); });   // (pinned: Esc in it, not one meant for the page)
         if (ctx?.kind === 'mall' && (seekAll().length || slug())) mallLoad();   // (the NC Mall: anything you want in it? — for the dot)
         paintBadge();
         if (ctx?.kind === 'items') setTimeout(paintBadge, 2500);   // (a page's items can come in after it's loaded)
@@ -36766,6 +36889,20 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
 
     // Neoboards: the items on your Seeking list (DTI), marked wherever a post names them — offers are easy to spot
+    // Userlookup links at place=9999 (user asked; ⚙ › Neopets, off till turned on): the same page, without the captcha — every one on the
+    // page, and any that come later; the link's other parts kept, place=9999 first
+    function runLookup9999() {
+        const fix = root => root?.querySelectorAll?.('a[href*="userlookup.phtml"]').forEach(a => {
+            let u;
+            try { u = new URL(a.href, location.href); } catch (_) { return; }
+            if (!/(^|\.)neopets\.com$/i.test(u.hostname) || u.pathname !== '/userlookup.phtml' || u.searchParams.get('place') === '9999') return;
+            u.search = '?' + new URLSearchParams([['place', '9999'], ...[...u.searchParams].filter(([k]) => k !== 'place')]).toString();
+            a.href = u.href;
+        });
+        fix(document);
+        new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) fix(n.matches?.('a') ? n.parentElement : n); })))
+            .observe(document.documentElement, { childList: true, subtree: true });
+    }
     function runSeekHighlight() {
         const names = Object.values((GM_getValue('dti_seeking', null) || {}).items || {}).map(e => String(e.name || '').trim()).filter(n => n.length >= 4)
             .sort((a, b) => b.length - a.length);
