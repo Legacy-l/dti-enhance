@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      3.3
+// @version      3.4
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -1331,6 +1331,72 @@
     const _THEMES_S6 = ['oat'];
     const _THEMES_M1 = ['arcane', 'chartreuse', 'bloodmoon'];
     const _THEMES_X2 = ['obsidian'];
+    // >>> en art
+    // ── Dark Energy and Light Energy (2026-10-12; user: "an extremely high quality advanced theme … titled 'Dark Energy' … two versions …
+    // Dark Energy and Light Energy as sister themes", after a stream overlay): hard-surface sci-fi in black, white and steel — chamfered
+    // armor plates with rims and rivets, recessed slots, hairlines, a core, and a little energy curling off the title. All drawn here ──
+    const _THEMES_EN = ['darkenergy', 'lightenergy'];
+    const _EN = `html:is(${_thm(_THEMES_EN)})[data-style]`;
+    // A plate's rim, for border-image (48 square, 16 a corner): the chamfered outline as a seat line, a lit top edge and a shaded
+    // bottom one — the plate itself is the element's background, cut to the same 12px chamfers
+    const _EN_RIM = (seat, lit, shade) => _svgUrl(_svgOf(48, 48,
+        `<path d="M12.5 .5H35.5L47.5 12.5V35.5L35.5 47.5H12.5L.5 35.5V12.5Z" fill="none" stroke="${seat}"/>`
+        + `<path d="M1.5 12.9 12.9 1.5H35.1L46.5 12.9" fill="none" stroke="${lit}"/>`
+        + `<path d="M46.5 35.1 35.1 46.5H12.9L1.5 35.1" fill="none" stroke="${shade}"/>`));
+    // Two slanted slots side by side — the plates' machined detail (either side of a divider's words)
+    const _EN_SLOTS = (fill, edge) => _svgUrl(_svgOf(44, 6,
+        `<path d="M3 .5H20.5V5.5H.5Z" fill="${fill}" stroke="${edge}"/><path d="M23.5 .5H41L43.5 5.5H23.5Z" fill="${fill}" stroke="${edge}"/>`));
+    // A rivet (10 square): a dark seat, the head, a glint
+    const _EN_RIVET = (seat, head, glint) => _svgUrl(_svgOf(10, 10,
+        `<circle cx="5" cy="5" r="4.5" fill="${seat}"/><circle cx="5" cy="5" r="3.1" fill="${head}"/><circle cx="4" cy="3.9" r="1.1" fill="${glint}"/>`));
+    // A viewfinder's corner (14 square, the top-left one; the others turned) — the pet's screen in the hero
+    const _EN_BRACKET = (color, turn) => _svgUrl(_svgOf(14, 14, `<path d="M1 13V1H13" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="square" transform="rotate(${turn} 7 7)"/>`));
+    // The page's sides: an armor plate coming in from each edge to a blunt point at mid-height, its inner rim, a hairline beside
+    // it and three rivets (the right side is the left one mirrored); placed so its point stops short of the page's content
+    const _EN_SIDE = (plate, rim, hair, rivet, flip) => _svgUrl(_svgOf(560, 1000,
+        `<g${flip ? ' transform="translate(560 0) scale(-1 1)"' : ''}>`
+        + `<path d="M0 0H170L452 420Q470 444 470 470V530Q470 556 452 580L170 1000H0Z" fill="${plate}"/>`
+        + `<path d="M14 18H160L436 428Q452 450 452 472V528Q452 550 436 572L160 982H14" fill="none" stroke="${rim}" stroke-width="1.5"/>`
+        + `<path d="M196 0 488 432M196 1000 488 568" fill="none" stroke="${hair}"/>`
+        + `<circle cx="44" cy="58" r="5" fill="${rivet}"/><circle cx="44" cy="942" r="5" fill="${rivet}"/><circle cx="420" cy="500" r="5" fill="${rivet}"/></g>`));
+    // The energy: wisps curling off the hero's title (and four small ones off the bar's core), placed by hand — each a list of points it
+    // curls through (smoothed), thick at its base and fine at its tip (drawn five times, each a shorter dash), a blurred copy behind for
+    // smoke; the "charged" copy adds a glow, for the flicker
+    const _enSmooth = pts => {
+        const P = [pts[0], ...pts, pts[pts.length - 1]], f = v => String(Math.round(v * 10) / 10);
+        let d = `M${pts[0][0]} ${pts[0][1]}`;
+        for (let i = 1; i < P.length - 2; i++) {
+            const [p0, p1, p2, p3] = [P[i - 1], P[i], P[i + 1], P[i + 2]];
+            d += `C${f(p1[0] + (p2[0] - p0[0]) / 6)} ${f(p1[1] + (p2[1] - p0[1]) / 6)} ${f(p2[0] - (p3[0] - p1[0]) / 6)} ${f(p2[1] - (p3[1] - p1[1]) / 6)} ${p2[0]} ${p2[1]}`;
+        }
+        return d;
+    };
+    const _enTaper = (pts, k = 1) => [[100, .55], [78, .8], [56, 1.05], [36, 1.3], [18, 1.6]]
+        .map(([n, w]) => `<path d="${_enSmooth(pts)}"${n === 100 ? '' : ` pathLength="100" stroke-dasharray="${n} 100"`} stroke-width="${Math.round(w * k * 100) / 100}"/>`).join('');
+    const _enWisps = (trunks, branches, motes, color, smoke, glow, blur, k = 1) =>
+        `<filter id="s" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="${blur[0]}"/></filter>`
+        + `<g filter="url(#s)" fill="none" stroke="${smoke}" stroke-width="${blur[0] * 1.45}" stroke-linecap="round">${trunks.map(t => `<path d="${_enSmooth(t)}"/>`).join('')}</g>`
+        + (glow ? `<filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="${blur[1]}"/></filter>`
+            + `<g filter="url(#g)" fill="none" stroke="${glow}" stroke-width="${blur[1] * 1.75}" stroke-linecap="round">${[...trunks, ...branches].map(t => `<path d="${_enSmooth(t)}"/>`).join('')}</g>` : '')
+        + `<g fill="none" stroke="${color}" stroke-linecap="round" stroke-linejoin="round">${trunks.map(t => _enTaper(t, k)).join('')}${branches.map(b => _enTaper(b, .72 * k)).join('')}</g>`
+        + `<g fill="${color}">${motes.map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}"/>`).join('')}</g>`;
+    const _EN_TITLE = {   // (340 × 140, on the big word's middle: its capitals run y 58–82, "Dress to" sits above x 112–228, the tagline under y 100)
+        trunks: [[[60,60],[58,54],[61,48],[59,42],[56,37],[57,31],[60,28]], [[96,60],[98,54],[95,48],[97,42],[100,38],[99,35]],
+            [[140,60],[139,55],[142,50],[140,46]], [[184,60],[186,55],[183,51],[185,47]], [[226,60],[224,54],[227,49],[225,44],[222,41]],
+            [[276,60],[279,54],[276,48],[279,42],[282,37],[280,31],[276,28],[275,24],[278,21]],
+            [[78,82],[80,87],[77,92],[79,97]], [[128,82],[126,87],[129,91],[127,95],[124,98]], [[200,82],[202,86],[200,90]], [[252,82],[250,87],[253,92],[251,97]]],
+        branches: [[[59,42],[64,40],[66,36],[65,33]], [[279,42],[274,40],[272,36],[274,33]], [[129,91],[133,92],[135,95]]],
+        motes: [[62,23,1.1],[54,30,.8],[101,31,1],[145,42,.8],[230,37,.9],[279,17,1.3],[268,28,.8],[81,102,1],[124,103,1.1],[255,101,.9]],
+    };
+    const _EN_CORONA = [[[24,14],[23,10],[25,7],[24,4]], [[32,14],[33,11],[31,8],[32,5],[34,3]], [[25,42],[24,46],[26,49],[25,52]], [[32,42],[33,45],[31,48],[32,51]]];   // (up and down off the bar's core)
+    const _EN_TENDRILS = (color, smoke, glow) => _svgUrl(_svgOf(340, 140, _enWisps(_EN_TITLE.trunks, _EN_TITLE.branches, _EN_TITLE.motes, color, smoke, glow, [2.2, 1.4])));
+    const _EN_CROWN = (color, smoke, glow) => _svgUrl(_svgOf(56, 56, _enWisps(_EN_CORONA, [], [], color, smoke, glow, [1.6, 1.1], .8)));
+    // The core's bezel: a machined ring around a dark port
+    const _EN_CORE = (bezel, lit, shade, port) => _svgUrl(_svgOf(80, 80,
+        `<circle cx="40" cy="40" r="38" fill="${bezel}"/><circle cx="40" cy="40" r="37.2" fill="none" stroke="${lit}" stroke-width="1.2"/>`
+        + `<path d="M8 52A34 34 0 0 0 72 52" fill="none" stroke="${shade}" stroke-width="2"/><circle cx="40" cy="40" r="29" fill="${port}"/>`
+        + `<circle cx="40" cy="40" r="29" fill="none" stroke="${shade}" stroke-width="2.4"/>`));
+    // <<< en art
     // In Settings: the light looks, then the dark ones, each in the order shown (desc: a line about it, on hover)
     const THEME_PRESETS = [
         { id: 'pastel',  label: 'R. Pastel', base: 'light', fav: '#9061f9', cover: '#fdf7ff', desc: 'Soft rainbow pastels on white',
@@ -1428,6 +1494,11 @@
           pv: ['radial-gradient(ellipse at 50% 100%,#2a2522,#121010 70%)', 'linear-gradient(90deg,#2a2624,#34302d 50%,#2a2624)', '#211d1c', 'linear-gradient(90deg,#ecc9b4,#c99a80)'] },
         { id: 'noir', label: 'Noir', base: 'dark', fav: '#d92f32', cover: '#0b0b0b', desc: 'Black and white, and one red',
           pv: ['radial-gradient(circle at 50% -30%,#2a2a2a,#0b0b0b 70%)', 'linear-gradient(180deg,#161616 0 82%,#d92f32 82%)', '#1b1b1b', '#d92f32'] },
+    // >>> en presets
+        // ── Dark Energy and Light Energy: sister themes ──
+        { id: 'darkenergy', label: 'Dark Energy', base: 'dark', fav: '#e9edf2', cover: '#0b0c0e', font: 'Michroma', desc: 'Hard-surface sci-fi in graphite and white: chamfered armor plates, rivets and slots, energy curling off the title', pv: ['#0b0c0e', 'linear-gradient(180deg,#1c1f24,#0e1013)', '#15171b', 'linear-gradient(180deg,#ffffff,#cfd5dd)'] },
+        { id: 'lightenergy', label: 'Light Energy', base: 'light', fav: '#17191d', cover: '#dfe3e9', font: 'Michroma', desc: 'Dark Energy’s sister in white: pale steel plates under black armor, ink-black energy curling off the title', pv: ['#dfe3e9', 'linear-gradient(180deg,#2a2d33,#131518)', '#eef1f5', 'linear-gradient(180deg,#2e3238,#121417)'] },
+    // <<< en presets
     ];
     let currentPreset = GM_getValue(PRESET_KEY, '');
     if (!THEME_PRESETS.some(t => t.id === currentPreset)) currentPreset = '';
@@ -2628,7 +2699,7 @@
         const t = { style: effStyle(), mode: effMode() };
         ['--bg', '--surface', '--surface-2', '--border', '--text', '--text-muted', '--accent', '--accent-fg', '--accent-text', '--accent-glow', '--success', '--nc',
          '--nav-bg', '--solid-bg', '--solid-fill', '--solid-fg', '--solid-fg-2', '--solid-hover', '--solid-active', '--solid-line', '--theme-font', '--theme-font-wt', '--theme-hc-track', '--theme-hc-case',
-         '--theme-hc-size', '--theme-brand-track']
+         '--theme-hc-size', '--theme-brand-track', '--np-rim', '--np-rivet', '--np-core', '--np-wisps', '--np-charge', '--np-frame', '--np-frame-sm', '--np-frame-hot', '--np-sky', '--np-stars', '--np-storm', '--np-storm-fx', '--np-edge']
             .forEach(k => { const v = cs.getPropertyValue(k).trim(); if (v) t[k] = v; });
         const font = presetOf()?.font;   // (the theme's own typeface, if it has one: its Google Fonts link, for a panel on Neopets)
         if (font) t.fontHref = `https://fonts.googleapis.com/css2?family=${font}&display=swap`;
@@ -5557,7 +5628,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
     function mountTokensApp(host, { inModal = false, share = null } = {}) {
         const SEARCH = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14"/></svg>';
         const DOWN = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v8M4.8 7.6 8 10.8l3.2-3.2M3 13.5h10"/></svg>';
-        const ui = Object.assign({ view: 'mine', kind: '', state: '', q: '', species: '', series: '', color: '', pcolor: '', style: '', pz: '', ess: '', tlist: '', olist: '', match: '', sort: 'name', group: false, size: 'big', avail: false, barMin: false }, GM_getValue('dti_tok_ui', {}) || {});   // (Big tiles until another size is picked)
+        const ui = Object.assign({ view: 'mine', kind: '', state: '', q: '', species: '', series: '', color: '', pcolor: '', style: '', pz: '', ess: '', tlist: '', olist: '', match: '', sort: 'name', group: false, size: 'big', avail: false, wantFirst: true, barMin: false }, GM_getValue('dti_tok_ui', {}) || {});   // (Big tiles until another size is picked)
         ui.q = '';
         if (share) Object.assign(ui, { view: 'mine', kind: '', state: '', species: '', series: '', color: '', pcolor: '', style: '', pz: '', ess: '', tlist: '', olist: '', match: '', sort: 'name', avail: false });   // (someone's shared list: from the start, with your tile size and grouping)
         ui.pcolor = Picks.of(ui.pcolor);   // (by look: the colors picked — Picks; one color, as kept before, is read as one)
@@ -6091,7 +6162,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             studioBox.innerHTML = studioState === 'loading'
                 ? `<span class="dti-tk-studio-spin"></span>Reading the Styling Studio\u2019s current rotation from ${src}${studioStep ? ` \u2014 ${studioStep}` : ''}\u2026`
                 : studioState === 'error' ? `Couldn\u2019t reach ${src} for the Styling Studio\u2019s rotation${d ? ` \u2014 this is what it had ${tokAgo(d.at)}` : ''}. <button type="button" class="dti-tk-studio-re">Try again</button>`
-                : keys ? `<span><b>${keys.size}</b> style tokens in the Styling Studio right now \u00b7 from ${src}, checked ${tokAgo(d.at)}${off ? ` \u00b7 ${off} not on DTI yet` : ''} \u00b7 <a href="https://www.neopets.com/mall/stylingstudio/" target="_blank" rel="noopener">Styling Studio \u2197</a></span><button type="button" class="dti-tk-studio-re">Check again</button>`
+                : keys ? `<span><b>${keys.size}</b> style tokens in the Styling Studio right now \u00b7 from ${src}, checked ${tokAgo(d.at)}${off ? ` \u00b7 ${off} not on DTI yet` : ''} \u00b7 <a href="https://www.neopets.com/mall/stylingstudio/" target="_blank" rel="noopener">Styling Studio \u2197</a></span>${share ? '' : `<button type="button" class="dti-tk-wfirst${ui.wantFirst ? ' on' : ''}" aria-pressed="${!!ui.wantFirst}" title="The ones you\u2019ve marked wanted at the top">Wanted first</button>`}<button type="button" class="dti-tk-studio-re">Check again</button>`
                 : '';
         }
         function readStudio() {
@@ -6109,7 +6180,10 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             const d = tokStudio();
             if (ui.avail && (!d || Date.now() - d.at > TOK_STUDIO_AGE)) readStudio();
         });
-        $('.dti-tk-studio').addEventListener('click', e => { if (e.target.closest('.dti-tk-studio-re') && studioState !== 'loading') readStudio(); });
+        $('.dti-tk-studio').addEventListener('click', e => {
+            if (e.target.closest('.dti-tk-wfirst')) { ui.wantFirst = !ui.wantFirst; saveUi(); render(); return; }
+            if (e.target.closest('.dti-tk-studio-re') && studioState !== 'loading') readStudio();
+        });
         if (!share && tokStudio() && Date.now() - tokStudio().at > TOK_STUDIO_AGE) readStudio();   // (you use it: kept up to date)
         gmWatch('dti_tok_studio', app, () => { if (studioState !== 'loading') render(); });
         const searchInp = $('.dti-tk-search input');
@@ -6334,16 +6408,17 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 own: (a, b) => b.own - a.own || b.want - a.want || a.name.localeCompare(b.name),
                 list: (a, b) => (ui.view === 'mine' && ['own', 'uft'].includes(ui.state) ? listRank('own', a) - listRank('own', b) : tlRank(a) - tlRank(b)) || a.name.localeCompare(b.name),   // (your want lists in their order — Owned / UFT: your owned lists; no list, then not in that kind, after)
             }[ui.sort] || ((a, b) => a.name.localeCompare(b.name));
+            const top = i => wantTop(i) ? 0 : 1, byTop = (a, b) => top(a) - top(b) || by(a, b);
             groups = ui.group ? buildGroups(list) : null;
             list.sort(groups ? (a, b) => {   // grouped: series, then style (each style's own tokens before its Prismatic versions), then the order picked
                 const x = groups.get(a.key), y = groups.get(b.key);
                 return gRank(a) - gRank(b) || x.s.localeCompare(y.s) || (!x.t) - (!y.t) || x.t.localeCompare(y.t) || (a.base || '').localeCompare(b.base || '')
                     || (!!a.prismatic - !!b.prismatic) || by(a, b);
-            } : by);
+            } : byTop);
             // One style's tokens, all of its versions: the regular ones first, then each Prismatic version (in the chips' order)
             if (!ui.pz && list.length && list.every(i => i.base && i.base === list[0].base) && list.some(i => i.prismatic)) {
                 const g = i => i.prismatic ? '1' + i.prismatic.toLowerCase() : '0';
-                list.sort((a, b) => g(a).localeCompare(g(b)));   // (stable: the order picked stays within each)
+                list.sort((a, b) => top(a) - top(b) || g(a).localeCompare(g(b)));   // (stable: the order picked stays within each)
             }
             cropObs.disconnect();
             grid.innerHTML = ''; shown = 0;
@@ -6394,9 +6469,10 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         // Grouped by type: a heading for each series (Nostalgic, Baby, Mischievous… — essences after them), and under it one
         // for each of its styles (Nostalgic Alien, Nostalgic Mutant…): the style's own tokens, then its Prismatic versions.
         // A series' styles with just one token share "Other styles"; a series with one style has no style headings.
-        const gRank = i => i.essence ? 1 : i.series ? 0 : 2;
+        const wantTop = i => !share && ui.avail && ui.wantFirst && !!i.want;   // (Available now: the ones you want at the top — grouped, their own group)
+        const gRank = i => wantTop(i) ? -1 : i.essence ? 1 : i.series ? 0 : 2;
         function buildGroups(items) {
-            const sOf = i => i.series || (i.essence ? 'Essence' : 'Other'), per = new Map(), g = new Map();
+            const sOf = i => wantTop(i) ? 'You want' : i.series || (i.essence ? 'Essence' : 'Other'), per = new Map(), g = new Map();
             items.forEach(i => { if (i.base) { const k = sOf(i) + '\u0001' + i.base; per.set(k, (per.get(k) || 0) + 1); } });
             items.forEach(i => { const s = sOf(i); g.set(i.key, { s, t: i.base && per.get(s + '\u0001' + i.base) > 1 ? i.base : '' }); });
             g.count = new Map(); g.subs = new Map();
@@ -7068,6 +7144,10 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-tk-studio a { color: var(--accent-text, var(--accent)); font-weight: 700; }
             #dti-tokens-app .dti-tk-studio-re { margin-left: auto; height: 28px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 700; }
             #dti-tokens-app .dti-tk-studio-re:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            #dti-tokens-app .dti-tk-wfirst { margin-left: auto; height: 28px; padding: 0 11px; border-radius: 99px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 700; }
+            #dti-tokens-app .dti-tk-wfirst:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            #dti-tokens-app .dti-tk-wfirst.on { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            #dti-tokens-app .dti-tk-wfirst + .dti-tk-studio-re { margin-left: 0; }
             .dti-tk-studio-spin { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: dti-tk-spin .8s linear infinite; }
             @keyframes dti-tk-spin { to { transform: rotate(360deg); } }
             .dti-tk-tags { position: absolute; top: 8px; left: 8px; z-index: 1; display: flex; gap: 4px; pointer-events: auto; }
@@ -14577,6 +14657,18 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['3.4', [
+            'Mini DTI: it opens below Neopets\u2019 top bar, nearer the edge; the tab hides while it\u2019s open \u2014 minimize brings it back',
+            'Mini DTI: move it anywhere by its top bar, size it from its edges and bottom corners \u2014 it stays that way; a double-click on the bar puts it back by the edge',
+            'Mini DTI: Alt+M opens it or minimizes it; each part keeps your place when you switch parts or minimize',
+            'Mini DTI: pinned, it opens again on your next page in that tab \u2014 a new tab starts with just the tab',
+            'Mini DTI: On this page now works on someone\u2019s shop (what you\u2019re after in it, with its price), Auctions, the Trading Post and the Shop Wizard',
+            'Mini DTI: Seeking \u2014 Must have / Want / Maybe right on each row; Seen on the boards names the items',
+            'Mini DTI: Items loads more results as you scroll; trade reports say who they\u2019re with; Home\u2019s numbers go two by two in a narrow window, nothing cut off',
+            'Mini DTI: clearer arrows; empty NC Mall tabs dimmed; a trade\u2019s status menu no longer gets cut off',
+            'Tokens: Available now (My Tokens) and In Studio (Mini DTI) put the ones you want first \u2014 a switch turns it off',
+            'Themes: Dark Energy and Light Energy \u2014 sister themes in hard-surface sci-fi: chamfered armor plates with rivets, a glowing core, energy curling off the title; Mini DTI wears them too',
+        ]],
         ['3.3', [
             'Petpet Matcher (under Pet Colors in the menu): every petpet and petpetpet in every color \u2014 by name, paint brush color, color and rarity',
             'Petpet Matcher: match to a pet in a color, a token, one of your customs or any Neopet \u2014 Auto match finds the petpets (and petpetpets) that go with it',
@@ -17071,6 +17163,200 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             html[data-dti-theme="obsidian"] :is(${_CARDS}) { border-radius: 3px !important; border-color: #2a2a38 !important; background: linear-gradient(160deg, rgba(255,255,255,.04), transparent 40%), var(--surface) !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.07), var(--shadow-md) !important; }
             html[data-dti-theme="obsidian"] :is(.btn-primary, .dti-nx-new, .dti-hc-ico) { border-radius: 3px !important; }
             html[data-dti-theme="obsidian"] #main-nav { box-shadow: inset 0 -1px 0 rgba(255,255,255,.06), 0 8px 26px rgba(0,0,0,.7) !important; }
+
+            /* >>> en css */
+            /* ══ Dark Energy and Light Energy (sister themes): hard-surface plates in black, white and steel ══ */
+            :root[data-dti-theme="darkenergy"][data-mode][data-style] {
+                --bg: #0b0c0e; --surface: #15171b; --surface-2: #1b1e23; --surface-3: #22262c; --border: #2c3138; --nav-bg: #0f1114;
+                --text: #eef1f5; --text-muted: #a3aab5; --text-sub: #6b7380;
+                --accent: #e9edf2; --accent-dim: #c9d0d9; --accent-glow: rgba(233,237,242,.1); --accent-text: #f4f7fa; --accent-fg: #0b0c0e;
+                --solid-bg: #1d2026; --solid-fill: linear-gradient(180deg, #1f2227, #121418);
+                --solid-fg: #eef1f5; --solid-fg-2: rgba(238,241,245,.7); --solid-line: rgba(238,241,245,.16); --solid-hover: rgba(255,255,255,.07); --solid-active: rgba(255,255,255,.13);
+                --theme-btn: linear-gradient(180deg, #ffffff, #cfd5dd); --theme-btn-fg: #0b0c0e;
+                --theme-page: radial-gradient(1300px 760px at 50% -8%, #171a1f, transparent 70%), linear-gradient(180deg, #0c0d10, #08090b);
+                --en-side-l: ${_EN_SIDE('#121418', '#22262c', 'rgba(233,237,242,.07)', '#262a31', false)}; --en-side-r: ${_EN_SIDE('#121418', '#22262c', 'rgba(233,237,242,.07)', '#262a31', true)};
+                --shadow-sm: 0 2px 6px rgba(0,0,0,.45); --shadow-md: 0 12px 30px rgba(0,0,0,.55); --shadow-lg: 0 22px 50px rgba(0,0,0,.7);
+                --theme-font: 'Michroma', 'Poppins', sans-serif; --theme-font-wt: 400; --theme-hc-size: 10px; --theme-hc-track: .16em; --theme-hc-case: uppercase; --theme-brand-track: .08em;
+                --theme-navdeco: none; --theme-navdeco-h: 0px;
+                --theme-ed-panel: #121418; --theme-scroll: #2c3138; --theme-scroll-track: #0b0c0e; --theme-sel: rgba(233,237,242,.24);
+                --en-plate: #15171b; --en-lift: 0 16px 26px -14px rgba(0,0,0,.75); --en-cap: #0e1013; --en-screen: #08090b; --en-bracket-c: rgba(233,237,242,.32);
+                --en-slot: #0b0c0e; --en-slot-in: inset 0 2px 4px rgba(0,0,0,.6), inset 0 -1px 0 rgba(255,255,255,.05);
+                --en-rim: ${_EN_RIM('#050607', 'rgba(255,255,255,.1)', 'rgba(0,0,0,.55)')};
+                --en-slots: ${_EN_SLOTS('#08090b', 'rgba(255,255,255,.14)')}; --en-rivet: ${_EN_RIVET('#060708', '#353a42', 'rgba(255,255,255,.4)')};
+                --en-lit: linear-gradient(180deg, #ffffff, #cfd5dd); --en-lit-fg: #0b0c0e; --en-lit-glow: 0 0 14px rgba(233,237,242,.3);
+                --en-ink: #f4f7fa; --en-pulse: rgba(233,237,242,.5);
+                --en-tendrils: ${_EN_TENDRILS('rgba(233,237,242,.7)', 'rgba(233,237,242,.14)', '')}; --en-charge: ${_EN_TENDRILS('#ffffff', 'rgba(255,255,255,.25)', 'rgba(255,255,255,.9)')};
+                --en-crown: ${_EN_CROWN('rgba(233,237,242,.42)', 'rgba(233,237,242,.1)', '')}; --en-crown-charge: ${_EN_CROWN('#ffffff', 'rgba(255,255,255,.3)', 'rgba(255,255,255,.9)')};
+                --en-core: ${_EN_CORE('#2a2e35', 'rgba(255,255,255,.2)', 'rgba(0,0,0,.6)', '#08090b')}; --en-core-bar: var(--en-core);
+                --np-rim: var(--en-rim); --np-rivet: var(--en-rivet); --np-core: var(--en-core-bar); --np-wisps: var(--en-tendrils); --np-charge: var(--en-charge);   /* (for Mini DTI on Neopets) */
+                --en-br-tl: ${_EN_BRACKET('rgba(233,237,242,.34)', 0)}; --en-br-tr: ${_EN_BRACKET('rgba(233,237,242,.34)', 90)}; --en-br-br: ${_EN_BRACKET('rgba(233,237,242,.34)', 180)}; --en-br-bl: ${_EN_BRACKET('rgba(233,237,242,.34)', 270)};
+            }
+            :root[data-dti-theme="lightenergy"][data-mode][data-style] {
+                --bg: #dfe3e9; --surface: #eef1f5; --surface-2: #e6eaf0; --surface-3: #dce1e8; --border: #c3cad4; --nav-bg: #1b1d21;
+                --text: #17191d; --text-muted: #4d5560; --text-sub: #7d8692;
+                --accent: #17191d; --accent-dim: #33373e; --accent-glow: rgba(23,25,29,.09); --accent-text: #121417; --accent-fg: #f4f6f9;
+                --solid-bg: #1b1d21; --solid-fill: linear-gradient(180deg, #2a2d33, #131518);
+                --solid-fg: #f2f4f7; --solid-fg-2: rgba(242,244,247,.7); --solid-line: rgba(242,244,247,.18); --solid-hover: rgba(255,255,255,.09); --solid-active: rgba(255,255,255,.15);
+                --theme-btn: linear-gradient(180deg, #2e3238, #121417); --theme-btn-fg: #f4f6f9;
+                --theme-page: radial-gradient(1300px 800px at 50% 6%, #f4f6f9, transparent 70%), linear-gradient(180deg, #e2e6eb, #d5dae1);
+                --en-side-l: ${_EN_SIDE('#1b1d21', '#3a3e45', 'rgba(23,25,29,.18)', '#3a3e45', false)}; --en-side-r: ${_EN_SIDE('#1b1d21', '#3a3e45', 'rgba(23,25,29,.18)', '#3a3e45', true)};
+                --shadow-sm: 0 2px 6px rgba(20,24,30,.12); --shadow-md: 0 12px 30px rgba(20,24,30,.14); --shadow-lg: 0 22px 50px rgba(20,24,30,.2);
+                --theme-font: 'Michroma', 'Poppins', sans-serif; --theme-font-wt: 400; --theme-hc-size: 10px; --theme-hc-track: .16em; --theme-hc-case: uppercase; --theme-brand-track: .08em;
+                --theme-navdeco: none; --theme-navdeco-h: 0px;
+                --theme-ed-panel: #e9ecf1; --theme-scroll: #9aa3ae; --theme-scroll-track: #dfe3e9; --theme-sel: rgba(23,25,29,.18);
+                --en-plate: #eef1f5; --en-lift: 0 16px 26px -14px rgba(20,24,30,.32); --en-cap: #1b1d21; --en-screen: #e3e7ed; --en-bracket-c: rgba(23,25,29,.4);
+                --en-slot: #dde2e8; --en-slot-in: inset 0 2px 4px rgba(20,24,30,.16), inset 0 -1px 0 rgba(255,255,255,.9);
+                --en-rim: ${_EN_RIM('#b9c1cc', '#ffffff', 'rgba(20,24,30,.14)')};
+                --en-slots: ${_EN_SLOTS('#d3d9e1', 'rgba(20,24,30,.24)')}; --en-rivet: ${_EN_RIVET('#0b0c0e', '#4a4f57', 'rgba(255,255,255,.5)')};
+                --en-lit: linear-gradient(180deg, #2e3238, #121417); --en-lit-fg: #f4f6f9; --en-lit-glow: 0 4px 14px rgba(20,24,30,.28);
+                --en-ink: #121417; --en-pulse: rgba(23,25,29,.35);
+                --en-tendrils: ${_EN_TENDRILS('rgba(23,25,29,.72)', 'rgba(23,25,29,.12)', '')}; --en-charge: ${_EN_TENDRILS('#121417', 'rgba(23,25,29,.2)', 'rgba(23,25,29,.45)')};
+                --en-crown: ${_EN_CROWN('rgba(233,237,242,.42)', 'rgba(233,237,242,.1)', '')}; --en-crown-charge: ${_EN_CROWN('#ffffff', 'rgba(255,255,255,.3)', 'rgba(255,255,255,.9)')};
+                --en-core: ${_EN_CORE('#d2d8e0', '#ffffff', 'rgba(20,24,30,.22)', '#17191d')}; --en-core-bar: ${_EN_CORE('#2a2e35', 'rgba(255,255,255,.2)', 'rgba(0,0,0,.6)', '#08090b')};
+                --np-rim: var(--en-rim); --np-rivet: var(--en-rivet); --np-core: var(--en-core-bar); --np-wisps: var(--en-tendrils); --np-charge: var(--en-charge);   /* (for Mini DTI on Neopets) */
+                --en-br-tl: ${_EN_BRACKET('rgba(23,25,29,.4)', 0)}; --en-br-tr: ${_EN_BRACKET('rgba(23,25,29,.4)', 90)}; --en-br-br: ${_EN_BRACKET('rgba(23,25,29,.4)', 180)}; --en-br-bl: ${_EN_BRACKET('rgba(23,25,29,.4)', 270)};
+            }
+            ${_EN} { scrollbar-color: var(--theme-scroll) var(--theme-scroll-track, transparent); }
+            ${_EN} ::selection { background: var(--theme-sel); }
+            /* the sides: an armor plate in from each edge, its point 60% of the way into the margin beside a 1200px page (user: less toward
+               the middle; on a narrow window: just its edge) */
+            ${_EN} body::after { content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+                background: var(--en-side-l) calc(30vw - 360px - 47vh) 0 / auto 100% no-repeat, var(--en-side-r) right calc(30vw - 360px - 47vh) top 0 / auto 100% no-repeat; }
+            ${_EN} body:has(#dti-closet-center, #wardrobe-2020-root)::after { display: none; }   /* (the :has() on body, not html — so it's dropped with the theme's other rules when another theme is on) */
+            /* the plates: cut 12px at each corner (the background, so nothing inside is clipped), a rim with a lit top edge and a shaded
+               bottom one */
+            ${_EN} :is(${_CARDS}, body.auth_users-edit .settings-form, turbo-frame#item-preview, .dti-tk-bar, .dti-pp-stage, .dti-pp-bar, .dti-nx-side, .dti-nx-listcol, .dti-nx-detail) {
+                background: linear-gradient(135deg, transparent 8px, var(--en-plate) 9px) top left / 51% 51% no-repeat,
+                    linear-gradient(225deg, transparent 8px, var(--en-plate) 9px) top right / 51% 51% no-repeat,
+                    linear-gradient(315deg, transparent 8px, var(--en-plate) 9px) bottom right / 51% 51% no-repeat,
+                    linear-gradient(45deg, transparent 8px, var(--en-plate) 9px) bottom left / 51% 51% no-repeat !important;
+                border: 1px solid transparent !important; border-radius: 0 !important;
+                border-image: var(--en-rim) 16 / 16px / 0 stretch !important;
+                box-shadow: var(--en-lift) !important;   /* (pulled in, so it falls only under the plate — a full one showed through the cut corners) */
+            }
+            /* a card's head: a dark cap across its top (cut to the plate's corners), its title in the display face, a rivet at each end */
+            ${_EN} .dti-hc-head, ${_EN} #dti-home-grid .dti-hc-head, ${_EN} .dti-set-head {
+                background: linear-gradient(135deg, transparent 6.6px, var(--en-cap) 7.6px) left top / 51% 100% no-repeat,
+                    linear-gradient(225deg, transparent 6.6px, var(--en-cap) 7.6px) right top / 51% 100% no-repeat !important;
+                border-bottom: 0 !important; box-shadow: inset 0 -1px 0 rgba(255,255,255,.07), 0 1px 0 rgba(0,0,0,.35) !important;
+                position: relative; padding-left: 24px !important; padding-right: 24px !important;
+            }
+            ${_EN} :is(.dti-nx-brand, .dti-panel-label[aria-expanded="true"]) {
+                background: linear-gradient(135deg, transparent 6.6px, var(--en-cap) 7.6px) left top / 51% 100% no-repeat,
+                    linear-gradient(225deg, transparent 6.6px, var(--en-cap) 7.6px) right top / 51% 100% no-repeat !important; border-radius: 0 !important;
+            }
+            ${_EN} :is(.dti-panel-label[aria-expanded="false"], .dti-list-section-head) {
+                background: linear-gradient(135deg, transparent 6.6px, var(--en-cap) 7.6px) top left / 51% 51% no-repeat, linear-gradient(225deg, transparent 6.6px, var(--en-cap) 7.6px) top right / 51% 51% no-repeat,
+                    linear-gradient(315deg, transparent 6.6px, var(--en-cap) 7.6px) bottom right / 51% 51% no-repeat, linear-gradient(45deg, transparent 6.6px, var(--en-cap) 7.6px) bottom left / 51% 51% no-repeat !important; border-radius: 0 !important;
+            }
+            ${_EN} :is(.dti-panel-label, .dti-list-section-head, .dti-nx-brand) { color: var(--solid-fg) !important; }
+            ${_EN} :is(.dti-panel-label .dti-panel-txt, .dti-list-section-head .dti-section-title-wrap) { font-family: var(--theme-font) !important; font-weight: 400 !important; font-size: 9px !important; letter-spacing: .08em !important; text-transform: uppercase; }
+            ${_EN} .dti-nx-brand :is(b, strong, span, h2) { font-family: var(--theme-font) !important; font-weight: 400 !important; letter-spacing: .1em !important; text-transform: uppercase; font-size: 13px !important; }
+            ${_EN} :is(.dti-hc-head, .dti-set-head)::before, ${_EN} :is(.dti-hc-head, .dti-set-head)::after { content: ''; position: absolute; top: 50%; width: 10px; height: 10px; margin-top: -5px; background: var(--en-rivet) center / 10px no-repeat; pointer-events: none; }
+            ${_EN} :is(.dti-hc-head, .dti-set-head)::before { left: 8px; }
+            ${_EN} :is(.dti-hc-head, .dti-set-head)::after { right: 8px; }
+            /* (a head with a count and three or more buttons — Customs: no rivets, so its title keeps its room) */
+            ${_EN} #dti-home-grid .dti-hc-head:has(.dti-hc-count):has(.dti-hc-actions > :nth-child(3)) { padding-left: 12px !important; padding-right: 12px !important; }
+            ${_EN} #dti-home-grid .dti-hc-head:has(.dti-hc-count):has(.dti-hc-actions > :nth-child(3))::before, ${_EN} #dti-home-grid .dti-hc-head:has(.dti-hc-count):has(.dti-hc-actions > :nth-child(3))::after { display: none; }
+            ${_EN} .dti-set-head { margin: 0 -22px 18px !important; padding: 0 26px !important; }
+            ${_EN} body.auth_users-edit .dti-set-head h2 { font-family: var(--theme-font) !important; font-weight: 400 !important; font-size: 12px !important; letter-spacing: .14em !important; text-transform: uppercase; color: var(--solid-fg) !important; }
+            ${_EN} :is(.dti-set-ico, #dti-set-pagehead .dti-set-pageico) { background: rgba(0,0,0,.42) !important; box-shadow: inset 0 1px 3px rgba(0,0,0,.6), inset 0 -1px 0 rgba(255,255,255,.07) !important; color: var(--solid-fg) !important; border-radius: 50% !important; }
+            ${_EN} :is(#dti-set-pagehead .dti-set-pageico, .dti-tk-hico, .dti-sk-hico, .dti-pp-hico, .dti-tf-hico, .dti-tp-hico, .dti-ix-hico) { background: var(--en-core) center / contain no-repeat !important; border: 0 !important; border-radius: 50% !important; box-shadow: 0 6px 16px rgba(0,0,0,.28) !important; color: #f4f7fa !important; }
+            ${_EN} #dti-set-pagehead h1 { font-family: var(--theme-font) !important; font-weight: 400 !important; letter-spacing: .08em !important; }
+            ${_EN} :is(.dti-hc-head, #dti-home-grid .dti-hc-head) .dti-hc-title { font-family: var(--theme-font) !important; font-weight: 400 !important; font-size: 9.5px !important; letter-spacing: .12em !important; text-transform: uppercase !important; color: var(--solid-fg) !important; }
+            ${_EN} #dti-home-grid .dti-hc-head :is(.dti-hc-ico, .dti-hc-count) { background: rgba(0,0,0,.42) !important; box-shadow: inset 0 1px 3px rgba(0,0,0,.6), inset 0 -1px 0 rgba(255,255,255,.07) !important; color: var(--solid-fg) !important; border-radius: 50% !important; }
+            ${_EN} #dti-home-grid .dti-hc-head .dti-hc-count { border-radius: 99px !important; font-family: 'Poppins', sans-serif !important; font-weight: 800 !important; font-size: 10px !important; }   /* (Michroma's 0 reads as an empty box) */
+            ${_EN} #dti-home-grid .dti-hc-head :is(.dti-seg, .dti-weeknav) { background: rgba(0,0,0,.42) !important; box-shadow: inset 0 1px 3px rgba(0,0,0,.6), inset 0 -1px 0 rgba(255,255,255,.07) !important; border: 0 !important; border-radius: 99px !important; }
+            ${_EN} #dti-home-grid .dti-hc-head .dti-seg > button.active { background: linear-gradient(180deg, #ffffff, #cfd5dd) !important; color: #0b0c0e !important; box-shadow: 0 0 10px rgba(233,237,242,.25) !important; }
+            ${_EN} #dti-home-grid .dti-hc-head :is(.dti-icon-btn, .dti-hc-pill, .dti-spl-badge) { background: rgba(0,0,0,.35) !important; border: 1px solid rgba(255,255,255,.1) !important; color: var(--solid-fg) !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.05) !important; }
+            ${_EN} #dti-home-grid .dti-hc-head :is(.dti-icon-btn, .dti-hc-pill, .dti-spl-badge):hover { border-color: rgba(255,255,255,.5) !important; }
+            /* the bar: armor across the top, its links in a recessed channel, the one you're on lit; the logo a small core, wisps curling off it */
+            ${_EN} #main-nav { background: var(--solid-fill) !important; box-shadow: inset 0 -1px 0 rgba(255,255,255,.06), 0 1px 0 #050607, 0 10px 28px rgba(0,0,0,.4) !important; }
+            ${_EN} #main-nav .dti-brand { font-family: var(--theme-font) !important; font-weight: 400 !important; letter-spacing: .1em !important; font-size: 17px !important; color: var(--solid-fg) !important; }
+            ${_EN} #main-nav .dti-brand-gem { background: var(--en-core-bar) center / contain no-repeat !important; box-shadow: none !important; border-radius: 50% !important; position: relative; z-index: 0; overflow: visible !important; }
+            ${_EN} #main-nav .dti-brand-gem svg { position: relative; z-index: 1; }
+            ${_EN} #main-nav .dti-brand-gem svg :is(path, line) { stroke: #f4f7fa !important; }
+            ${_EN} #main-nav .dti-brand-gem::before, ${_EN} #main-nav .dti-brand-gem::after { content: ''; position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; z-index: -1; pointer-events: none; background: var(--en-crown) center / 56px no-repeat; }
+            ${_EN} #main-nav .dti-brand-gem::after { background-image: var(--en-crown-charge); opacity: 0; animation: dti-en-flicker 7s linear 1.1s infinite; }
+            ${_EN} #main-nav .dti-nav-center { background: rgba(0,0,0,.42); box-shadow: inset 0 2px 5px rgba(0,0,0,.6), inset 0 -1px 0 rgba(255,255,255,.07); border-radius: 99px; padding: 3px; }
+            ${_EN} #main-nav :is(.dti-nav-center > .dti-nav-link, .dti-nav-more-btn) { font-family: 'Poppins', sans-serif !important; font-size: 10.5px !important; font-weight: 600 !important; letter-spacing: .15em !important; text-transform: uppercase !important; color: var(--solid-fg-2) !important; border-radius: 99px !important; background: none !important; }
+            ${_EN} #main-nav :is(.dti-nav-center > .dti-nav-link, .dti-nav-more-btn):hover { color: var(--solid-fg) !important; background: rgba(255,255,255,.06) !important; }
+            ${_EN} #main-nav .dti-nav-center > .dti-nav-link.active { background: linear-gradient(180deg, #ffffff, #cfd5dd) !important; color: #0b0c0e !important; box-shadow: 0 0 12px rgba(233,237,242,.3), inset 0 -1px 0 rgba(0,0,0,.25) !important; }
+            ${_EN} #main-nav .dti-nav-divider { background: rgba(255,255,255,.12) !important; }
+            ${_EN} #main-nav :is(.dti-nav-gear, .dti-logout-btn) { background: rgba(0,0,0,.4) !important; border: 1px solid rgba(255,255,255,.1) !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.06) !important; color: var(--solid-fg) !important; }
+            ${_EN} #main-nav #dti-nst-clock { background: rgba(0,0,0,.5) !important; border: 1px solid rgba(255,255,255,.08) !important; box-shadow: inset 0 2px 5px rgba(0,0,0,.6) !important; color: #f4f7fa !important; font-family: var(--theme-font) !important; }
+            /* the call to action: a lit hexagonal plate (on the bar: always the white one); the quieter buttons: pill slots */
+            ${_EN} :is(.btn-primary, .dti-nx-new, #main-nav .dti-nav-new, .dti-sc-btn, .dti-spl-enter, #dti-seek-section button.main) {
+                background: var(--en-lit) !important; color: var(--en-lit-fg) !important; border: 0 !important; border-radius: 0 !important;
+                clip-path: polygon(11px 0, calc(100% - 11px) 0, 100% 50%, calc(100% - 11px) 100%, 11px 100%, 0 50%);
+                font-family: 'Poppins', sans-serif !important; font-weight: 700 !important; letter-spacing: .14em !important; text-transform: uppercase !important; font-size: 11px !important;
+                box-shadow: inset 0 1px 0 rgba(255,255,255,.45), inset 0 -2px 0 rgba(0,0,0,.2) !important; position: relative; overflow: hidden;
+            }
+            ${_EN} #main-nav .dti-nav-right .dti-nav-new { background: linear-gradient(180deg, #ffffff, #cfd5dd) !important; color: #0b0c0e !important; }   /* (the bar's own: white in both — user asked) */
+            ${_EN} :is(.btn-primary, .dti-nx-new, #main-nav .dti-nav-new, .dti-sc-btn, .dti-spl-enter, #dti-seek-section button.main) :is(span, svg) { color: inherit !important; }
+            ${_EN} :is(.btn-primary, .dti-nx-new, #main-nav .dti-nav-new, .dti-sc-btn, .dti-spl-enter, #dti-seek-section button.main)::after {
+                content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.6) 50%, transparent 70%) -150% 0 / 60% 100% no-repeat; opacity: 0;
+            }
+            ${_EN} :is(.btn-primary, .dti-nx-new, #main-nav .dti-nav-new, .dti-sc-btn, .dti-spl-enter, #dti-seek-section button.main):hover::after { opacity: 1; animation: dti-en-sweep .7s ease-out; }
+            @keyframes dti-en-sweep { from { background-position: -150% 0; } to { background-position: 250% 0; } }
+            ${_EN} :is(.btn-ghost, .dti-spl-vote) { background: var(--en-slot) !important; box-shadow: var(--en-slot-in) !important; border: 1px solid transparent !important; border-radius: 99px !important; color: var(--en-ink) !important; font-family: 'Poppins', sans-serif !important; font-weight: 700 !important; letter-spacing: .12em !important; text-transform: uppercase !important; font-size: 10.5px !important; }
+            ${_EN} :is(.btn-ghost, .dti-spl-vote):hover { border-color: var(--en-ink) !important; }
+            /* fields: recessed channels; the rim lights when one has focus */
+            ${_EN} #container :is(input[type=text], input[type=search], input:not([type]), select, .dti-csel-trigger) { background: var(--en-slot) !important; box-shadow: var(--en-slot-in) !important; border: 1px solid transparent !important; border-radius: 6px !important; color: var(--text) !important; }
+            ${_EN} #container :is(input[type=text], input[type=search], input:not([type]), select, .dti-csel-trigger):focus { border-color: var(--en-ink) !important; box-shadow: var(--en-slot-in), 0 0 0 3px var(--accent-glow) !important; outline: none !important; }
+            ${_EN} .dti-hero-field { background: var(--en-slot) !important; box-shadow: var(--en-slot-in) !important; border-radius: 6px !important; border-color: transparent !important; }
+            ${_EN} .dti-hero-field input { background: transparent !important; box-shadow: none !important; }
+            ${_EN} .dti-seg { background: var(--en-slot) !important; box-shadow: var(--en-slot-in) !important; border: 0 !important; border-radius: 99px !important; padding: 3px !important; }
+            ${_EN} .dti-seg > button { border-radius: 99px !important; font-weight: 600 !important; letter-spacing: .05em !important; color: var(--text-muted) !important; }
+            ${_EN} .dti-seg > button.active { background: var(--en-lit) !important; color: var(--en-lit-fg) !important; box-shadow: var(--en-lit-glow) !important; }
+            ${_EN} #dti-home-grid .dti-hc-head .dti-seg > button:not(.active) { color: var(--solid-fg-2) !important; }
+            /* items: small plates — the rim lighting up under the pointer */
+            ${_EN} :is(#dti-newest-items-grid .object a, .dti-nm-tile a, .dti-uo-card, .dti-item-card, .dti-tk-card, .dti-pp-tile, .dti-list-card) {
+                background: linear-gradient(135deg, transparent 5px, var(--surface-2) 6px) top left / 51% 51% no-repeat, linear-gradient(225deg, transparent 5px, var(--surface-2) 6px) top right / 51% 51% no-repeat,
+                    linear-gradient(315deg, transparent 5px, var(--surface-2) 6px) bottom right / 51% 51% no-repeat, linear-gradient(45deg, transparent 5px, var(--surface-2) 6px) bottom left / 51% 51% no-repeat !important;
+                border: 1px solid transparent !important; border-radius: 0 !important; border-image: var(--en-rim) 16 / 10px / 0 stretch !important; box-shadow: none !important; transition: transform .18s, filter .18s !important;
+            }
+            /* (a custom's picture fills its card's top: cut to the same corners) */
+            ${_EN} ul#outfits > li > a > img { clip-path: polygon(11px 0, calc(100% - 11px) 0, 100% 11px, 100% 100%, 0 100%, 0 11px); }
+            ${_EN} .dti-uo-card img { clip-path: polygon(7px 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%, 0 7px); }
+            ${_EN} :is(#dti-newest-items-grid .object:hover > a, .dti-nm-tile:hover > a, .dti-uo-card:hover, .dti-item-card:hover, .dti-tk-card:hover, .dti-pp-tile:hover) { transform: translateY(-2px); filter: brightness(1.08); }
+            /* the hero: its screen (the pet) behind viewfinder corners; the logo a core port, pulsing; "Dress to" small and spaced over
+               a big IMPRESS, energy curling off the word */
+            ${_EN} #dti-hero-left {
+                background: linear-gradient(135deg, transparent 6.6px, var(--en-screen) 7.6px) left top / 51% 51% no-repeat, linear-gradient(45deg, transparent 6.6px, var(--en-screen) 7.6px) left bottom / 51% 51% no-repeat,
+                    linear-gradient(var(--en-screen), var(--en-screen)) right / 50% 100% no-repeat !important;
+                border-right: 0 !important; box-shadow: inset -1px 0 0 rgba(0,0,0,.4), inset -2px 0 0 rgba(255,255,255,.05);
+            }
+            ${_EN} #dti-hero-left::after { display: none !important; }
+            /* the editor's picture: the same viewfinder corners */
+            ${_EN} #wardrobe-2020-root > * > * > * > *:first-child { background-image: var(--en-br-tl), var(--en-br-tr), var(--en-br-br), var(--en-br-bl) !important;
+                background-position: 18px 18px, right 18px top 18px, right 18px bottom 18px, 18px calc(100% - 18px) !important; background-size: 14px 14px !important; background-repeat: no-repeat !important; }
+            ${_EN} #dti-pet-display-wrap { background: var(--en-br-tl) 14px 14px / 14px no-repeat, var(--en-br-tr) right 14px top 14px / 14px no-repeat, var(--en-br-br) right 14px bottom 14px / 14px no-repeat, var(--en-br-bl) 14px calc(100% - 14px) / 14px no-repeat !important; }
+            ${_EN} #dti-pet-display { border-radius: 4px !important; box-shadow: 0 0 0 1px rgba(0,0,0,.25), 0 14px 30px rgba(0,0,0,.3) !important; }
+            ${_EN} #dti-wearing-panel { background: var(--en-plate) !important; border-color: transparent !important; box-shadow: inset 1px 0 0 rgba(0,0,0,.25), inset -1px 0 0 rgba(0,0,0,.25) !important; }
+            ${_EN} #dti-wearing-panel .dti-wp-hdr { font-family: var(--theme-font) !important; font-weight: 400 !important; font-size: 9.5px !important; letter-spacing: .2em !important; color: var(--solid-fg) !important; background: var(--en-cap) !important; border: 0 !important; }
+            ${_EN} #dti-hero-right .dti-hero-brand { font-family: 'Poppins', sans-serif !important; font-weight: 600 !important; letter-spacing: .5em !important; color: var(--text-muted) !important; }
+            ${_EN} #dti-hero-logo { width: 46px !important; height: 46px !important; flex: none !important; background: var(--en-core) center / contain no-repeat !important; border: 0 !important; border-radius: 50% !important; box-shadow: 0 6px 18px rgba(0,0,0,.3) !important; color: #f4f7fa !important; position: relative; }
+            ${_EN} #dti-hero-logo svg { width: 22px !important; height: 21px !important; }
+            ${_EN} #dti-hero-logo::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; border: 1px solid var(--en-pulse); opacity: 0; pointer-events: none; animation: dti-en-pulse 4.6s ease-out infinite; }
+            @keyframes dti-en-pulse { 0% { transform: scale(.82); opacity: 0; } 18% { opacity: .9; } 100% { transform: scale(1.45); opacity: 0; } }
+            ${_EN} #dti-hero-right h1 { flex: none; font-family: 'Poppins', sans-serif !important; font-weight: 600 !important; font-size: 11px !important; letter-spacing: .6em !important; text-transform: uppercase; color: var(--text-muted) !important; line-height: 1 !important; padding: 2px 0 0 !important; margin: 4px 0 12px !important; }
+            ${_EN} #dti-hero-right h1 span { display: block; position: relative; z-index: 0; margin-top: 18px; font-family: var(--theme-font) !important; font-weight: 400 !important; font-size: 34px !important; letter-spacing: .06em !important; line-height: 1.1 !important; color: var(--en-ink) !important; -webkit-text-fill-color: currentColor !important; background: none !important; text-indent: .06em; }
+            ${_EN} #dti-hero-right h1 span::before, ${_EN} #dti-hero-right h1 span::after { content: ''; position: absolute; left: 50%; top: 50%; width: 340px; height: 140px; margin: -72px 0 0 -170px; z-index: -1; pointer-events: none; background: var(--en-tendrils) center / 340px 140px no-repeat; }
+            ${_EN} #dti-hero-right h1 span::after { background-image: var(--en-charge); opacity: 0; animation: dti-en-flicker 7s linear infinite; }
+            @keyframes dti-en-flicker { 0%, 62% { opacity: 0; } 63% { opacity: .85; } 64% { opacity: .2; } 66% { opacity: 1; } 70% { opacity: .5; } 76% { opacity: 0; } 100% { opacity: 0; } }
+            ${_EN} .dti-form-divider { font-family: 'Poppins', sans-serif !important; font-weight: 600 !important; font-size: 9px !important; letter-spacing: .3em !important; text-transform: uppercase; }
+            ${_EN} .dti-form-divider::before, ${_EN} .dti-form-divider::after { background: var(--en-slots) center / 44px 6px no-repeat !important; height: 6px !important; border: 0 !important; }
+            ${_EN} turbo-frame#item-preview > div.preview-area { border-right: 0 !important; box-shadow: inset -1px 0 0 rgba(0,0,0,.3), inset -2px 0 0 rgba(255,255,255,.05) !important;
+                background: var(--en-br-tl) 10px 10px / 14px no-repeat, var(--en-br-tr) right 10px top 10px / 14px no-repeat, var(--en-br-br) right 10px bottom 10px / 14px no-repeat, var(--en-br-bl) 10px calc(100% - 10px) / 14px no-repeat,
+                    linear-gradient(135deg, transparent 6.6px, var(--en-screen) 7.6px) left top / 51% 51% no-repeat, linear-gradient(45deg, transparent 6.6px, var(--en-screen) 7.6px) left bottom / 51% 51% no-repeat, linear-gradient(var(--en-screen), var(--en-screen)) right / 50% 100% no-repeat !important; }
+            ${_EN} turbo-frame#item-preview outfit-viewer { box-shadow: 0 0 0 1px rgba(0,0,0,.3), 0 10px 26px rgba(0,0,0,.28) !important; }
+            ${_EN} turbo-frame#item-preview > :is(species-color-picker, species-face-picker) { border-color: transparent !important; box-shadow: inset 0 1px 0 rgba(0,0,0,.25), inset 1px 0 0 rgba(0,0,0,.25) !important; }
+            ${_EN} species-face-picker-options label { border-radius: 4px !important; background: var(--en-slot) !important; box-shadow: var(--en-slot-in) !important; opacity: .6 !important; }
+            ${_EN} species-face-picker-options label:has(input:checked) { opacity: 1 !important; border-color: var(--en-ink) !important; box-shadow: var(--en-lit-glow) !important; }
+            ${_EN} .item-zones-info h3 { font-family: var(--theme-font) !important; font-weight: 400 !important; letter-spacing: .16em !important; font-size: 10px !important; }
+            @media (prefers-reduced-motion: reduce) { ${_EN} :is(#dti-hero-logo, #dti-hero-right h1 span, #main-nav .dti-brand-gem)::after, ${_EN} :is(.btn-primary, .dti-nx-new, #main-nav .dti-nav-new, .dti-sc-btn, .dti-spl-enter, #dti-seek-section button.main)::after { animation: none !important; } }
+            /* <<< en css */
 
             /* ── Badge visibility toggles ──────────────────────────────────── */
             /* Newest Items' NC / NP switch: both badges, whatever the settings above say */
@@ -35590,6 +35876,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 '--hf': v('--theme-font', "'Poppins', system-ui, sans-serif"), '--hw': v('--theme-font-wt', '800'),
                 '--htr': v('--theme-hc-track', '.09em'), '--hcs': v('--theme-hc-case', 'uppercase'), '--hsz': v('--theme-hc-size', '11px'),
                 '--btr': v('--theme-brand-track', '-.02em'), '--r': sq ? '3px' : '14px', '--r2': sq ? '2px' : '10px',
+                '--np-rim': v('--np-rim', 'none'), '--np-rivet': v('--np-rivet', 'none'), '--np-core': v('--np-core', 'none'), '--np-wisps': v('--np-wisps', 'none'), '--np-charge': v('--np-charge', 'none'),
+                '--np-frame': v('--np-frame', 'none'), '--np-frame-sm': v('--np-frame-sm', 'none'), '--np-frame-hot': v('--np-frame-hot', 'none'), '--np-sky': v('--np-sky', 'none'), '--np-stars': v('--np-stars', 'none'),
+                '--np-storm': v('--np-storm', 'none'), '--np-storm-fx': v('--np-storm-fx', 'none'), '--np-edge': v('--np-edge', 'none'),
                 ...(solid ? {   // (Solid: the bar filled like DTI's nav, and the cards' heads with it)
                     '--nv': v('--solid-fill', v('--solid-bg', A)), '--nvfg': v('--solid-fg', '#ffffff'), '--nvfg2': v('--solid-fg-2', 'rgb(255 255 255 / .8)'),
                     '--nvh': v('--solid-hover', 'rgb(255 255 255 / .14)'), '--nva': v('--solid-active', 'rgb(255 255 255 / .22)'), '--nvl': v('--solid-line', 'rgb(255 255 255 / .32)'),
@@ -35601,8 +35890,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 }),
             };
             // (saved values go into a style sheet: anything that could end the rule is left out — its fallback shows instead)
-            const css = Object.entries(vars).filter(([, x]) => !/[;{}]|<\//.test(String(x))).map(([k, x]) => `${k}:${x}`).join(';');
-            return { css: `:host{${css}}`, solid, dark: t.mode === 'dark', font: /^https:\/\/fonts\.googleapis\.com\//.test(t.fontHref || '') ? t.fontHref : '' };
+            // (a picture's data URL has its ";base64," — that one's fine)
+            const css = Object.entries(vars).filter(([, x]) => !/[;{}]|<\//.test(String(x).replace(/;base64,/g, ','))).map(([k, x]) => `${k}:${x}`).join(';');
+            const en = t.preset === 'darkenergy' ? 'd' : t.preset === 'lightenergy' ? 'l' : '';   // (Dark / Light Energy: the Mini in their plates)
+            const px = t.preset === 'nightsky' ? 'n' : t.preset === 'dawnsky' ? 'd' : '';   // (Night Sky / Dawn Sky: the Mini in pixels)
+            const t2 = t.preset === 'tempest2';   // (Tempest 2.0: the Mini in storm glass, the storm in its hero)
+            const t3 = t.preset === 'tempest3';   // (Tempest 3.0: flat, the bar a storm cloud, a little storm in its hero)
+            return { css: `:host{${css}}`, solid, dark: t.mode === 'dark', en, px, t2, t3, font: /^https:\/\/fonts\.googleapis\.com\//.test(t.fontHref || '') ? t.fontHref : '' };
         }
 
         // ── Bits used all over ──
@@ -35619,6 +35913,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             back: svg('<path d="M10 3 5 8l5 5"/>', 2),
             ext: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5h5v5M9.5 2.5 3 9"/></svg>',
             x: svg('<path d="M4 4l8 8M12 4l-8 8"/>', 1.9),
+            min: svg('<path d="M3.8 10.5h8.4"/>', 2),
+            chev: svg('<path d="M4.5 6.2 8 9.8l3.5-3.6"/>', 1.9),
             pin: svg('<path d="M8 11.3v3.4"/><path d="M3.4 11.3h9.2v-1.2a1.3 1.3 0 0 0-.7-1.2l-1.2-.6a1.3 1.3 0 0 1-.7-1.2V4h.6a1.3 1.3 0 0 0 0-2.6H5.4a1.3 1.3 0 0 0 0 2.6H6v3.1a1.3 1.3 0 0 1-.7 1.2l-1.2.6a1.3 1.3 0 0 0-.7 1.2z"/>', 1.5),
             grid: svg('<rect x="2.5" y="2.5" width="4.4" height="4.4" rx="1.2"/><rect x="9.1" y="2.5" width="4.4" height="4.4" rx="1.2"/><rect x="2.5" y="9.1" width="4.4" height="4.4" rx="1.2"/><rect x="9.1" y="9.1" width="4.4" height="4.4" rx="1.2"/>', 1.5),
             gift: svg('<rect x="2" y="5.6" width="12" height="3.2" rx=".8"/><path d="M3 8.8v4.4c0 .5.3.8.8.8h8.4c.5 0 .8-.3.8-.8V8.8M8 5.6V14M8 5.6S6.9 2.4 5.2 3c-1.3.5-.7 2.6 2.8 2.6zm0 0s1.1-3.2 2.8-2.6c1.3.5.7 2.6-2.8 2.6z"/>', 1.5),
@@ -35706,6 +36002,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const seekNames = () => new Set(seekOn() ? seekMine().map(e => String(e.name || '').toLowerCase()) : []);
         const seekEntry = it => ({ name: it.name, img: it.img || '', at: Date.now(), note: '', acct: acctMany() ? meAcct() : '', ord: -Date.now() });
         const tierOf = e => (e.tier === 0 || e.tier === 2 ? e.tier : 1);   // (Must have, Want, Maybe)
+        const TIERS = ['Must have', 'Want', 'Maybe'];   // (DTI's Seeking page's SEEK_TIERS — that isn't set yet on Neopets pages)
         const seekSorted = () => seekMine().sort((a, b) => tierOf(a) - tierOf(b) || (a.ord ?? 0) - (b.ord ?? 0) || (b.at || 0) - (a.at || 0));
         // new offers on it (Trade Finder's daily check, or Seeking's own): who — on its row for 3 days; the count until you look
         const skNew = () => { const t = GM_getValue('dti_sk_new', {}) || {}; return Date.now() - (t.at || 0) < 3 * 864e5 ? t.items || {} : {}; };
@@ -35834,17 +36131,211 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .tab { position: fixed; right: 0; z-index: 2; width: 20px; height: 56px; padding: 0; border: none; border-radius: 12px 0 0 12px; cursor: pointer;
                 display: grid; place-items: center; background: var(--a); color: var(--af); box-shadow: -2px 3px 12px rgb(0 0 0 / .22), inset 1px 0 0 rgb(255 255 255 / .18);
                 opacity: .8; transition: width .15s, opacity .15s; touch-action: none; font: 13px system-ui, sans-serif; }
-            .tab:hover, .tab.open, .tab.drag { width: 26px; opacity: 1; }
+            .tab:hover, .tab.drag { width: 26px; opacity: 1; }
+            .tab.open { display: none; }   /* (the window's open: its minimize brings the tab back) */
             .tab.drag { cursor: grabbing; }
             .tab:focus-visible { outline: 2px solid var(--a); outline-offset: 2px; }
             .tab svg { width: 13px; height: 12px; pointer-events: none; }
             .tab .badge { position: absolute; top: -7px; left: -9px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 99px; pointer-events: none;
                 background: #e5484d; color: #fff; font: 800 10px/18px system-ui, sans-serif; font-style: normal; text-align: center; box-shadow: 0 0 0 2px var(--s); }
-            .tab .dot { position: absolute; top: 6px; left: 50%; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--af); box-shadow: 0 0 0 1.5px var(--a); pointer-events: none; }`;
+            .tab .dot { position: absolute; top: 6px; left: 50%; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--af); box-shadow: 0 0 0 1.5px var(--a); pointer-events: none; }
+            .tab.px { border-radius: 0; box-shadow: inset 3px 0 0 rgb(255 255 255 / .35), inset 0 3px 0 rgb(255 255 255 / .2), inset 0 -3px 0 rgb(0 0 0 / .3);
+                clip-path: polygon(3px 0, 100% 0, 100% 100%, 3px 100%, 3px calc(100% - 3px), 0 calc(100% - 3px), 0 3px, 3px 3px); }
+            .tab.en { border-radius: 0; box-shadow: none; filter: drop-shadow(-2px 3px 6px rgb(0 0 0 / .35));
+                background: linear-gradient(135deg, transparent 5px, var(--a) 6px) left top / 100% 51% no-repeat, linear-gradient(45deg, transparent 5px, var(--a) 6px) left bottom / 100% 51% no-repeat; }
+            .tab.t2 { background: linear-gradient(180deg, #ddd4ff, #a995f7); color: #120f1c; box-shadow: -2px 3px 16px rgb(150 120 255 / .38), inset 1px 0 0 rgb(255 255 255 / .45); }
+            .tab.t3 { background: linear-gradient(180deg, #fff3a6, #ffd03f); color: #1a1426; box-shadow: -2px 3px 16px rgb(255 214 77 / .3), inset 1px 0 0 rgb(255 255 255 / .5); }`;
+
+        // ── Dark Energy and Light Energy (themes): the window in their hard-surface look — chamfered plates with rims, dark caps with a
+        // rivet at each end, lit hexagonal buttons, recessed slots, the bar's core, energy curling off the title (their drawings: --np-*) ──
+        const EN_CUT = (c, d) => `linear-gradient(135deg, transparent ${d}px, ${c} ${d + 1}px) top left / 51% 51% no-repeat, linear-gradient(225deg, transparent ${d}px, ${c} ${d + 1}px) top right / 51% 51% no-repeat, `
+            + `linear-gradient(315deg, transparent ${d}px, ${c} ${d + 1}px) bottom right / 51% 51% no-repeat, linear-gradient(45deg, transparent ${d}px, ${c} ${d + 1}px) bottom left / 51% 51% no-repeat`;
+        const EN_TOP = (c, d) => `linear-gradient(135deg, transparent ${d}px, ${c} ${d + 1}px) left top / 51% 100% no-repeat, linear-gradient(225deg, transparent ${d}px, ${c} ${d + 1}px) right top / 51% 100% no-repeat`;
+        const EN_CSS = `
+            .win.en-d { --en-nav: #16181c; --en-cap: #0e1013; --en-plate: #15171b; --en-slot: #0b0c0e; --en-slot-in: inset 0 2px 4px rgb(0 0 0 / .6), inset 0 -1px 0 rgb(255 255 255 / .05);
+                --en-ink: #f4f7fa; --en-lit: linear-gradient(180deg, #ffffff, #cfd5dd); --en-lit-fg: #0b0c0e; --en-lift: 0 14px 22px -14px rgb(0 0 0 / .7); }
+            .win.en-l { --en-nav: #1b1d21; --en-cap: #1b1d21; --en-plate: #eef1f5; --en-slot: #dde2e8; --en-slot-in: inset 0 2px 4px rgb(20 24 30 / .16), inset 0 -1px 0 rgb(255 255 255 / .9);
+                --en-ink: #121417; --en-lit: linear-gradient(180deg, #2e3238, #121417); --en-lit-fg: #f4f6f9; --en-lift: 0 14px 22px -14px rgb(20 24 30 / .32); }
+            .win.en { border: 1px solid transparent; border-radius: 0; border-image: var(--np-rim) 16 / 16px / 0 stretch; background: ${EN_CUT('var(--pg)', 8)}; box-shadow: 0 36px 64px -30px rgb(0 0 0 / .75); }
+            .win.en .nav { background: ${EN_TOP('var(--en-nav)', 6.6)}; border-bottom: 0; box-shadow: inset 0 -1px 0 rgb(255 255 255 / .06), 0 1px 0 rgb(0 0 0 / .45); color: #eef1f5; }
+            .win.en .links { flex: 0 1 auto; margin: 0 auto; padding: 3px; border-radius: 99px; background: rgb(0 0 0 / .42); box-shadow: inset 0 2px 5px rgb(0 0 0 / .6), inset 0 -1px 0 rgb(255 255 255 / .07); }
+            .win.en .links button { border-radius: 99px; color: rgb(238 241 245 / .7); }
+            .win.en .links button.on { background: linear-gradient(180deg, #ffffff, #cfd5dd); border-color: transparent; color: #0b0c0e; box-shadow: 0 0 10px rgb(233 237 242 / .3); }
+            .win.en .gem { border-radius: 50%; background: var(--np-core) center / contain no-repeat; box-shadow: none; color: #f4f7fa; }
+            .win.en .brand b { letter-spacing: .1em; }
+            .win.en .card { background: ${EN_CUT('var(--en-plate)', 6)}; border: 1px solid transparent; border-radius: 0; border-image: var(--np-rim) 16 / 12px / 0 stretch; box-shadow: var(--en-lift); }
+            .win.en .card > .ch { position: relative; background: ${EN_TOP('var(--en-cap)', 4.6)}; color: #eef1f5; border-bottom: 0; padding-left: 22px; padding-right: 22px; box-shadow: inset 0 -1px 0 rgb(255 255 255 / .07); }
+            .win.en .card.fold > .ch { background: ${EN_CUT('var(--en-cap)', 4.6)}; }
+            .win.en .card > .ch::before, .win.en .card > .ch::after { content: ''; position: absolute; top: 50%; width: 10px; height: 10px; margin-top: -5px; background: var(--np-rivet) center / 10px no-repeat; pointer-events: none; }
+            .win.en .card > .ch::before { left: 6px; } .win.en .card > .ch::after { right: 6px; }
+            .win.en .card > .ch :is(.ci, .cn) { border-radius: 50%; background: rgb(0 0 0 / .42); box-shadow: inset 0 1px 3px rgb(0 0 0 / .6), inset 0 -1px 0 rgb(255 255 255 / .07); color: #eef1f5; }
+            .win.en .card > .ch .cn { border-radius: 99px; }
+            .win.en .card > .ch .cn.hot { background: linear-gradient(180deg, #ffffff, #cfd5dd); color: #0b0c0e; }
+            .win.en .card > .ch :is(.ibtn, .alink) { color: #eef1f5; }
+            .win.en .tile { background: ${EN_CUT('var(--s2)', 4)}; border: 1px solid transparent; border-radius: 0; border-image: var(--np-rim) 16 / 9px / 0 stretch; box-shadow: none; }
+            .win.en .tile:hover { box-shadow: none; filter: brightness(1.08); }
+            .win.en .stat { background: ${EN_CUT('var(--en-plate)', 5)}; border: 1px solid transparent; border-radius: 0; border-image: var(--np-rim) 16 / 10px / 0 stretch; box-shadow: var(--en-lift); }
+            .win.en .btn { border-radius: 99px; border-color: transparent; background: var(--en-slot); box-shadow: var(--en-slot-in); color: var(--en-ink); font-weight: 700; letter-spacing: .04em; }
+            .win.en .btn:hover:not(:disabled) { border-color: var(--en-ink); color: var(--en-ink); }
+            .win.en .btn.pri { border: 0; border-radius: 0; background: var(--en-lit); color: var(--en-lit-fg); clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%);
+                padding: 0 18px; box-shadow: inset 0 1px 0 rgb(255 255 255 / .45), inset 0 -2px 0 rgb(0 0 0 / .2); text-transform: uppercase; letter-spacing: .12em; font-size: 11px; }
+            .win.en .btn.pri:hover:not(:disabled) { color: var(--en-lit-fg); filter: brightness(1.1); }
+            .win.en :is(.inp, .chip) { border-color: transparent; background: var(--en-slot); box-shadow: var(--en-slot-in); }
+            .win.en .inp { border-radius: 6px; }
+            .win.en .inp:focus { border-color: var(--en-ink); box-shadow: var(--en-slot-in), 0 0 0 3px var(--ag); }
+            .win.en .chip.on { background: var(--en-lit); color: var(--en-lit-fg); box-shadow: none; }
+            .win.en .seg { border: 0; border-radius: 99px; background: var(--en-slot); box-shadow: var(--en-slot-in); }
+            .win.en .seg button { border-radius: 99px; }
+            .win.en .seg button.on { background: var(--en-lit); color: var(--en-lit-fg); box-shadow: none; }
+            .win.en .hero-t { display: block; text-align: center; padding: 2px 0 10px; }
+            .win.en .hero-t b { display: block; font-family: 'Poppins', system-ui, sans-serif; font-weight: 600; font-size: 10px; line-height: 1; letter-spacing: .55em; text-transform: uppercase; color: var(--m); }
+            .win.en .hero-t b span { display: block; position: relative; z-index: 0; margin-top: 15px; font-family: var(--hf); font-weight: 400; font-size: 28px; letter-spacing: .06em; line-height: 1.1; text-indent: .06em; color: var(--en-ink); }
+            .win.en .hero-t b span::before, .win.en .hero-t b span::after { content: ''; position: absolute; left: 50%; top: 50%; width: 280px; height: 115px; margin: -59px 0 0 -140px; z-index: -1; pointer-events: none; background: var(--np-wisps) center / 280px 115px no-repeat; }
+            .win.en .hero-t b span::after { background-image: var(--np-charge); opacity: 0; animation: en-flicker 7s linear infinite; }
+            @keyframes en-flicker { 0%, 62% { opacity: 0; } 63% { opacity: .85; } 64% { opacity: .2; } 66% { opacity: 1; } 70% { opacity: .5; } 76%, 100% { opacity: 0; } }
+            @media (prefers-reduced-motion: reduce) { .win.en .hero-t b span::after { animation: none; } }`;
+
+        // ── Tempest 2.0 (theme): the window in storm glass — a lit rim along the top, the bar a line of light at its foot, titles tall
+        // and glowing, a bolt-yellow mark in each head; the hero card a window on the storm (--np-storm), lightning in it now and then ──
+        const T2_GLASS = 'linear-gradient(180deg, rgb(27 24 40 / .95), rgb(15 13 22 / .965))', T2_LIT = 'linear-gradient(180deg, #ddd4ff, #a995f7)';
+        const T2_CSS = `
+            .win.t2 { border: 1px solid rgb(185 168 255 / .22); border-top-color: rgb(226 219 255 / .38); border-radius: 14px; color: #efecf8;
+                background: linear-gradient(rgb(8 7 13 / .66), rgb(8 7 13 / .66)), var(--np-storm, none) center 60% / cover no-repeat, #08070d; box-shadow: 0 30px 70px rgb(0 0 0 / .55); }
+            .win.t2 .nav { background: linear-gradient(180deg, rgb(22 19 32 / .97), rgb(11 10 17 / .97)); border-bottom: 0; color: #f2effa;
+                box-shadow: 0 1px 0 rgb(207 195 255 / .42), 0 6px 16px -6px rgb(185 168 255 / .4); }
+            .win.t2 .brand b { font-size: 25px; letter-spacing: .05em; text-shadow: 0 0 14px rgb(185 168 255 / .4); }
+            .win.t2 .gem { border-radius: 8px; background: radial-gradient(circle at 50% 30%, rgb(185 168 255 / .25), transparent 70%), #0d0b13; color: #e9e3ff; box-shadow: inset 0 0 0 1px rgb(185 168 255 / .42), 0 0 12px rgb(185 168 255 / .25); }
+            .win.t2 .links button { border-radius: 8px; color: rgb(242 239 250 / .72); }
+            .win.t2 .links button.on { background: linear-gradient(180deg, rgb(185 168 255 / .24), rgb(185 168 255 / .07)); border-color: transparent; color: #ffffff; box-shadow: inset 0 -2px 0 #cfc3ff; }
+            .win.t2 .nbtn { border-radius: 8px; color: rgb(242 239 250 / .82); }
+            .win.t2 :is(.card, .stat) { background: ${T2_GLASS}; border: 1px solid rgb(185 168 255 / .14); border-top-color: rgb(226 219 255 / .3); border-radius: 12px; box-shadow: 0 14px 30px rgb(0 0 0 / .4); }
+            .win.t2 .card > .ch { background: linear-gradient(90deg, rgb(200 188 255 / .5), rgb(185 168 255 / .12) 40%, transparent 85%) left bottom / 100% 1px no-repeat, linear-gradient(180deg, rgb(185 168 255 / .075), transparent);
+                border-bottom: 0; color: #f4f1fc; }
+            .win.t2 .ct { font-size: 19px; letter-spacing: .07em; line-height: 1; color: #f4f1fc; text-shadow: 0 0 14px rgb(185 168 255 / .28); }
+            .win.t2 .card > .ch .ci { border-radius: 8px; background: radial-gradient(circle at 50% 35%, rgb(255 214 77 / .2), transparent 70%), #0d0b13; color: #ffe066; box-shadow: inset 0 0 0 1px rgb(255 214 77 / .32), 0 0 10px rgb(255 214 77 / .2); }
+            .win.t2 .card > .ch .cn { border-radius: 99px; background: rgb(5 4 9 / .55); color: #cabdff; box-shadow: inset 0 1px 3px rgb(0 0 0 / .55); }
+            .win.t2 .card > .ch .cn.hot { background: ${T2_LIT}; color: #120f1c; box-shadow: none; }
+            .win.t2 .card > .ch :is(.ibtn, .alink) { color: #f4f1fc; }
+            .win.t2 .tile { background: rgb(30 26 44 / .62); border: 1px solid rgb(185 168 255 / .1); border-radius: 10px; box-shadow: none; }
+            .win.t2 .tile:hover { border-color: rgb(207 195 255 / .55); box-shadow: 0 0 16px rgb(185 168 255 / .2); }
+            .win.t2 .btn { border-radius: 9px; border-color: rgb(185 168 255 / .28); background: rgb(185 168 255 / .06); color: #f4f1fc; }
+            .win.t2 .btn:hover:not(:disabled) { border-color: rgb(207 195 255 / .7); color: #ffffff; box-shadow: 0 0 14px rgb(185 168 255 / .25); }
+            .win.t2 .btn.pri { border: 0; background: ${T2_LIT}; color: #120f1c; font-family: var(--hf); font-weight: 400; font-size: 17px; letter-spacing: .08em; text-transform: uppercase;
+                box-shadow: inset 0 0 0 1px rgb(255 255 255 / .18), 0 4px 16px rgb(150 120 255 / .3); }
+            .win.t2 .btn.pri:hover:not(:disabled) { color: #120f1c; filter: brightness(1.06); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .3), 0 0 22px rgb(185 168 255 / .5); }
+            .win.t2 :is(.inp, .chip) { border-color: rgb(185 168 255 / .16); background: rgb(5 4 9 / .55); box-shadow: inset 0 1px 3px rgb(0 0 0 / .55); }
+            .win.t2 .inp:focus { border-color: rgb(207 195 255 / .75); box-shadow: inset 0 1px 3px rgb(0 0 0 / .55), 0 0 0 3px rgb(185 168 255 / .16); }
+            .win.t2 .chip.on { background: ${T2_LIT}; color: #120f1c; box-shadow: none; }
+            .win.t2 .seg { border: 1px solid rgb(185 168 255 / .14); background: rgb(5 4 9 / .55); box-shadow: inset 0 1px 3px rgb(0 0 0 / .55); }
+            .win.t2 .seg button.on { background: ${T2_LIT}; color: #120f1c; box-shadow: 0 0 12px rgb(185 168 255 / .35); }
+            .win.t2 .card.hero { position: relative; isolation: isolate; overflow: hidden;
+                background: linear-gradient(180deg, rgb(10 9 16 / .12), rgb(10 9 16 / .18) 48%, rgb(10 9 16 / .72) 84%), var(--np-storm, none) center 42% / cover no-repeat, #0d0b13; }
+            .win.t2 .card.hero::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--np-storm-fx, none) center 42% / cover no-repeat;
+                mix-blend-mode: screen; opacity: 0; animation: t2-strike 13s linear 2.4s infinite; }
+            @keyframes t2-strike { 0% { opacity: 0; } .4% { opacity: 1; } 1.2% { opacity: .14; } 1.8% { opacity: .92; } 2.6% { opacity: .1; } 3.2% { opacity: .62; } 4.9% { opacity: .06; } 8.1%, 100% { opacity: 0; } }
+            .win.t2 .hero-t { display: block; text-align: center; padding: 8px 0 10px; }
+            .win.t2 .hero-t b { display: block; font-family: 'Poppins', system-ui, sans-serif; font-weight: 600; font-size: 10px; line-height: 1; letter-spacing: .5em; text-transform: uppercase; color: #d6cdff; text-shadow: 0 1px 6px rgb(0 0 0 / .7); }
+            .win.t2 .hero-t b span { display: block; margin-top: 9px; font-family: var(--hf); font-weight: 400; font-size: 54px; letter-spacing: .05em; line-height: .9; text-indent: .05em;
+                background: linear-gradient(180deg, #ffffff 20%, #d6cdff 62%, #9d8cf2); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none;
+                filter: drop-shadow(0 0 16px rgb(185 168 255 / .35)) drop-shadow(0 2px 6px rgb(0 0 0 / .55)); }
+            @media (prefers-reduced-motion: reduce) { .win.t2 .card.hero::before { animation: none; } }`;
+
+        // ── Tempest 3.0 (theme): the window in its flat storm — panels like cut paper, the original's yellow tiles, a row of billows hanging
+        // under the bar (--np-edge), the hero card a little storm (--np-storm) with a strike either side of the title now and then ──
+        const T3_BOLT = 'linear-gradient(180deg, #fff3a6, #ffd03f)', T3_LIT = 'linear-gradient(180deg, #ddd4ff, #a995f7)';
+        const T3_CSS = `
+            .win.t3 { border: 1px solid #2c2440; border-top-color: #3a3158; border-radius: 14px; color: #f1edf9;
+                background: linear-gradient(rgb(14 11 22 / .88), rgb(14 11 22 / .88)), var(--np-storm, none) center / cover no-repeat, #0e0b16; box-shadow: 0 30px 70px rgb(0 0 0 / .55); }
+            .win.t3 .nav { background: #15111f; border-bottom: 0; color: #f2effa; box-shadow: none; }
+            .win.t3 .nav::after { content: ''; position: absolute; left: 0; right: 0; top: calc(100% - 1px); height: 11px; pointer-events: none;
+                background: var(--np-edge, none) 0 0 / auto 11px repeat-x; filter: drop-shadow(0 4px 5px rgb(0 0 0 / .45)); }
+            .win.t3 .brand b { font-size: 25px; letter-spacing: .05em; }
+            .win.t3 .gem { border-radius: 8px; background: ${T3_BOLT}; color: #1a1426; box-shadow: inset 0 -2px 0 rgb(0 0 0 / .18), 0 0 12px rgb(255 214 77 / .28); }
+            .win.t3 .links button { border-radius: 8px; color: rgb(242 239 250 / .72); }
+            .win.t3 .links button.on { background: rgb(185 168 255 / .14); border-color: transparent; color: #ffffff; box-shadow: inset 0 -3px 0 #ffd84d; }
+            .win.t3 .nbtn { border-radius: 8px; color: rgb(242 239 250 / .82); }
+            .win.t3 :is(.card, .stat) { background: #1a1525; border: 1px solid #2c2440; border-top-color: #3a3158; border-radius: 12px; box-shadow: 0 12px 26px rgb(0 0 0 / .4); }
+            .win.t3 .card > .ch { background: linear-gradient(90deg, #ffd84d, #ffd84d) 12px 100% / 26px 2px no-repeat, linear-gradient(90deg, #2c2440, #2c2440) 0 100% / 100% 1px no-repeat; border-bottom: 0; color: #f4f1fc; }
+            .win.t3 .ct { font-size: 19px; letter-spacing: .07em; line-height: 1; color: #f4f1fc; }
+            .win.t3 .card > .ch .ci { border-radius: 8px; background: ${T3_BOLT}; color: #1a1426; box-shadow: inset 0 -2px 0 rgb(0 0 0 / .18), 0 0 10px rgb(255 214 77 / .25); }
+            .win.t3 .card > .ch .cn { border-radius: 99px; background: #100d18; color: #c9bcff; box-shadow: none; }
+            .win.t3 .card > .ch .cn.hot { background: ${T3_LIT}; color: #15101f; }
+            .win.t3 .card > .ch :is(.ibtn, .alink) { color: #f4f1fc; }
+            .win.t3 .tile { background: #211b2f; border: 1px solid #2c2440; border-radius: 10px; box-shadow: none; }
+            .win.t3 .tile:hover { border-color: rgb(185 168 255 / .7); box-shadow: 0 8px 16px rgb(0 0 0 / .35); }
+            .win.t3 .btn { border-radius: 9px; border-color: rgb(185 168 255 / .38); background: transparent; color: #f4f1fc; }
+            .win.t3 .btn:hover:not(:disabled) { border-color: #cfc3ff; background: rgb(185 168 255 / .08); color: #ffffff; }
+            .win.t3 .btn.pri { border: 0; background: ${T3_LIT}; color: #15101f; font-family: var(--hf); font-weight: 400; font-size: 17px; letter-spacing: .08em; text-transform: uppercase;
+                box-shadow: inset 0 1px 0 rgb(255 255 255 / .5), inset 0 -2px 0 rgb(0 0 0 / .18); }
+            .win.t3 .btn.pri:hover:not(:disabled) { color: #15101f; animation: t3-zap .42s linear; }
+            @keyframes t3-zap { 0% { filter: brightness(1); } 12% { filter: brightness(1.45) drop-shadow(0 0 10px rgb(220 210 255 / .8)); } 24% { filter: brightness(1.05); } 38% { filter: brightness(1.3) drop-shadow(0 0 8px rgb(220 210 255 / .6)); } 100% { filter: brightness(1.06); } }
+            .win.t3 :is(.inp, .chip) { border-color: #2c2440; background: #100d18; box-shadow: inset 0 2px 4px rgb(0 0 0 / .35); }
+            .win.t3 .inp:focus { border-color: #b9a8ff; box-shadow: inset 0 2px 4px rgb(0 0 0 / .35), 0 0 0 3px rgb(185 168 255 / .18); }
+            .win.t3 .chip.on { background: ${T3_LIT}; color: #15101f; box-shadow: none; }
+            .win.t3 .seg { border: 1px solid #2c2440; background: #100d18; box-shadow: none; }
+            .win.t3 .seg button.on { background: ${T3_LIT}; color: #15101f; box-shadow: inset 0 1px 0 rgb(255 255 255 / .45); }
+            .win.t3 .card.hero { position: relative; isolation: isolate; overflow: hidden;
+                background: linear-gradient(180deg, rgb(12 10 20 / .04), rgb(12 10 20 / .14) 48%, rgb(12 10 20 / .7) 86%), var(--np-storm, none) center 40% / cover no-repeat, #120f1b; }
+            .win.t3 .card.hero::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--np-storm-fx, none) center 40% / cover no-repeat;
+                opacity: 0; animation: t2-strike 13s linear 2.4s infinite; }
+            .win.t3 .hero-t { display: block; text-align: center; padding: 8px 0 10px; }
+            .win.t3 .hero-t b { display: block; font-family: 'Poppins', system-ui, sans-serif; font-weight: 600; font-size: 10px; line-height: 1; letter-spacing: .5em; text-transform: uppercase; color: #d6cdff; text-shadow: 0 1px 6px rgb(0 0 0 / .7); }
+            .win.t3 .hero-t b span { display: block; margin-top: 9px; padding-bottom: 9px; font-family: var(--hf); font-weight: 400; font-size: 52px; letter-spacing: .05em; line-height: .9; text-indent: .05em;
+                color: #f4f1fc; text-shadow: 0 0 16px rgb(185 168 255 / .35), 0 2px 6px rgb(0 0 0 / .5); background: linear-gradient(#ffd84d, #ffd84d) center 100% / 40px 2px no-repeat; }
+            @media (prefers-reduced-motion: reduce) { .win.t3 .card.hero::before, .win.t3 .btn.pri:hover { animation: none; } }`;
+
+        // ── Night Sky and Dawn Sky (themes): the window in pixels — a notched frame round it and its cards, its sky behind, a HUD of a
+        // bar, sunk fields, chunky buttons, items as inventory slots, the big pixel title (their frames, sky and stars: --np-*) ──
+        const PX_NOTCH = 'polygon(3px 0, calc(100% - 3px) 0, 100% 3px, 100% calc(100% - 3px), calc(100% - 3px) 100%, 3px 100%, 0 calc(100% - 3px), 0 3px)';
+        const PX_CSS = `
+            .win.px-n { --px-out: #05021a; --px-sel: #3ff0ff; --px-sel-fg: #07041a; --px-dash: #3ff0ff; --px-slot: #07031c; --px-slot-hi: #2a1b6e; --px-panel: rgb(16 9 46 / .95);
+                --px-head: rgb(5 2 26 / .5); --px-ink: #ffffff; --px-glow: 0 0 6px rgb(63 240 255 / .65), 0 0 16px rgb(63 240 255 / .3); --px-small: #3ff0ff; --px-nav: #0d0730;
+                --px-btn: #ff4fd8; --px-btn-hi: #ff9cf0; --px-btn-lo: #b02a9c; --px-btn-fg: #ffffff; --px-btn-sh: #4a0a52; }
+            .win.px-d { --px-out: #3b1d5e; --px-sel: #3b1d5e; --px-sel-fg: #fff6ec; --px-dash: #ff8a7a; --px-slot: #fffaf6; --px-slot-hi: #f1d8e2; --px-panel: rgb(255 249 244 / .95);
+                --px-head: rgb(59 29 94 / .06); --px-ink: #3b1d5e; --px-glow: 3px 3px 0 #ffcf6a; --px-small: #ff7a59; --px-nav: #3b1d5e;
+                --px-btn: #ff7a59; --px-btn-hi: #ffb39c; --px-btn-lo: #c9503a; --px-btn-fg: #ffffff; --px-btn-sh: #5a1f3a; }
+            .win.px { border: 1px solid transparent; border-radius: 0; border-image: var(--np-frame) 6 / 6px / 5px stretch; image-rendering: pixelated;
+                background: var(--np-stars, none) 0 40px / 825px 250px repeat-x, var(--np-sky, none) 0 0 / 160px 100% repeat-x, var(--pgc); }
+            .win.px > * { image-rendering: auto; }
+            .win.px .nav { background: linear-gradient(90deg, var(--px-dash) 0 6px, transparent 6px 12px) left bottom / 12px 3px repeat-x, var(--px-nav); border-bottom: 0; box-shadow: none; color: #fff6ec; }
+            .win.px .brand b { font-size: 24px; letter-spacing: .04em; color: #ffffff; text-shadow: 0 0 6px rgb(63 240 255 / .6); }
+            .win.px-d .brand b { text-shadow: 3px 3px 0 #ff7a59; }
+            .win.px .gem { border-radius: 0; background: var(--px-out); color: var(--px-sel); box-shadow: inset 0 0 0 3px var(--px-sel); clip-path: ${PX_NOTCH}; }
+            .win.px-d .gem { color: #ffcf6a; box-shadow: inset 0 0 0 3px #ffcf6a; }
+            .win.px .links button { border-radius: 0; font-family: 'Silkscreen', 'Poppins', monospace; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: rgb(255 246 236 / .75); }
+            .win.px .links button.on { background: var(--px-sel); border-color: transparent; color: var(--px-sel-fg); }
+            .win.px-d .links button.on { background: #ffcf6a; color: #3b1d5e; }
+            .win.px .nbtn { border-radius: 0; color: rgb(255 246 236 / .8); }
+            .win.px .card { background: var(--px-panel) padding-box; border: 1px solid transparent; border-radius: 0; border-image: var(--np-frame) 6 / 6px / 5px stretch; box-shadow: 0 6px 0 rgb(0 0 0 / .25); }
+            .win.px .card > .ch { background: linear-gradient(90deg, var(--px-dash) 0 6px, transparent 6px 12px) left bottom / 12px 3px repeat-x, var(--px-head); border-bottom: 0; color: var(--px-ink); }
+            .win.px .ct { font-size: 18px; letter-spacing: .05em; line-height: 1; color: var(--px-ink); text-shadow: var(--px-glow); }
+            .win.px .card > .ch :is(.ci, .cn) { border-radius: 0; background: var(--px-slot); color: var(--px-small); box-shadow: inset 3px 3px 0 rgb(0 0 0 / .3), inset -3px -3px 0 var(--px-slot-hi); }
+            .win.px .card > .ch .cn.hot { background: var(--px-sel); color: var(--px-sel-fg); box-shadow: none; }
+            .win.px .card > .ch :is(.ibtn, .alink) { color: var(--px-ink); }
+            .win.px .tile { background: var(--px-slot) padding-box; border: 1px solid transparent; border-radius: 0; border-image: var(--np-frame-sm) 6 / 6px / 5px stretch; box-shadow: none; }
+            .win.px .tile:hover { border-image-source: var(--np-frame-hot); box-shadow: none; transform: translateY(-3px); }
+            .win.px .stat { background: var(--px-panel) padding-box; border: 1px solid transparent; border-radius: 0; border-image: var(--np-frame-sm) 6 / 6px / 5px stretch; box-shadow: none; }
+            .win.px .btn { border: 0; border-radius: 0; background: var(--px-slot); color: var(--t); box-shadow: inset 0 0 0 3px var(--px-out); font-family: var(--hf); font-size: 16px; letter-spacing: .05em; text-transform: uppercase; }
+            .win.px .btn:hover:not(:disabled) { box-shadow: inset 0 0 0 3px var(--px-sel); color: var(--t); }
+            .win.px .btn.pri { background: var(--px-btn); color: var(--px-btn-fg); clip-path: ${PX_NOTCH}; text-shadow: 2px 2px 0 var(--px-btn-sh);
+                box-shadow: inset 0 0 0 3px var(--px-out), inset 0 6px 0 var(--px-btn-hi), inset 0 -6px 0 var(--px-btn-lo); }
+            .win.px .btn.pri:hover:not(:disabled) { color: var(--px-btn-fg); filter: brightness(1.1); }
+            .win.px .btn.pri:active { transform: translateY(3px); }
+            .win.px :is(.inp, .chip) { border: 0; border-radius: 0; background: var(--px-slot); box-shadow: inset 3px 3px 0 rgb(0 0 0 / .3), inset -3px -3px 0 var(--px-slot-hi); }
+            .win.px .inp:focus { outline: 3px solid var(--px-sel); outline-offset: 0; box-shadow: inset 3px 3px 0 rgb(0 0 0 / .3); }
+            .win.px .chip.on { background: var(--px-sel); color: var(--px-sel-fg); box-shadow: none; }
+            .win.px .seg { border: 0; border-radius: 0; background: var(--px-slot); box-shadow: inset 0 0 0 3px var(--px-out); }
+            .win.px .seg button { border-radius: 0; font-family: var(--hf); font-size: 16px; letter-spacing: .04em; }
+            .win.px .seg button.on { background: var(--px-sel); color: var(--px-sel-fg); box-shadow: none; }
+            .win.px .hero-t { display: block; text-align: center; padding: 2px 0 6px; }
+            .win.px .hero-t b { display: block; font-family: 'Silkscreen', 'Poppins', monospace; font-weight: 700; font-size: 10px; line-height: 1; letter-spacing: .32em; text-transform: uppercase; color: var(--px-small); }
+            .win.px .hero-t b span { display: block; margin-top: 7px; font-family: var(--hf); font-weight: 400; font-size: 52px; line-height: .9; letter-spacing: .05em; text-indent: .05em; color: var(--px-ink); text-shadow: var(--px-glow); }
+            .win.px-n .hero-t b span { background: repeating-linear-gradient(180deg, #ffffff 0 4px, rgb(255 255 255 / .55) 4px 5px); -webkit-background-clip: text; background-clip: text; color: transparent;
+                text-shadow: none; filter: drop-shadow(0 0 4px rgb(63 240 255 / .8)) drop-shadow(0 0 12px rgb(63 240 255 / .35)); }`;
 
         // ── The window (added the first time it opens) ──
         const WIN_CSS = `
-            .win { position: fixed; right: 32px; z-index: 3; display: flex; flex-direction: column; overflow: hidden; max-width: calc(100vw - 44px);
+            .win { position: fixed; z-index: 3; display: flex; flex-direction: column; overflow: hidden; max-width: calc(100vw - 20px);
                 border-radius: calc(var(--r) + 4px); border: 1px solid var(--b); background: var(--pgc); background: var(--pg, var(--pgc));
                 box-shadow: 0 24px 64px rgb(0 0 0 / .3), 0 2px 10px rgb(0 0 0 / .12); color: var(--t);
                 font: 500 13px/1.45 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif; container: win / inline-size; animation: win-in .16s ease-out; }
@@ -35855,9 +36346,20 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .win a { color: inherit; }
             .grip { position: absolute; left: 0; top: 0; bottom: 0; width: 7px; z-index: 6; cursor: ew-resize; }
             .grip:hover, .grip.on { background: linear-gradient(90deg, var(--ag), transparent); }
+            .vgrip { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; z-index: 6; cursor: ns-resize; }
+            .vgrip:hover, .vgrip.on { background: linear-gradient(0deg, var(--ag), transparent); }
+            .rgrip { position: absolute; right: 0; top: 0; bottom: 0; width: 7px; z-index: 6; cursor: ew-resize; }
+            .rgrip:hover, .rgrip.on { background: linear-gradient(270deg, var(--ag), transparent); }
+            .cgrip { position: absolute; bottom: 0; width: 18px; height: 18px; z-index: 7; }
+            .cgrip.bl { left: 0; cursor: nesw-resize; } .cgrip.br { right: 0; cursor: nwse-resize; }
+            .cgrip:hover, .cgrip.on { background: radial-gradient(circle at var(--cx, 0) 100%, var(--ag) 0, transparent 70%); }
+            .cgrip.br { --cx: 100%; }
+            .rz { touch-action: none; }
+            .win.moving { box-shadow: 0 30px 80px rgb(0 0 0 / .34), 0 2px 10px rgb(0 0 0 / .14); }
+            .win.moving .nav { cursor: grabbing; }
 
             /* The bar: DTI's nav, small — the gem and "DTI", the parts as links, DTI's pages and ✕ */
-            .nav { position: relative; z-index: 4; flex: none; display: flex; align-items: center; gap: 4px; height: 54px; padding: 0 8px 0 10px;
+            .nav { position: relative; z-index: 4; flex: none; display: flex; align-items: center; gap: 4px; height: 54px; padding: 0 8px 0 10px; cursor: grab; user-select: none; touch-action: none;
                 background: var(--nv); color: var(--nvfg); border-bottom: 1px solid var(--nvb); box-shadow: 0 2px 10px rgb(0 0 0 / .06); }
             .brand { flex: none; display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 8px 0 4px; border: none; border-radius: 11px; background: none; cursor: pointer; color: var(--nvfg); }
             .brand:hover { background: var(--nvh); }
@@ -35959,6 +36461,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 background: none; color: var(--m); cursor: pointer; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
             .seg button:hover { color: var(--t); }
             .seg button.on { background: var(--a); color: var(--af); box-shadow: 0 1px 4px color-mix(in srgb, var(--a) 35%, transparent); }
+            .seg button.empty { opacity: .45; }
             .seg button i { font-style: normal; font-size: 10.5px; font-weight: 800; padding: 0 6px; border-radius: 99px; background: color-mix(in srgb, var(--t) 8%, transparent); line-height: 17px; }
             .seg button.on i { background: rgb(255 255 255 / .24); }
             .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -36033,7 +36536,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .hero-t small { font-size: 12px; color: var(--m); }
             .hrow { display: flex; gap: 8px; }
             .hrow .sbox { flex: 1; min-width: 0; }
-            .glance { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 8px; }
+            .glance { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+            .glance.g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            @container win (max-width: 520px) { .glance.g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
             .stat { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 10px 11px; border-radius: calc(var(--r) - 3px); border: 1px solid var(--b);
                 background: var(--s); color: var(--t); cursor: pointer; text-align: left; transition: border-color .12s, transform .12s; }
             .stat:hover { border-color: var(--a); transform: translateY(-1px); }
@@ -36041,7 +36546,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .stat .sn svg { width: 15px; height: 15px; opacity: .8; }
             .stat.zero .sn { color: var(--m); }
             .stat .sl { font-size: 11.5px; font-weight: 700; }
-            .stat small { font-size: 10.5px; color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+            .stat small { font-size: 10.5px; line-height: 1.3; color: var(--m); max-width: 100%; }
             .stat small.hot { color: #ea580c; font-weight: 700; }
             .here .hl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 700; }
             .here .cb { display: flex; flex-direction: column; gap: 10px; }
@@ -36067,6 +36572,17 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .rm { width: 28px; height: 28px; flex: none; padding: 0; border: none; border-radius: 8px; background: none; color: var(--m); cursor: pointer; font-size: 17px; line-height: 1; }
             .rm:hover { color: #e5484d; background: var(--s2); }
             .thumbs { display: flex; align-items: center; gap: 4px; min-height: 28px; }
+            .send { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; margin-top: 10px; font-size: 12px; font-weight: 600; color: var(--m); }
+            .send small { font-weight: 500; opacity: .8; }
+            .send .more { width: 100%; margin: 0; }
+            .spin { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--a) 25%, transparent); border-top-color: var(--a); animation: spin .7s linear infinite; }
+            .ichips { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 6px; }
+            .ichip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 30px; padding: 0 11px 0 3px; border-radius: 99px; border: 1px solid var(--b);
+                background: var(--s); color: var(--t); cursor: pointer; font-size: 11.5px; font-weight: 600; }
+            .ichip img, .ichip .noimg { width: 24px; height: 24px; flex: none; border-radius: 50%; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px var(--b); }
+            .ichip > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .ichip:hover { border-color: var(--a); color: var(--at); }
+            .ichips .n { font-size: 11px; font-weight: 700; color: var(--m); }
             .thumbs img, .thumbs .noimg, .thumbs .gico { width: 28px; height: 28px; flex: none; border-radius: 7px; background: #fff; box-shadow: 0 0 0 1px var(--b); object-fit: contain; }
             .thumbs .n { font-size: 11px; font-weight: 700; color: var(--m); }
             .thumbs .none { font-size: 11px; color: var(--m); font-style: italic; }
@@ -36081,9 +36597,22 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .tmain { flex: 1; min-width: 0; padding: 0; border: none; background: none; text-align: left; cursor: pointer; color: var(--t); display: flex; flex-direction: column; gap: 7px; }
             .ttop { display: flex; align-items: baseline; gap: 6px; }
             .ttop b { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .twith { margin-top: -5px; font-size: 11.5px; font-weight: 600; color: var(--m); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .when { flex: none; font-size: 11px; color: var(--m); }
             .chip.st { flex: none; height: 24px; padding: 0 8px; border: none; border-radius: 7px; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; display: inline-flex; align-items: center; gap: 4px; }
-            .chip.st i { font-style: normal; font-size: 8px; opacity: .7; }
+            .chip.st i, .tierb i { display: grid; opacity: .7; }
+            .chip.st i svg, .tierb i svg { width: 12px; height: 12px; }
+            .tierw { position: relative; flex: none; }
+            .tierb { display: inline-flex; align-items: center; gap: 2px; height: 24px; padding: 0 5px 0 9px; border-radius: 99px; border: 1px solid var(--b); background: var(--s); color: var(--m);
+                cursor: pointer; font-size: 10.5px; font-weight: 800; white-space: nowrap; }
+            .tierb.t0 { color: #dc2626; border-color: color-mix(in srgb, #dc2626 40%, var(--b)); background: color-mix(in srgb, #dc2626 8%, var(--s)); }
+            .tierb.t1 { color: var(--at); }
+            .tierb:hover, .tierb[aria-expanded="true"] { border-color: var(--a); }
+            .tierw .stmenu { top: calc(100% + 4px); right: 0; min-width: 140px; }
+            .dot.t0 { background: #dc2626; } .dot.t1 { background: var(--a); } .dot.t2 { background: var(--m); }
+            /* (a menu open in a card: all of it shows — the card clipped it) */
+            .card:has(.stmenu) { overflow: visible; }
+            .card:has(.stmenu) > .ch { border-radius: calc(var(--r) - 1px) calc(var(--r) - 1px) 0 0; }
             .s-planned { background: var(--ag) !important; color: var(--at) !important; }
             .s-pending { background: color-mix(in srgb, var(--nc) 16%, transparent) !important; color: var(--nc) !important; }
             .s-done { background: color-mix(in srgb, var(--ok) 16%, transparent) !important; color: var(--ok) !important; }
@@ -36101,7 +36630,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .gdir { width: 32px; height: 32px; flex: none; border-radius: 9px; display: grid; place-items: center; background: var(--ag); color: var(--at); }
             .gdir.in { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
             .gdir svg { width: 16px; height: 16px; }
-            .caret { flex: none; color: var(--m); font-size: 10px; }
+            .caret { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; color: inherit; opacity: .7; transition: background .12s, opacity .12s; }
+            .caret svg { width: 15px; height: 15px; transition: transform .15s; }
+            [aria-expanded="true"] > .caret svg { transform: rotate(180deg); }
+            button:hover > .caret { opacity: 1; background: color-mix(in srgb, currentColor 10%, transparent); }
             .gbody { display: flex; flex-direction: column; gap: 7px; padding: 0 12px 12px 54px; }
             .gi { display: flex; align-items: center; gap: 8px; font-size: 12.5px; cursor: pointer; }
             .gi img, .gi .noimg { width: 28px; height: 28px; flex: none; border-radius: 6px; background: #fff; box-shadow: 0 0 0 1px var(--b); object-fit: contain; }
@@ -36290,7 +36822,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             tab: VIEWS().some(([v]) => v === savedTab) ? savedTab : savedTab === 'search' ? 'items' : 'home',
             item: null, itemTop: 0,   // (an item open over the part it was opened from, and where that part was scrolled to)
             q: '', chip: '', scope: GM_getValue('dti_np_items_scope', 'search') === 'mine' ? 'mine' : 'search', mine: { seg: 'own', q: '', all: {} },
-            view: 'list', key: '', stFor: '', openGift: '', gdel: '', allGifts: false, showDone: false, allAcct: false, undo: null,
+            view: 'list', key: '', stFor: '', tierFor: '', openGift: '', gdel: '', allGifts: false, showDone: false, allAcct: false, undo: null,
             draft: null,   // (a new trade report's trader, before anything's saved: { key, partner })
             tk: { seg: ['want', 'own', 'studio'].includes(savedSeg) ? savedSeg : 'want', q: '', open: '', list: '' },
             nt: { seg: '', q: '', key: '' },
@@ -36312,6 +36844,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         [['position', 'fixed'], ['top', '0'], ['right', '0'], ['width', '0'], ['height', '0'], ['margin', '0'], ['padding', '0'], ['z-index', '2147483000'], ['display', 'block']].forEach(([k, v]) => hostCss(k, v));
         document.body.appendChild(host);
         const tab = root.querySelector('.tab');
+        tab.classList.toggle('en', !!theme.en);
+        tab.classList.toggle('px', !!theme.px);
+        tab.classList.toggle('t2', !!theme.t2);
+        tab.classList.toggle('t3', !!theme.t3);
         const pos = Object.assign({ y: 0.18 }, GM_getValue('dti_np_fab_pos', {}) || {});   // (how far down the right edge, 0–1 — to start, near the top (user asked))
         const TAB_H = 56;
         function place(y = pos.y * innerHeight) { tab.style.top = Math.round(Math.min(Math.max(8, y - TAB_H / 2), innerHeight - TAB_H - 8)) + 'px'; }
@@ -36321,7 +36857,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const b = root.querySelector('.tab .badge');
             b.hidden = !n; b.textContent = n > 9 ? '9+' : String(n);
             root.querySelector('.tab .dot').hidden = !h || !!n;
-            tab.title = n ? `Mini DTI — ${plural(n, 'NC gift')} to put in a trade report` : h ? `Mini DTI — on this page: ${m.tip || ''}` : 'Mini DTI — drag it up or down to move it';
+            tab.title = n ? `Mini DTI (Alt+M) — ${plural(n, 'NC gift')} to put in a trade report` : h ? `Mini DTI (Alt+M) — on this page: ${m.tip || ''}` : 'Mini DTI (Alt+M) — drag it up or down to move it';
             if (!win) return;
             const nb = k => win.querySelector(`.links [data-v="${k}"] .nb`);
             if (nb('trades')) nb('trades').textContent = n ? String(n) : '';
@@ -36333,19 +36869,20 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         function build() {
             npFonts(theme.font);
             const css = document.createElement('style');
-            css.textContent = WIN_CSS;
+            css.textContent = WIN_CSS + EN_CSS + PX_CSS + T2_CSS + T3_CSS;
             root.appendChild(css);
             win = document.createElement('section');
-            win.className = 'win' + (theme.solid ? ' solid' : '') + (theme.dark ? ' dark' : '');
+            win.className = 'win' + (theme.solid ? ' solid' : '') + (theme.dark ? ' dark' : '') + (theme.en ? ' en en-' + theme.en : '') + (theme.px ? ' px px-' + theme.px : '') + (theme.t2 ? ' t2' : '') + (theme.t3 ? ' t3' : '');
             win.hidden = true;
             win.setAttribute('aria-label', 'Mini DTI');
-            win.innerHTML = `<div class="grip" title="Drag to make it wider or narrower"></div>
+            win.innerHTML = `<div class="rz grip" data-e="l" title="Drag to make it wider or narrower \u2014 double-click: as wide as it starts"></div><div class="rz rgrip" data-e="r" title="Drag to make it wider or narrower \u2014 double-click: as wide as it starts"></div>
+                <div class="rz vgrip" data-e="b" title="Drag to make it shorter or taller \u2014 double-click: as tall as fits"></div><div class="rz cgrip bl" data-e="bl" title="Drag to size it"></div><div class="rz cgrip br" data-e="br" title="Drag to size it"></div>
                 <header class="nav">
                     <button type="button" class="brand" data-v="home" title="Home"><i class="gem">${GEM}</i><b>DTI</b></button>
                     <nav class="links">${VIEWS().map(([v, l]) => `<button type="button" data-v="${v}" title="${l}">${ICO[v]}<span>${l}</span><b class="nb${v === 'seeking' ? ' sk' : ''}"></b></button>`).join('')}</nav>
                     <button type="button" class="nbtn pin" aria-pressed="false">${ICO.pin}</button>
                     <button type="button" class="nbtn pages" title="DTI’s pages" aria-haspopup="true" aria-expanded="false">${ICO.grid}</button>
-                    <button type="button" class="nbtn shut" title="Close (Esc)" aria-label="Close">${ICO.x}</button>
+                    <button type="button" class="nbtn shut" title="Minimize to the tab (Esc or Alt+M)" aria-label="Minimize to the tab">${ICO.min}</button>
                 </header>
                 <div class="menu" hidden></div>
                 <main class="body"></main>
@@ -36360,7 +36897,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const b = win.querySelector('.pages');
             b.classList.toggle('on', on); b.setAttribute('aria-expanded', String(on));
             if (on) menu.innerHTML = `<div class="mh">DTI’s pages</div>${LINKS().map(([l, u, d]) => `<a class="lnk" href="${esc(u)}" target="_blank" rel="noopener"><span><b>${l}</b><small>${d}</small></span>${ICO.ext}</a>`).join('')}
-                <p class="mhint">Drag the DTI tab up or down to move it, and this window’s left edge to make it wider. Turn it off in DTI’s ⚙ › Neopets.</p>`;
+                <p class="mhint">Drag this window’s top bar to move it anywhere, its edges or bottom corners to size it — a double-click on the bar puts it back by the edge. Drag the DTI tab up or down to move the tab. Turn it off in DTI’s ⚙ › Neopets.</p>`;
         }
         function paintPin() {
             const b = win.querySelector('.pin');
@@ -36369,26 +36906,51 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             b.title = pinned ? 'Pinned open — a click outside won’t close it (click to unpin)' : 'Pin it open — so a click outside doesn’t close it';
         }
         function openWin(open) {
-            const was = !!win && !win.hidden;
+            const was = !!win && !win.hidden, top = was ? body.scrollTop : 0;
             if (open && !win) build();
             if (!win) return;
             win.hidden = !open;
-            if (was !== !!open) GM_setValue('dti_np_open', !!open);   // (open or not as you left it — pinned, the next page opens it again)
+            if (was !== !!open) { try { sessionStorage.setItem('dti_np_open', open ? '1' : ''); } catch (_) {} }   // (open or not as you left it, in this tab — pinned, its next page opens it again)
             tab.classList.toggle('open', open);
             showMenu(false);
-            if (!open) { ui.stFor = ''; return; }
+            if (!open) { ui.stFor = ui.tierFor = ''; if (was) scrollOf[placeKey()] = top; return; }
             pinned = !!GM_getValue('dti_np_pin', false);   // (as it was left — in any tab)
             paintPin();
             fit();
             render();
+            if (!was) body.scrollTop = scrollOf[placeKey()] || 0;   // (where you were in it)
         }
-        // as wide as you made it (and fits), as tall as fits — level with the tab where it can be
+        const scrollOf = {};   // (where you were in each part, this page)
+        const placeKey = () => ui.item ? '·item' : ui.tab;
+        // (where the window can start: under Neopets' top bar while it's in sight — it was covering it: user asked)
+        function topRoom() {
+            const b = (document.getElementById('navtop__2020') || document.querySelector('.nav-top__2020'))?.getBoundingClientRect();
+            return b && b.bottom > 0 && b.height < 160 ? Math.round(b.bottom) + 10 : 12;
+        }
+        // as wide as you made it (and fits), as tall as you made it (else as tall as fits, up to 820) — under the top bar, level with
+        // where the tab is where it can be (the tab's hidden while it's open)
+        // — or where you moved it: as far across and down the room it has as it was (a double-click on its bar docks it again)
+        const vw = () => Math.min(innerWidth, document.documentElement.clientWidth || innerWidth);   // (the page's scrollbar left out)
+        const movedTo = () => { const p = GM_getValue('dti_np_win_pos', null); return p && isFinite(p.x) && isFinite(p.y) ? p : null; };
         function fit() {
-            const w = Math.round(Math.min(Math.max(380, +GM_getValue('dti_np_win_w', 560) || 560), innerWidth - 44));
-            const h = Math.round(Math.max(320, Math.min(820, innerHeight - 24)));
-            const r = tab.getBoundingClientRect(), mid = r.top + r.height / 2;
+            const at = movedTo(), W = vw();
+            const w = Math.round(Math.min(Math.max(380, +GM_getValue('dti_np_win_w', 560) || 560), W - 20));
+            const top0 = at ? 8 : topRoom(), room = Math.max(240, innerHeight - top0 - 12);
+            const h = Math.round(Math.min(room, Math.max(300, +GM_getValue('dti_np_win_h', 0) || 820)));
             win.style.width = w + 'px'; win.style.height = h + 'px';
-            win.style.top = Math.round(Math.max(8, Math.min(mid - h / 2, innerHeight - h - 12))) + 'px';
+            if (at) {
+                win.style.left = Math.round(Math.max(4, Math.min(at.x * (W - w), W - w - 4))) + 'px';
+                win.style.top = Math.round(Math.max(4, Math.min(at.y * (innerHeight - h), innerHeight - h - 4))) + 'px';
+                return;
+            }
+            const mid = Math.min(Math.max(pos.y * innerHeight, 8 + TAB_H / 2), innerHeight - 8 - TAB_H / 2);
+            win.style.left = (W - w - 10) + 'px';
+            win.style.top = Math.round(Math.max(top0, Math.min(mid - h / 2, innerHeight - h - 12))) + 'px';
+        }
+        const rect = () => ({ l: parseFloat(win.style.left) || 0, t: parseFloat(win.style.top) || 0, w: win.offsetWidth, h: win.offsetHeight });   // (as laid out — not mid-slide)
+        function savePos() {
+            const r = rect(), fx = vw() - r.w, fy = innerHeight - r.h;
+            GM_setValue('dti_np_win_pos', { x: fx > 0 ? +(r.l / fx).toFixed(4) : 1, y: fy > 0 ? +(r.t / fy).toFixed(4) : 0 });
         }
         function render() {
             win.querySelectorAll('.links [data-v]').forEach(b => b.classList.toggle('on', b.dataset.v === ui.tab));
@@ -36404,7 +36966,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         }
         function rerender() { const top = body.scrollTop; render(); body.scrollTop = top; }
         const shown = tabName => !!win && !win.hidden && !ui.item && ui.tab === tabName;
-        // a part from the bar (or a link to it): its start, at the top
+        // a part from the bar (or a link to it): where you were in it — the part you're on again: its start, at the top
         function goTab(t) {
             if (!VIEWS().some(([v]) => v === t)) return;
             if (t === ui.tab && !ui.item) {   // (the part again: back to its start)
@@ -36412,11 +36974,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (t === 'notes') ui.nt.key = '';
                 if (t === 'tokens') ui.tk.open = '';
             }
+            const again = t === ui.tab && !ui.item;
+            if (!again) scrollOf[ui.tab] = ui.item ? ui.itemTop || 0 : body.scrollTop;   // (where you were in the part you're leaving)
             ui.item = null; itemPage = null;
             ui.tab = t;
             GM_setValue('dti_np_panel_tab', t);
             render();
-            body.scrollTop = 0;
+            body.scrollTop = again ? 0 : scrollOf[t] || 0;
         }
 
         // ════ Home: this page, your numbers, what you looked at last, the NC Mall ════
@@ -36440,7 +37004,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const want = myTokWant(), st = tokStudioKeys(), inSt = st ? want.filter(i => st.has(i.key)).length : 0;
             const nts = DTINotes.all().filter(n => n && n.type !== 'trade' && !String(n.key || '').startsWith('trade:')).length;
             const stat = (go, ico, n, label, small, hot) => `<button type="button" class="stat${n ? '' : ' zero'}" data-go="${go}"><span class="sn">${ico}${n.toLocaleString()}</span><span class="sl">${label}</span>${small ? `<small${hot ? ' class="hot"' : ''}>${small}</small>` : ''}</button>`;
-            return `<div class="glance">
+            return `<div class="glance g${sk >= 0 ? 4 : 3}">
                 ${stat('trades', ICO.trades, open, `Open trade${open === 1 ? '' : 's'}`, gw ? `${plural(gw, 'NC gift')} to sort` : '', gw)}
                 ${sk >= 0 ? stat('seeking', ICO.seeking, sk, 'Seeking now', skn ? plural(skn, 'new offer') : '', skn) : ''}
                 ${stat('tokens', ICO.tokens, want.length, `Token${want.length === 1 ? '' : 's'} wanted`, inSt ? `${inSt} in the Studio now` : '', inSt)}
@@ -36499,7 +37063,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (!rows) return card(ICO.mall, 'NC Mall', '', act, mallFail ? '<div class="msg">Couldn’t reach the NC Mall’s list right now</div>' : `<div class="cb tight"><div class="strip">${skTiles(6)}</div></div>`);
             const list = rows[ui.mallTab] || [];
             return card(ICO.mall, 'NC Mall', '', act, `<div class="cb tight" style="display:flex;flex-direction:column;gap:8px">
-                <div class="seg">${[['new', 'New'], ['leaving', 'Leaving'], ['sale', 'On sale']].map(([k, l]) => `<button type="button" data-malltab="${k}" class="${ui.mallTab === k ? 'on' : ''}">${l} <i>${rows[k].length}</i></button>`).join('')}</div>
+                <div class="seg">${[['new', 'New'], ['leaving', 'Leaving'], ['sale', 'On sale']].map(([k, l]) => `<button type="button" data-malltab="${k}" class="${ui.mallTab === k ? 'on' : rows[k].length ? '' : 'empty'}">${l} <i>${rows[k].length}</i></button>`).join('')}</div>
                 ${list.length ? `<div class="strip">${list.slice(0, 20).map(r => tile({ id: r.id, name: r.name, img: r.img }, mallSub(r, ui.mallTab))).join('')}</div>` : '<div class="msg">Nothing here right now</div>'}</div>`);
         }
 
@@ -36536,8 +37100,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 const theirs = trades().filter(n => (n.trade?.partner?.name || '').toLowerCase() === w).sort((a, b) => (b.updated || 0) - (a.updated || 0));
                 const open = theirs.filter(isOpen);
                 let toks = [], wish = [];
-                if (ctx.gallery) {
-                    const gal = [...scrapeNeoItems('gal')].map(([name, x]) => ({ id: '', name, img: x.img || '', nc: !!x.nc, qty: x.qty || 1 }));
+                if (ctx.gallery || ctx.shop) {
+                    const gal = [...scrapeNeoItems(ctx.gallery ? 'gal' : 'shop')].map(([name, x]) => ({ id: '', name, img: x.img || '', nc: !!x.nc, qty: x.qty || 1, price: x.price || '' }));
                     const want = new Map(myTokWant().map(i => [i.key, i]));
                     toks = [...new Set(gal.map(x => tokNorm(x.name)))].filter(k => want.has(k)).map(k => want.get(k));
                     wish = gal.filter(after);
@@ -36547,7 +37111,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 return { n, sig: `user|${w}|${open.map(o => o.key).sort().join(',')}|${wish.map(x => x.name).sort().join(',')}|${toks.map(i => i.key).sort().join(',')}`,
                     tip: [open.length ? `${plural(open.length, 'open trade')} with ${ctx.who}` : '', wish.length ? `they have ${wish.length} you’re after` : '', toks.length ? `they have ${plural(toks.length, 'token')} you want` : ''].filter(Boolean).join(' · '),
                     body: (nf ? `<div class="hline"><b>${esc(nf.nick || nf.name || ctx.who)}</b> is one of your Neofriends · <a class="alink" href="${D}/user/${esc(nf.slug || nf.id)}/closet" target="_blank" rel="noopener">Their DTI lists ${ICO.ext}</a></div>` : '')
-                        + (wish.length ? `<div class="hline">They have <b>${wish.length}</b> you’re after</div>${tiles(wish.slice(0, 12))}` : '')
+                        + (wish.length ? `<div class="hline">They have <b>${wish.length}</b> you’re after${ctx.shop ? ' in their shop' : ''}</div>${tiles(wish.slice(0, 12), x => x.price ? { sub: `${x.price} NP` } : {})}` : '')
                         + (toks.length ? `<div class="hline">They have <b>${plural(toks.length, 'token')}</b> you want</div><div class="grid">${toks.map(i => tokTile(i)).join('')}</div>` : '')
                         + (open.length ? `<div class="hline">Open trade${open.length === 1 ? '' : 's'} with ${esc(ctx.who)}</div><div class="card"><div class="rows">${open.map(tradeRow).join('')}</div></div>`
                             : `<div class="hline">${theirs.length ? `${plural(theirs.length, 'finished trade')} with ${esc(ctx.who)} — none open.` : `No trade reports with ${esc(ctx.who)} yet.`}</div>`)
@@ -36574,6 +37138,20 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         : '<div class="hline">None of the tokens you want are in this rotation.</div>')
                         + `<div class="hacts"><button type="button" class="btn sm" data-tkgo="studio">See the whole rotation (${st.size})</button></div>` };
             }
+            if (ctx.kind === 'market') {   // (Auctions, the Trading Post, the Shop Wizard: what's here you're after — the Shop Wizard: the one you looked for)
+                const all = [...scrapeNeoItems('market')].map(([name, x]) => ({ id: '', name, img: x.img || '', nc: !!x.nc, qty: x.qty || 1, price: x.price || '' }));
+                const hits = all.filter(after), owned = all.filter(x => !after(x) && mineOf(x)?.own).length;
+                const want = new Map(myTokWant().map(i => [i.key, i]));
+                const toks = [...new Set(all.map(x => tokNorm(x.name)))].filter(k => want.has(k)).map(k => want.get(k));
+                const one = ctx.src === 'sw' && all.length === 1, n = hits.length + toks.length;
+                const line = one ? '<div class="hline">The item you looked for</div>'
+                    : `<div class="hline">${all.length ? `<b>${plural(all.length, 'item')}</b> here${hits.length ? ` · <b>${hits.length}</b> you’re after` : ' · none you’re after'}${owned ? ` · ${owned} you own` : ''}`
+                        : ({ tp: 'No one else’s lots here yet — what’s in them for you shows here.', sw: 'Look an item up — it shows here, with your marks.' })[ctx.src] || 'No items on this page yet.'}</div>`;
+                return { n, sig: `market|${ctx.src}|${[...hits.map(x => x.name), ...toks.map(i => i.key)].sort().join(',')}`,
+                    tip: [hits.length ? `${plural(hits.length, 'item')} you’re after` : '', toks.length ? `${plural(toks.length, 'token')} you want` : ''].filter(Boolean).join(' · '),
+                    body: line + (one ? tiles(all) : hits.length ? tiles(hits.slice(0, 24), x => x.price ? { sub: `${x.price} NP` } : {}) + (hits.length > 24 ? `<div class="hint">+ ${hits.length - 24} more on this page</div>` : '') : '')
+                        + (toks.length ? `<div class="hline">Token${toks.length === 1 ? '' : 's'} you want</div><div class="grid">${toks.map(i => tokTile(i)).join('')}</div>` : '') };
+            }
             if (ctx.kind === 'pet') {
                 const pet = ctx.pet;
                 return { n: 0, body: `<div class="hline">${pet ? `Dress <b>${esc(pet)}</b> up on DTI — try anything on, and save it as a custom.` : 'Open a pet on DTI to try anything on it.'}</div>`
@@ -36598,14 +37176,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (!m) return '';
             const fold = !!(GM_getValue('dti_np_ctx_fold', {}) || {})[ctx.kind];
             return `<section class="card here${fold ? ' fold' : ''}">
-                <button type="button" class="ch" data-ctxfold aria-expanded="${!fold}" title="${fold ? 'Show' : 'Hide'} what this page has for you"><span class="ci">${ICO.here}</span><span class="ct">On this page</span><span class="hl">${esc(ctx.label)}</span>${m.n ? `<span class="cn hot">${m.n}</span>` : ''}<span class="caret">${fold ? '▾' : '▴'}</span></button>
+                <button type="button" class="ch" data-ctxfold aria-expanded="${!fold}" title="${fold ? 'Show' : 'Hide'} what this page has for you"><span class="ci">${ICO.here}</span><span class="ct">On this page</span><span class="hl">${esc(ctx.label)}</span>${m.n ? `<span class="cn hot">${m.n}</span>` : ''}<span class="caret">${ICO.chev}</span></button>
                 ${fold ? '' : `<div class="cb">${m.body}</div>`}</section>`;
         }
         // what the card needs, once: your lists (for ✓ / ♥), the NC Mall's, the page's NC total, the Studio's rotation when it's old, the topic's lists
         function hereLoads() {
             if (!ctx) return;
             const again = () => { paintBadge(); if (shown('home')) rerender(); };
-            if (['items', 'mall', 'board'].includes(ctx.kind) || (ctx.kind === 'user' && ctx.gallery)) if (!mineIx && slug()) mineLoad().then(m => { if (m) again(); });
+            if (['items', 'mall', 'board', 'market'].includes(ctx.kind) || (ctx.kind === 'user' && (ctx.gallery || ctx.shop))) if (!mineIx && slug()) mineLoad().then(m => { if (m) again(); });
             if (ctx.kind === 'mall') mallLoad();
             if (ctx.kind === 'items') hereTotal();
             if (ctx.kind === 'studio' && tokStudio() && Date.now() - tokStudio().at > TOK_STUDIO_AGE && !studioFail) studioRead();
@@ -36688,8 +37266,18 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         function paintSearch(res) {
             const { items, page, pages } = lastSearch;
             if (!items.length) { res.innerHTML = emptyBox(ICO.items, 'No items found', /user:/.test(lastSearch.key) ? 'Your own lists are searched with your DTI login — is this browser logged in to DTI?' : 'Try fewer words, or another filter.'); return; }
-            res.innerHTML = tiles(items, { skt: true }) + (page < pages ? `<button type="button" class="more" data-smore style="margin-top:10px">Show more <small>page ${page} of ${pages}</small></button>` : '');
+            res.innerHTML = tiles(items, { skt: true }) + (page < pages ? `<div class="send">${moreLoading(page, pages)}</div>` : '');
             paintVals(res);
+            watchMore(res);
+        }
+        const moreLoading = (page, pages) => `<span class="spin"></span>Loading more… <small>page ${page + 1} of ${pages}</small>`;
+        let moreIO = null, moreBusy = 0;
+        function watchMore(res) {   // (the end of the results in sight — or nearly: the next page)
+            moreIO?.disconnect();
+            const end = res.querySelector('.send');
+            if (!end || typeof IntersectionObserver !== 'function') return;
+            moreIO = new IntersectionObserver(es => { if (es.some(x => x.isIntersecting) && end.isConnected) searchMore(end); }, { root: body, rootMargin: '0px 0px 200px 0px' });
+            moreIO.observe(end);
         }
         function paintSearchEmpty(res) {
             const r = recent();
@@ -36698,11 +37286,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             paintVals(res);
         }
         async function searchMore(b) {
-            const res = b.closest('.sres'), { key, page } = lastSearch, my = searchGen;
-            b.disabled = true; b.textContent = 'Loading…';
+            const res = b.closest('.sres'), { key, page, pages } = lastSearch, my = searchGen, end = res?.querySelector('.send');
+            if (!res || moreBusy === my) return;
+            moreBusy = my;
+            if (end) end.innerHTML = moreLoading(page, pages);
             const d = await dtiJSON(`/items.json?q=${encodeURIComponent(key)}&page=${page + 1}`);
-            if (my !== searchGen || lastSearch.key !== key || !res?.isConnected) return;
-            if (!d) { b.disabled = false; b.textContent = 'Couldn’t reach DTI — try again'; return; }
+            if (moreBusy === my) moreBusy = 0;
+            if (my !== searchGen || lastSearch.key !== key || !res.isConnected) return;
+            if (!d) { moreIO?.disconnect(); if (end) end.innerHTML = '<button type="button" class="more" data-smore>Couldn’t reach DTI — try again</button>'; return; }
             const have = new Set(lastSearch.items.map(it => it.id));
             Object.assign(lastSearch, { items: [...lastSearch.items, ...(d.items || []).map(asItem).filter(it => !have.has(it.id))], page: page + 1, pages: d.total_pages || lastSearch.pages });
             const top = body.scrollTop;   // (the grid grows below — nothing moves)
@@ -36974,11 +37565,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const t = GM_getValue('dti_sk_new', {}) || {};
             if (t.at && t.at > (GM_getValue('dti_sk_new_seen', 0) || 0)) GM_setValue('dti_sk_new_seen', t.at);
             const row = e => {
-                const offers = fresh[e.id] || null;
+                const offers = fresh[e.id] || null, tier = tierOf(e), open = ui.tierFor === String(e.id);
                 return `<div class="row go" role="button" tabindex="0" data-item="${itemAttr({ id: e.id, name: e.name || 'Item', img: e.img })}" title="${esc(e.name || 'Item')} — its page here">
                     ${e.img ? `<img src="${esc(e.img)}" alt="" loading="lazy">` : '<span class="noimg"></span>'}
                     <span class="rt"><b>${esc(e.name || 'Item')}</b>${e.note ? `<small>${esc(e.note)}</small>` : ''}<span class="v" data-val="${esc(e.name || '')}" hidden></span></span>
                     ${offers ? `<span class="new" title="New on DTI: ${esc(offers.join(', '))}">New · ${offers.length} offering</span>` : ''}
+                    <span class="tierw"><button type="button" class="tierb t${tier}" data-sktier="${esc(e.id)}" title="How much you want it — click to change" aria-haspopup="menu" aria-expanded="${open}">${TIERS[tier]}<i>${ICO.chev}</i></button>${open ? `<span class="stmenu" role="menu">${TIERS.map((l, i) => `<button type="button" role="menuitemradio" aria-checked="${i === tier}" data-settier="${i}"${i === tier ? ' class="on"' : ''}><i class="dot t${i}"></i>${l}</button>`).join('')}</span>` : ''}</span>
                     <button type="button" class="rm" data-skrm="${esc(e.id)}" title="Take it off your Seeking list" aria-label="Take it off">×</button>
                 </div>`;
             };
@@ -36992,7 +37584,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     : emptyBox(ICO.seeking, 'Nothing on your Seeking list', 'The items you want now — add them above, from an item’s page here, or on DTI.')), 'sk')
                 + (seen.length ? card(ICO.eye, 'Seen on the boards', seen.length, '<button type="button" class="alink" data-seenclr title="Forget them all">Clear</button>', `<div class="rows">${seen.map(x => `<div class="row">
                     <span class="rt"><b>${esc(x.who || x.slug)}</b><small>${esc(ago(x.at))} · ${x.mail ? 'in a Neomail' : 'on the Neoboards'}</small>
-                        <span class="thumbs">${x.items.slice(0, 7).map(it => `<button type="button" class="tbtn" data-item="${itemAttr({ id: it.id, name: it.name || 'Item', img: it.img })}" title="${esc(it.name || '')}" style="padding:0;border:none;background:none;cursor:pointer">${it.img ? `<img src="${esc(it.img)}" alt="">` : '<span class="noimg"></span>'}</button>`).join('')}${x.items.length > 7 ? `<span class="n">+${x.items.length - 7}</span>` : ''}</span></span>
+                        <span class="ichips">${x.items.slice(0, 7).map(it => `<button type="button" class="ichip" data-item="${itemAttr({ id: it.id, name: it.name || 'Item', img: it.img })}" title="${esc(it.name || 'Item')} \u2014 its page here">${it.img ? `<img src="${esc(it.img)}" alt="">` : '<span class="noimg"></span>'}<span>${esc(it.name || 'Item')}</span></button>`).join('')}${x.items.length > 7 ? `<span class="n">+${x.items.length - 7}</span>` : ''}</span></span>
                     ${npHref(x.where) ? `<a class="btn sm" href="${esc(npHref(x.where))}">Topic</a>` : ''}
                     ${x.np ? `<a class="ibtn" href="https://www.neopets.com/neomessages.phtml?type=send&recipient=${encodeURIComponent(x.np)}" title="Neomail ${esc(x.np)}">${ICO.mail}</a>` : ''}
                     <a class="ibtn" href="${D}/user/${encodeURIComponent(x.slug)}/closet" target="_blank" rel="noopener" title="Their lists on DTI">${ICO.ext}</a>
@@ -37016,9 +37608,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             return `<div class="trow">
                 <button type="button" class="tmain" data-open="${esc(n.key)}" title="Open this trade report">
                     <span class="ttop"><b>${esc(titleOf(n))}</b><span class="when">${esc(ago(n.updated))}</span></span>
+                    ${n.title && t.partner?.name ? `<span class="twith">with ${esc(t.partner.name)}</span>` : ''}
                     <span class="thumbs" title="What you give ⇄ what you get">${thumbs(t.give)}<span class="sw">${ICO.trades}</span>${thumbs(t.get)}</span>
                 </button>
-                <button type="button" class="chip st s-${t.status}" data-st="${esc(n.key)}" title="Change the status">${stLabel(t.status)}<i>▾</i></button>
+                <button type="button" class="chip st s-${t.status}" data-st="${esc(n.key)}" title="Change the status">${stLabel(t.status)}<i>${ICO.chev}</i></button>
                 ${ui.stFor === n.key ? `<div class="stmenu">${STATUS.map(([v, l]) => `<button type="button" data-set="${v}"${v === t.status ? ' class="on"' : ''}><i class="dot s-${v}"></i>${l}</button>`).join('')}</div>` : ''}
             </div>`;
         }
@@ -37041,7 +37634,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 <button type="button" class="gmain" data-g="${esc(g.uid)}" aria-expanded="${open}">
                     <span class="gdir ${g.dir === 'in' ? 'in' : 'out'}">${ICO.gift}</span>
                     <span class="rt"><b>${g.dir === 'in' ? 'Received from' : 'Sent to'} ${esc(g.who || 'someone')}</b><small>${full ? `<i class="gst ${st}">${GIFT_ST[st]}</i> ` : ''}${esc(named.map(i => g.items[i].name).join(', '))} · ${esc(ago(g.at))}</small></span>
-                    <span class="caret">${open ? '▴' : '▾'}</span>
+                    <span class="caret">${ICO.chev}</span>
                 </button>
                 ${open ? `<div class="gbody">
                     ${sort ? left.map(i => gi(g, i, `data-gi="${i}" checked`)).join('') : ''}
@@ -37272,6 +37865,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 ${i.img ? `<img class="pic" src="${esc(i.img)}" alt="" loading="lazy">` : '<span class="pic none"></span>'}<span class="nm">${esc(i.name)}</span>${marks ? `<span class="tkm">${marks}</span>` : ''}</button>`;
         }
         const tkPanel = i => `<div class="tkx"><div class="tkn"><b>${esc(i.name)}</b>${tokMeta(i) ? `<small>${esc(tokMeta(i))}</small>` : ''}<button type="button" class="btn sm" data-item="${itemAttr(tokItem(i))}">Its page</button></div>${tkEditHtml(i)}</div>`;
+        const tkWantFirst = () => (GM_getValue('dti_tok_ui', {}) || {}).wantFirst !== false;   // (My Tokens' switch — on to start)
         function renderTokens() {
             tkLoadCat();
             const scope = tkScope(), mine = DTITokens.read(scope).mine, imported = tokImported(tkCat, scope), st = tokStudioKeys();
@@ -37298,6 +37892,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     + (only && !(only === '-' ? none : by.get(only)).length ? '<div class="msg">Nothing in this list yet</div>' : '')
                     + gl.lists.filter(l => by.get(l.id).length && (!only || only === l.id)).map(l => card(`<i class="ldot" style="background:${esc(l.color)}"></i>`, esc(l.name), by.get(l.id).length, '', `<div class="cb tight">${grid(by.get(l.id))}</div>`)).join('')
                     + (none.length && (!only || only === '-') ? card(ICO.tokens, 'Not in a list', none.length, '', `<div class="cb tight">${grid(none)}</div>`) : '');
+            } else if (seg === 'studio' && tkWantFirst() && list.some(i => i.want) && list.some(i => !i.want)) {   // (the ones you want first)
+                const wl = list.filter(i => i.want), rest = list.filter(i => !i.want);
+                main = card(ICO.tokens, 'You want', wl.length, '', `<div class="cb tight">${grid(wl)}</div>`) + card(ICO.tokens, 'The rest of the rotation', rest.length, '', `<div class="cb tight">${grid(rest)}</div>`);
             } else if (list.length) main = grid(list);
             const empty = q ? (more.length ? '' : '<div class="msg">No tokens match</div>')
                 : seg === 'want' ? emptyBox(ICO.tokens, 'No tokens wanted yet', 'Search any token above and press Want on it — the same Want list as My Tokens.')
@@ -37305,7 +37902,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 : '';
             const sd = tokStudio();
             const studioHead = seg !== 'studio' ? '' : st
-                ? `<div class="tknote"><span>The Styling Studio’s rotation · from <a href="${esc(TOK_STUDIO_URL)}" target="_blank" rel="noopener">itemdb</a>, ${studioBusy ? 'checking…' : 'checked ' + esc(ago(sd.at))}</span><button type="button" class="btn sm" data-studioread${studioBusy ? ' disabled' : ''}>Check again</button></div>`
+                ? `<div class="tknote"><span>The Styling Studio’s rotation · from <a href="${esc(TOK_STUDIO_URL)}" target="_blank" rel="noopener">itemdb</a>, ${studioBusy ? 'checking…' : 'checked ' + esc(ago(sd.at))}</span><button type="button" class="chip${tkWantFirst() ? ' on' : ''}" data-tkwf aria-pressed="${tkWantFirst()}" title="The ones you’ve marked wanted at the top — the same switch as My Tokens’ Available now">Wanted first</button><button type="button" class="btn sm" data-studioread${studioBusy ? ' disabled' : ''}>Check again</button></div>`
                 : emptyBox(ICO.tokens, 'The Styling Studio’s rotation', 'Which style tokens you can get on Neopets right now — read from itemdb (the same list as “Available now” in My Tokens).')
                     + `<div style="text-align:center">${studioBusy ? '<span class="msg">Reading it…</span>' : `<button type="button" class="btn pri" data-studioread>${studioFail ? 'Couldn’t reach itemdb — try again' : 'Read the rotation'}</button>`}</div>`;
             body.innerHTML = acctBar('’s tokens')
@@ -37405,10 +38002,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const ACT = ['[data-go]', '[data-nbopen]', '[data-malltab]', '[data-recentclear]', '[data-ctxfold]', '[data-import]', '[data-capture]', '[data-newwith]', '[data-studioread]', '[data-tkgo]',
             '[data-scope]', '[data-chip]', '[data-smore]', '[data-mseg]', '[data-minere]', '[data-mineall]',
             '[data-item]', '[data-iback]', '[data-iseek]', '[data-itrades]', '[data-trall]', '[data-lq]', '[data-lsave]', '[data-itrade]', '[data-inew]',
-            '[data-skrm]', '[data-skcopy]', '[data-sktog]', '[data-seenrm]', '[data-seenclr]',
+            '[data-skrm]', '[data-skcopy]', '[data-sktog]', '[data-seenrm]', '[data-seenclr]', '[data-sktier]', '[data-settier]',
             '[data-open]', '[data-st]', '[data-set]', '[data-g]', '[data-gact]', '[data-gtickall]', '[data-undo]', '[data-gifton]', '[data-seg]', '[data-q]', '[data-gbc]', '[data-rm]',
             '.newbtn', '.morebtn', '.acctall', '.seekoff', '.back', '.del', '[data-trpin]', '[data-gview]',
-            '[data-tkseg]', '[data-tkopen]', '[data-tkstep]', '[data-tkuft]', '[data-tkl]',
+            '[data-tkseg]', '[data-tkopen]', '[data-tkstep]', '[data-tkuft]', '[data-tkl]', '[data-tkwf]',
             '[data-ntkey]', '[data-ntnew]', '[data-ntseg]', '[data-ntback]', '[data-ntpin]', '[data-ntdel]'].join(', ');
         function wire() {
             win.querySelector('.nav').addEventListener('click', e => {
@@ -37432,14 +38029,58 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 delete img.dataset.fb;
                 if (src) { img.src = src; img.className = 'thumb'; } else img.remove();
             }, true);
-            // the window's left edge: wider or narrower (kept)
-            const grip = win.querySelector('.grip');
+            // its edges and bottom corners: its size (kept) — the left edge leaves the right where it is, so docked it stays docked;
+            // a double-click on an edge: that size back as it starts
             let rs = null;
-            grip.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); rs = { x: e.clientX, w: win.offsetWidth }; grip.setPointerCapture(e.pointerId); grip.classList.add('on'); });
-            grip.addEventListener('pointermove', e => { if (rs) win.style.width = Math.round(Math.min(Math.max(380, rs.w + rs.x - e.clientX), innerWidth - 44)) + 'px'; });
-            const endRs = () => { if (!rs) return; rs = null; grip.classList.remove('on'); GM_setValue('dti_np_win_w', win.offsetWidth); };
-            grip.addEventListener('pointerup', endRs);
-            grip.addEventListener('pointercancel', endRs);
+            win.querySelectorAll('.rz').forEach(g => {
+                g.addEventListener('pointerdown', e => {
+                    if (e.button !== 0) return;
+                    e.preventDefault();
+                    rs = { g, e: g.dataset.e, x0: e.clientX, y0: e.clientY, ...rect() };
+                    g.setPointerCapture(e.pointerId); g.classList.add('on');
+                });
+                g.addEventListener('pointermove', e => {
+                    if (rs?.g !== g) return;
+                    const dx = e.clientX - rs.x0, dy = e.clientY - rs.y0;
+                    if (rs.e.includes('l')) { const l = Math.max(4, Math.min(rs.l + dx, rs.l + rs.w - 380)); win.style.left = Math.round(l) + 'px'; win.style.width = Math.round(rs.l + rs.w - l) + 'px'; }
+                    if (rs.e.includes('r')) win.style.width = Math.round(Math.max(380, Math.min(rs.w + dx, vw() - rs.l - 4))) + 'px';
+                    if (rs.e.includes('b')) win.style.height = Math.round(Math.max(300, Math.min(rs.h + dy, innerHeight - rs.t - 4))) + 'px';
+                });
+                const end = () => {
+                    if (rs?.g !== g) return;
+                    const k = rs.e;
+                    rs = null; g.classList.remove('on');
+                    if (/[lr]/.test(k)) GM_setValue('dti_np_win_w', win.offsetWidth);
+                    if (k.includes('b')) GM_setValue('dti_np_win_h', win.offsetHeight);
+                    if (k.includes('r') || movedTo()) savePos();   // (the right edge moves it off the edge: where it is now)
+                };
+                g.addEventListener('pointerup', end);
+                g.addEventListener('pointercancel', end);
+                g.addEventListener('dblclick', () => { if (/[lr]/.test(g.dataset.e)) GM_setValue('dti_np_win_w', 0); if (g.dataset.e.includes('b')) GM_setValue('dti_np_win_h', 0); fit(); if (movedTo()) savePos(); });
+            });
+            // its top bar moves it — from anywhere on it, its buttons too (a click on one, without moving, is still a click)
+            const nav = win.querySelector('.nav');
+            let mv = null, skipClick = false;
+            nav.addEventListener('pointerdown', e => {
+                skipClick = false;
+                if (e.button !== 0) return;
+                mv = { x0: e.clientX, y0: e.clientY, ...rect(), id: e.pointerId, on: false };
+            });
+            nav.addEventListener('pointermove', e => {
+                if (!mv || e.pointerId !== mv.id) return;
+                if (!(e.buttons & 1)) { mv = null; return; }   // (let go somewhere else before it moved)
+                if (!mv.on) {
+                    if (Math.hypot(e.clientX - mv.x0, e.clientY - mv.y0) < 5) return;
+                    mv.on = true; nav.setPointerCapture(mv.id); win.classList.add('moving'); showMenu(false);
+                }
+                win.style.left = Math.round(Math.max(4, Math.min(mv.l + e.clientX - mv.x0, vw() - win.offsetWidth - 4))) + 'px';
+                win.style.top = Math.round(Math.max(4, Math.min(mv.t + e.clientY - mv.y0, innerHeight - win.offsetHeight - 4))) + 'px';
+            });
+            const endMv = () => { if (!mv) return; const on = mv.on; mv = null; if (!on) return; win.classList.remove('moving'); skipClick = true; savePos(); };
+            nav.addEventListener('pointerup', endMv);
+            nav.addEventListener('pointercancel', endMv);
+            nav.addEventListener('click', e => { if (skipClick) { skipClick = false; e.stopPropagation(); e.preventDefault(); } }, true);   // (the end of a move isn't a click)
+            nav.addEventListener('dblclick', e => { if (e.target.closest('button')) return; GM_setValue('dti_np_win_pos', null); fit(); });
             // keys typed in it stay in it (not Neopets' page); Esc closes the menu, then the window
             win.addEventListener('keydown', e => {
                 e.stopPropagation();
@@ -37488,6 +38129,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         function onClick(e) {
             const b = e.target.closest(ACT);
             if (ui.stFor && !e.target.closest('.stmenu, [data-st]')) { ui.stFor = ''; if (!b) return rerender(); }
+            if (ui.tierFor && !e.target.closest('.stmenu, [data-sktier]')) { ui.tierFor = ''; if (!b) return rerender(); }
             if (!b || b.disabled) return;
             const d = b.dataset;
             // ── going places ──
@@ -37582,6 +38224,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 return;
             }
             if (d.skrm) { seekSave(items => { delete items[d.skrm]; }); return rerender(); }
+            if (d.sktier) { ui.tierFor = ui.tierFor === d.sktier ? '' : d.sktier; return rerender(); }
+            if (d.settier) { const id = ui.tierFor, t = +d.settier; ui.tierFor = ''; seekSave(items => { if (items[id]) items[id].tier = t; }); return rerender(); }
             if ('skcopy' in d) {
                 const list = seekSorted();
                 Promise.all(list.map(x => npNcValue(x.name).catch(() => null))).then(vals => {
@@ -37640,6 +38284,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (d.gbc) { patchTrade(t => { const ex = t[d.side].find(o => o.id === d.gbc); if (ex) ex.qty++; else t[d.side].push({ id: d.gbc, name: GBC_KINDS[d.gbc].name, img: '', qty: 1 }); }); return rerenderEditor(); }
             // ── Tokens ──
             if (d.tkseg) { ui.tk.seg = d.tkseg; ui.tk.open = ui.tk.list = ''; GM_setValue('dti_np_tk_seg', d.tkseg); render(); body.scrollTop = 0; return; }
+            if ('tkwf' in d) { const u = GM_getValue('dti_tok_ui', {}) || {}; u.wantFirst = !tkWantFirst(); GM_setValue('dti_tok_ui', u); return rerender(); }
             if (d.tkopen) { ui.tk.open = ui.tk.open === d.tkopen ? '' : d.tkopen; return rerender(); }
             if ('tkl' in d) { ui.tk.list = ui.tk.list === d.tkl ? '' : d.tkl; ui.tk.open = ''; return rerender(); }   // (just one of your lists — All: every one)
             if ('tkuft' in d) {   // (up for trade, on / off)
@@ -37687,7 +38332,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
         // ── Live: the page itself — its own items coming in or paging in place (only where "On this page" reads them from the page), and
         // someone's lists looked at on the boards ──
-        if (ctx && (ctx.kind === 'items' || (ctx.kind === 'user' && ctx.gallery)))
+        if (ctx && (ctx.kind === 'items' || ctx.kind === 'market' || (ctx.kind === 'user' && (ctx.gallery || ctx.shop))))
             new MutationObserver(ms => { if (ms.some(m => [...m.addedNodes, ...m.removedNodes].some(n => n.nodeType === 1))) hereSoon(); })
                 .observe(document.body, { childList: true, subtree: true });
         document.addEventListener('dti-nb-looked', () => { if (boardRows || boardBusy) boardRefresh(); });   // (once the Mini DTI has looked at the topic — not your lists read again before)
@@ -37707,7 +38352,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             GM_addValueChangeListener('dti_theme_tokens', () => {
                 theme = themeOf();
                 root.querySelector('style.vars').textContent = theme.css;
-                if (win) { win.classList.toggle('solid', theme.solid); win.classList.toggle('dark', theme.dark); npFonts(theme.font); }
+                tab.classList.toggle('en', !!theme.en); tab.classList.toggle('px', !!theme.px); tab.classList.toggle('t2', !!theme.t2); tab.classList.toggle('t3', !!theme.t3);
+                if (win) {
+                    win.classList.toggle('solid', theme.solid); win.classList.toggle('dark', theme.dark);
+                    ['en', 'en-d', 'en-l'].forEach(c => win.classList.toggle(c, c === 'en' ? !!theme.en : c === 'en-' + theme.en));
+                    ['px', 'px-n', 'px-d'].forEach(c => win.classList.toggle(c, c === 'px' ? !!theme.px : c === 'px-' + theme.px));
+                    win.classList.toggle('t2', !!theme.t2); win.classList.toggle('t3', !!theme.t3);
+                    npFonts(theme.font);
+                }
             });
         }
 
@@ -37743,11 +38395,25 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // a click anywhere else, or Esc, closes it
         document.addEventListener('pointerdown', e => { if (win && !win.hidden && !pinned && !e.composedPath().some(n => n === host || n?.id === 'dti-nb-pop')) openWin(false); }, true);   // (the Seeking window it opened: not "outside")
         document.addEventListener('keydown', e => { if (e.key === 'Escape' && win && !win.hidden && (!pinned || e.composedPath().includes(host))) openWin(false); });   // (pinned: Esc in it, not one meant for the page)
+        // Alt+M opens it, or minimizes it to the tab — in it too (it keeps its keys to itself, so: before it); a box you're typing in on
+        // the page keeps it (Option+M types µ on a Mac)
+        document.addEventListener('keydown', e => {
+            if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.code !== 'KeyM' || e.repeat) return;
+            const inIt = e.composedPath().includes(host);
+            if (!inIt && e.target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+            e.preventDefault(); e.stopPropagation();
+            const open = !win || win.hidden;
+            openWin(open);
+            if (open) win.querySelector('.links .on, .links [data-v]')?.focus({ preventScroll: true });
+            else if (inIt) tab.focus();
+        }, true);
         if (ctx?.kind === 'mall' && (seekAll().length || slug())) mallLoad();   // (the NC Mall: anything you want in it? — for the dot)
         paintBadge();
         if (ctx?.kind === 'items') setTimeout(paintBadge, 2500);   // (a page's items can come in after it's loaded)
-        // (pinned, and open when you left the last page: open again here, on the part you were on — user asked)
-        if (GM_getValue('dti_np_pin', false) && GM_getValue('dti_np_open', false)) openWin(true);
+        // (pinned, and open when you left this tab's last page: open again here, on the part you were on — user asked; a new tab: just the tab)
+        let wasOpen = false;
+        try { wasOpen = sessionStorage.getItem('dti_np_open') === '1'; } catch (_) {}
+        if (GM_getValue('dti_np_pin', false) && wasOpen) openWin(true);
     }
 
     // ── Mini DTI's readers (whole functions: the Neopets side has them, and so do the tests) ──
@@ -37762,7 +38428,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         if (/^\/mall\/stylingstudio/i.test(path)) return { kind: 'studio', label: 'Styling Studio' };
         const gal = /^\/gallery\//i.test(path), shop = path === '/browseshop.phtml';
         const who = (path === '/userlookup.phtml' && qs.get('user')) || (path === '/neomessages.phtml' && qs.get('recipient')) || (gal && qs.get('gu')) || (shop && qs.get('owner')) || '';
-        if (who && low(who) !== low(me)) return { kind: 'user', who, gallery: gal, label: gal ? `${who}’s gallery` : shop ? `${who}’s shop` : who };
+        if (who && low(who) !== low(me)) return { kind: 'user', who, gallery: gal, shop, label: gal ? `${who}’s gallery` : shop ? `${who}’s shop` : who };
         if (path === '/petlookup.phtml' || /^\/customise\/?$/i.test(path)) {
             const pet = qs.get('pet') || qs.get('view') || '';
             return { kind: 'pet', pet, label: pet || 'Customise' };
@@ -37770,6 +38436,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const src = ({ '/inventory.phtml': 'inv', '/safetydeposit.phtml': 'sdb', '/closet.phtml': 'closet' })[path] || (gal ? 'gal' : /^\/stylingchamber/i.test(path) ? 'sc' : '');
         if (src) return { kind: 'items', src, label: 'Your ' + ({ inv: 'Inventory', sdb: 'Safety Deposit Box', closet: 'Closet', gal: 'Gallery', sc: 'Styling Chamber' })[src] };
         if (/^\/neoboards\/topic\.phtml$/i.test(path)) return { kind: 'board', topic: qs.get('topic') || '', label: 'Neoboards' };
+        // other people's items, for sale or trade: Auctions (the list, a lot, the Auction Genie), the Trading Post, the Shop Wizard
+        const mk = /^\/(auctions|genie)\.phtml$/i.test(path) ? ['auctions', 'Auctions'] : /^\/island\/tradingpost\.phtml$/i.test(path) ? ['tp', 'Trading Post']
+            : /^\/shops\/wizard\.phtml$/i.test(path) || (path === '/market.phtml' && qs.get('type') === 'wizard') ? ['sw', 'Shop Wizard'] : null;
+        if (mk) return { kind: 'market', src: mk[0], label: mk[1] };
         return null;
     }
     // A DTI item page (parsed) → what Mini DTI shows of it: { name, img, kind, first, desc, links, zones: { occ, res }, layers, species,
@@ -38767,6 +39437,34 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 const img = (el.closest('td') || el.parentElement)?.querySelector('img[src*="/items/"]')?.src || '';
                 add(n, galQty(el), img, { nc: /\/items\/mall_/i.test(img) });
             });
+        }
+        if (key === 'shop' || key === 'market') {
+            // Someone's shop, Auctions, the Trading Post, the Shop Wizard: each item's picture, and its name from the smallest box around
+            // it with just that one picture in it — a shop's item (its name, "N in stock", "40,000 NP"), an auction's row (its name a link
+            // to the lot), an item in a Trading Post lot — never a picture's title (a shop's is the item's description)
+            const IMG = 'img[src*="images.neopets.com/items/"]';
+            const okName = t => t.length >= 2 && t.length <= 80 && !/^[\d,.\s]+(np)?$/i.test(t) && !/\bin stock\b|^cost\b|^lot\b|^#\d|\bnp$/i.test(t);
+            const priceIn = (box, txt) => txt.match(/cost\s*:\s*([\d,]+)\s*np/i)?.[1]   // (a shop's older cells)
+                || box.closest('[data-price-str]')?.dataset.priceStr   // (a shop's items now)
+                || (box.querySelector('[data-label="Current Price"], [class*="price"]')?.textContent.match(/([\d,]+)\s*np/i) || [])[1] || '';   // (an auction's)
+            document.querySelectorAll(IMG).forEach(img => {
+                if (img.closest('.tp-border-frame')?.querySelector('img[src*="/bin-icon"]')) return;   // (the Trading Post: a lot of yours — a bin takes it down)
+                let box = img.parentElement, name = '';
+                for (let up = 0; box && box !== document.body && up < 6; up++) {
+                    if (box.querySelectorAll(IMG).length > 1) break;
+                    name = [...box.querySelectorAll('b, strong, a, p, span, h2, h3, h4, [class*="name"]')].map(e => e.textContent.replace(/\s+/g, ' ').trim()).find(okName) || '';
+                    if (name) break;
+                    box = box.parentElement;
+                }
+                if (!name && okName((img.alt || '').trim())) { name = img.alt.trim(); box = null; }
+                const txt = name && box ? box.textContent : '';
+                add(name, txt.match(/(\d[\d,]*)\s+in stock/i)?.[1], img.src, { nc: /\/items\/mall_/i.test(img.src), price: txt ? priceIn(box, txt) : '' });
+            });
+            if (!found.size && key === 'market') {   // (the Shop Wizard: what was looked for — its results say; else what's in its box)
+                const q = (document.querySelector('input[name="rs_type"]')?.value || document.querySelector('#shopwizard')?.value || '').trim();
+                if (q) add(q, 1, '', {});
+            }
+            return found;
         }
         // Layout we don't know (Neopets changed a page): pair item images with the row's name
         if (!found.size) {
