@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      3.4
+// @version      3.5
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -300,16 +300,16 @@
     // An essence-like token (a character's look, for that character's species): Essence of …, All-Star Essence of …, Treasured …
     const TOK_ESSENCE_RE = /^(?:(?:all-star )?essence of |treasured )/i;
     // Tokens out on Neopets that DTI hasn't named yet (it only learns a token once someone shows it a pet wearing it):
-    // [name, picture, color id]. Brain Tree, Esophagor and Pant Devil (Oct 2026) are the first essences any species can
-    // wear; until DTI names them, each pet it sees one on is an unnamed "<New?>" style with a placeholder picture in that
-    // essence's color (Woodland 89 / Ghost 29 / Blue 8) — those are folded into the essence here (seen: DTI's own
-    // pictures of styles 100491, 100490, 100492). Each one drops out by itself once DTI has it under its name.
+    // [name, picture, DTI's unnamed styles of it]. Brain Tree, Esophagor and Pant Devil (Oct 2026) are the first essences any
+    // species can wear; DTI has each as an unnamed "<New?>" style in the essence's color (seen: DTI's own pictures of styles
+    // 100491, 100490, 100492) — those, and only those, are folded into the essence here: more unnamed styles of those colors
+    // are other tokens (the Eerie Ghost release of Oct 16 2026 came as 100+ unnamed Ghost styles). Each one drops out by
+    // itself once DTI has it under its name.
     const TOK_EXTRA = [
-        ['Essence of Brain Tree', 'dd6c4dde.gif', 89],
-        ['Essence of Esophagor', 'e9a931b3.gif', 29],
-        ['Essence of Pant Devil', '8d77b711.gif', 8],
+        ['Essence of Brain Tree', 'dd6c4dde.gif', [100491]],
+        ['Essence of Esophagor', 'e9a931b3.gif', [100490]],
+        ['Essence of Pant Devil', '8d77b711.gif', [100492]],
     ];
-    const TOK_EXTRA_FROM = 100400;   // (placeholder styles from about then on)
     function tokNorm(name) { return String(name || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
     function tokBase(img) { return String(img || '').split(/[?#]/)[0].split('/').pop().toLowerCase(); }
     // The token's style worn on a pet (itemdb's preview, 600×600) — '' when there's no picture to go by
@@ -323,11 +323,22 @@
     // the pet filling its tile instead of a small pet in a lot of white. Measured once per picture — read through
     // Tampermonkey, as itemdb's server doesn't let pages read its pictures — and remembered in this browser.
     const TokCrop = (() => {
-        const LS = 'dti_tok_crop_v1';
+        const LS = 'dti_tok_crop_v2';   // (v1 kept a picture itemdb didn't have yet as never there: moved over without those)
         const keyOf = url => String(url).split('/').pop().replace(/\.png$/i, '');
         const queue = [], pending = new Map();
         let map = null, active = 0, saveT = 0;
-        const load = () => { if (!map) { try { map = JSON.parse(localStorage.getItem(LS) || '{}') || {}; } catch (_) { map = {}; } } return map; };
+        const load = () => {
+            if (map) return map;
+            try {
+                map = JSON.parse(localStorage.getItem(LS) || 'null');
+                if (!map) {
+                    map = Object.fromEntries(Object.entries(JSON.parse(localStorage.getItem('dti_tok_crop_v1') || '{}') || {}).filter(([, v]) => v));
+                    localStorage.removeItem('dti_tok_crop_v1');
+                    localStorage.setItem(LS, JSON.stringify(map));
+                }
+            } catch (_) { map = {}; }
+            return map;
+        };
         const save = () => { if (!saveT) saveT = setTimeout(() => { saveT = 0; try { localStorage.setItem(LS, JSON.stringify(map)); } catch (_) {} }, 1500); };   // (while measuring, too)
         // [z, cx, cy]; false = can't be read (kept); null = couldn't fetch it now (asked again another time)
         // [z, cx, cy] of the pet in a picture (an ImageBitmap) | false (nothing there but the white around it)
@@ -353,7 +364,7 @@
             return new Promise(res => GM_xmlhttpRequest({
                 method: 'GET', url, responseType: 'blob', timeout: 20000, anonymous: true,
                 onload: async r => {
-                    if (r.status !== 200 || !r.response) return res(r.status === 404 ? false : null);
+                    if (r.status !== 200 || !r.response) return res(null);   // (not there yet — itemdb makes a new token's later: asked again another time)
                     try {
                         const bmp = await createImageBitmap(r.response), v = cropOf(bmp);
                         bmp.close?.();
@@ -387,12 +398,115 @@
         };
     })();
     const tokCropCss = c => `--z:${c[0]};--cx:${c[1]};--cy:${c[2]}`;
+    // ── New tokens DTI has, but under no name: which of its unnamed styles each one is. A release comes to DTI as unnamed styles
+    // ("<New?> Ghost"): each pet's token and its Prismatic versions, DTI's own big picture of each, no names; the Studio's lists
+    // have the names, with each token's 80px picture. A token is matched to the unnamed style of its pet and color that looks
+    // like it — by its colors: a Pale Pink one is pink, a Shadow one dark, an Ivory one pale — and only a clear match counts (each
+    // the other's closest, well ahead of the next). Then it's that style on DTI's list under its name (buildTokenCatalog): DTI's
+    // big picture when itemdb has none, its date, the pose picker, trying it on. GM `dti_tok_phnames` { at, m: { [style id]: the
+    // Studio-list row } } (the Neopets side reads it too); the pictures' color readings, kept for good: localStorage
+    // `dti_tok_sig_v1` { [picture]: [r, g, b, 12 hues, 6 lightness bands] }.
+    function tokPhNames() { try { return GM_getValue('dti_tok_phnames', null); } catch (_) { return null; } }
+    // A picture's colors — the pet's, not the white or see-through around it (nor a token's hanger badge, bottom-left): its mean
+    // r, g, b (0–1), then how much of each of 12 hues (by how strong) and of 6 lightness bands. d = RGBA pixels, n × n.
+    function tokSig(d, n, token) {
+        const hue = new Array(12).fill(0), lig = new Array(6).fill(0);
+        let k = 0, r = 0, g = 0, b = 0;
+        for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+            if (token && x < n * 0.3 && y > n * 0.7) continue;
+            const i = (y * n + x) * 4, R = d[i], G = d[i + 1], B = d[i + 2];
+            if (d[i + 3] < 128 || (R > 240 && G > 240 && B > 240)) continue;
+            const mx = Math.max(R, G, B), mn = Math.min(R, G, B), l = (mx + mn) / 510, s = mx === mn ? 0 : (mx - mn) / (255 - Math.abs(mx + mn - 255) + 1e-6);
+            const h = mx === mn ? 0 : ((mx === R ? ((G - B) / (mx - mn)) % 6 : mx === G ? (B - R) / (mx - mn) + 2 : (R - G) / (mx - mn) + 4) * 60 + 360) % 360;
+            hue[Math.floor(h / 30) % 12] += s; lig[Math.min(5, Math.floor(l * 6))]++;
+            r += R; g += G; b += B; k++;
+        }
+        if (!k) return null;
+        const norm = a => { const t = a.reduce((x, y) => x + y, 0) || 1; return a.map(v => +(v / t).toFixed(4)); };
+        return [+(r / k / 255).toFixed(4), +(g / k / 255).toFixed(4), +(b / k / 255).toFixed(4), ...norm(hue), ...norm(lig)];
+    }
+    function tokSigDist(a, b) {   // (how unlike two pictures' colors are — 0: the same)
+        let s = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+        for (let i = 3; i < a.length; i++) s += Math.abs(a[i] - b[i]);
+        return s;
+    }
+    // One pet and color's tokens [[key, colors]] and DTI's unnamed styles [[style id, colors]] → Map(key → style id): clear matches only
+    function tokMatchGroup(toks, styles) {
+        const out = new Map();
+        if (!toks.length || !styles.length) return out;
+        const cost = toks.map(([, a]) => styles.map(([, b]) => tokSigDist(a, b)));
+        toks.forEach(([key], i) => {
+            const row = cost[i], best = Math.min(...row), j = row.indexOf(best);
+            const nextRow = Math.min(...row.filter((_, x) => x !== j)), col = cost.map(r => r[j]), nextCol = Math.min(...col.filter((_, x) => x !== i));
+            if (best <= 1 && Math.min(...col) === best && nextRow - best >= 0.3 && nextCol - best >= 0.3) out.set(key, styles[j][0]);
+        });
+        return out;
+    }
+    const TokMatch = (() => {
+        const LS = 'dti_tok_sig_v1';
+        let sigs = null, running = null;
+        const load = () => sigs || (sigs = (() => { try { return JSON.parse(localStorage.getItem(LS) || '{}') || {}; } catch (_) { return {}; } })());
+        const save = () => { try { localStorage.setItem(LS, JSON.stringify(sigs)); } catch (_) {} };
+        const read = (url, token) => new Promise(res => GM_xmlhttpRequest({   // (through Tampermonkey, like TokCrop)
+            method: 'GET', url, responseType: 'blob', timeout: 20000, anonymous: true,
+            onload: async r => {
+                if (r.status !== 200 || !r.response) return res(null);
+                try {
+                    const bmp = await createImageBitmap(r.response), N = 48, c = document.createElement('canvas');
+                    c.width = c.height = N;
+                    const g = c.getContext('2d', { willReadFrequently: true });
+                    g.drawImage(bmp, 0, 0, N, N);
+                    bmp.close?.();
+                    res(tokSig(g.getImageData(0, 0, N, N).data, N, token));
+                } catch (_) { res(null); }
+            },
+            onerror: () => res(null), ontimeout: () => res(null),
+        }));
+        async function sigOf(url, token) {
+            const m = load();
+            if (m[url]) return m[url];
+            const s = await read(url, token);
+            if (s) { m[url] = s; save(); }   // (one that couldn't be read: asked again next time)
+            return s;
+        }
+        // Match what can be matched now: each pet and color with unnamed styles and named tokens DTI doesn't have, a group's pictures
+        // at a time → true when something new was matched (dti_tok_phnames saved)
+        function run(cat, named) {
+            if (running) return running;
+            running = (async () => {
+                if (!cat || !named?.size) return false;
+                const prev = tokPhNames() || { m: {} }, groups = new Map();
+                const add = (sp, co, side, v) => {
+                    const k = `${sp}|${co}`.toLowerCase();
+                    if (!groups.has(k)) groups.set(k, { toks: [], styles: [] });
+                    groups.get(k)[side].push(v);
+                };
+                cat.byKey.forEach(t => { if (t.ph && t.art && t.species && t.color) t.sids.forEach(sid => { if (!prev.m[sid]) add(t.species, t.color, 'styles', [sid, t.art]); }); });
+                named.forEach((r, k) => { if (r[1] && r[4] && r[5] && !cat.byKey.has(k)) add(r[4], r[5], 'toks', [k, tokImg(r[1] + '.gif'), r]); });
+                const m = { ...prev.m };
+                let found = 0;
+                for (const { toks, styles } of groups.values()) {
+                    if (!toks.length || !styles.length) continue;
+                    const [ts, ss] = await Promise.all([
+                        Promise.all(toks.map(async ([k, url, r]) => [k, await sigOf(url, true), r])),
+                        Promise.all(styles.map(async ([sid, url]) => [sid, await sigOf(url, false)])),
+                    ]);
+                    const ok = ts.filter(x => x[1]);
+                    tokMatchGroup(ok, ss.filter(x => x[1])).forEach((sid, k) => { m[sid] = ok.find(x => x[0] === k)[2]; found++; });
+                }
+                if (found) GM_setValue('dti_tok_phnames', { at: Date.now(), m });
+                return found > 0;
+            })().finally(() => { running = null; });
+            return running;
+        }
+        return { run };
+    })();
     // A style worn on a pet, made small for a tile: its big picture cropped to the pet and drawn at the tile's exact size
     // (px = screen pixels) with the canvas's best smoothing — a browser shrinking a 600px picture by itself leaves jagged
     // outlines. Each one is drawn once and kept in IndexedDB (DTICache 'tthumb:<picture>:<px>', ~10KB), so a style seen
     // before shows at once. Making one = one download (through Tampermonkey, like TokCrop; the crop is measured from it
     // when it isn't known yet) — itemdb doesn't cache these, about half a second each — twelve at a time; `urgent` ones
-    // (on screen) go before the rest. One itemdb has no picture of is remembered too ('none'). → Promise<object URL | ''>
+    // (on screen) go before the rest. One itemdb has no picture of is remembered too, for a day ('none:<when>'). → Promise<object URL | ''>
     const TokThumb = (() => {
         const made = new Map(), hot = [], cold = [];
         let active = 0;
@@ -430,13 +544,14 @@
                 made.set(k, e);
                 e.p.then(u => { if (!u) made.delete(k); });   // (couldn't: asked again another time)
                 DTICache.get(keyOf(big, px)).then(kept => {
-                    if (kept === 'none') return resolve('');   // (itemdb has no picture of it: the token)
+                    // (itemdb has no picture of it: the token — for a day: itemdb makes a new token's picture a while after it's out)
+                    if (/^none:\d+$/.test(kept || '') && Date.now() - kept.slice(5) < 864e5) return resolve('');
                     if (kept instanceof Blob && kept.size) return resolve(URL.createObjectURL(kept));
                     const job = { k, run: () => new Promise(fin => GM_xmlhttpRequest({
                         method: 'GET', url: big, responseType: 'blob', timeout: 20000, anonymous: true,
                         onload: async r => {
                             let url = '';
-                            if (r.status === 404) DTICache.set(keyOf(big, px), 'none');
+                            if (r.status === 404) DTICache.set(keyOf(big, px), 'none:' + Date.now());
                             try {
                                 if (r.status === 200 && r.response) {
                                     const bmp = await createImageBitmap(r.response);
@@ -466,18 +581,27 @@
     const tokTradeItem = t => ({ id: TOK_TRADE_ID + t.key, name: t.name, img: tokImg(/^mall_bg_circle/i.test(t.img || '') && t.art ? t.art : t.img) });
     // The catalog's tokens with every word typed at the start of a word of their name: the full name first, then the ones
     // starting with what's typed, then the rest — shortest first. → [{ t, rank }]
+    // (… and the ones the Studio's lists named that DTI doesn't have yet — by their Neopets names and pictures)
     function tokSearch(cat, q, limit = 6) {
         const s = tokNorm(q), words = s.split(/[\s:]+/).filter(Boolean);
         if (!cat || !words.length) return [];
-        const out = [];
-        for (const t of cat.byKey.values()) {
+        const out = [], named = tokKnownKeys();
+        const look = t => {
             const ws = t.key.split(/[\s:]+/);
             if (words.every(w => ws.some(x => x.startsWith(w)))) out.push({ t, rank: t.key === s ? 0 : t.key.startsWith(s) ? 1 : 2 });
-        }
+        };
+        for (const t of cat.byKey.values()) look(t);
+        named?.forEach((r, key) => { if (!cat.byKey.has(key)) look(tokNamedT(key, r)); });
         return out.sort((a, b) => a.rank - b.rank || a.t.key.length - b.t.key.length || a.t.key.localeCompare(b.t.key)).slice(0, limit);
     }
+    const tokNamedT = (key, r) => ({ key, name: r[0], img: r[1] ? r[1] + '.gif' : '' });   // (a Studio-list row as a catalog token, for the trade entry)
     // A gift's item that's a token (its name, else its picture) → its trade entry; null if it isn't one
-    const tokTradeFor = (it, cat) => { const t = cat && (cat.byKey.get(tokNorm(it.name)) || cat.byImg.get(tokBase(it.img))); return t ? { ...tokTradeItem(t), qty: 1 } : null; };
+    const tokTradeFor = (it, cat) => {
+        const t = cat && (cat.byKey.get(tokNorm(it.name)) || cat.byImg.get(tokBase(it.img)));
+        if (t) return { ...tokTradeItem(t), qty: 1 };
+        const r = tokKnownKeys()?.get(tokNorm(it.name));   // (not on DTI yet, but the Studio's lists know it)
+        return r ? { ...tokTradeItem(tokNamedT(tokNorm(it.name), r)), qty: 1 } : null;
+    };
     const TOK_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="6.1"/><path d="M8 4.6l1 2.05 2.25.33-1.63 1.58.39 2.24L8 9.74l-2.01 1.06.39-2.24L4.75 6.98 7 6.65z" fill="currentColor" stroke="none"/></svg>';
     const TOK_SORT_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v10M2.5 10.5 5 13l2.5-2.5M11 13V3M8.5 5.5 11 3l2.5 2.5"/></svg>';
     const TOK_SOURCES = [   // (icons: the same Neopets ones as the import panel / the DTI button's Pages)
@@ -657,34 +781,67 @@
     function npStorageTidy() { try { ['dti_lebron_cache', 'dti_tok_catalog_v3', 'dti_nb_closets2', 'dti_nb_closets', 'dti_np_mall'].forEach(k => localStorage.removeItem(k)); } catch (_) {} }
 
     // ── The catalog: DTI's NC Styles list (every style is one token — essences and Treasured too, each for one species).
-    // 2.8 MB and ~10 s from DTI, so a slim copy is kept in this site's storage (fetched again after a day).
+    // 2.8 MB and ~10 s from DTI, so a slim copy is kept in this site's storage: read again after a day (a week on Neopets) — and
+    // sooner when tokens come out: DTI's NC Styles page (the styles it added or changed last, first; one small page) is looked at
+    // every 20 minutes (an hour on Neopets), and a style on it the copy doesn't have, or has under another name (DTI named one of
+    // its "<New?>" styles), and the whole list is read again. onFetch(why): that's starting — 'new' (the page showed something) or 'old'.
     let _tokCatP = null;
-    function loadTokenCatalog(force) {
+    function loadTokenCatalog(force, onFetch) {
         if (_tokCatP && !force) return _tokCatP;
         _tokCatP = (async () => {
             const LS = 'dti_tok_catalog_v3';
             const away = !/(^|\.)openneo\.net$/.test(location.hostname);   // (the DTI panel on Neopets: kept in our own store there)
+            const keep = s => {
+                if (away) npStoreSet('tokcat', s);
+                else try { localStorage.removeItem('dti_tok_catalog_v1'); localStorage.removeItem('dti_tok_catalog_v2'); localStorage.setItem(LS, JSON.stringify(s)); } catch (_) {}
+            };
             let slim = null;
             if (!force) { if (away) slim = (await npStoreGet('tokcat')) || null; else try { slim = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (_) {} }
-            if (!slim || !Array.isArray(slim.styles) || Date.now() - slim.at > (away ? 7 : 1) * 864e5) {
-                const [styles, home] = await Promise.all([
-                    away ? dtiGetText('/rainbow-pool/styles.json').then(t => JSON.parse(t))
-                        : fetch('/rainbow-pool/styles.json', { credentials: 'include' }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
-                    away ? dtiGetText('/').catch(() => '') : fetch('/', { credentials: 'include' }).then(r => r.text()).catch(() => ''),
-                ]);
-                const species = {}, colors = {}, hd = new DOMParser().parseFromString(home, 'text/html');
-                hd.querySelectorAll('select[name="species"] option').forEach(o => { if (/^\d+$/.test(o.value)) species[o.value] = o.textContent.trim(); });
-                hd.querySelectorAll('select[name="color"] option').forEach(o => { if (/^\d+$/.test(o.value)) colors[o.value] = o.textContent.trim(); });
-                // (a style with DTI's placeholder picture: its own picture of the style worn, so the tile shows what it is)
-                const art = s => /mall_bg_circle/.test(s.thumbnail_url || '') ? String((s.swf_assets || []).find(a => a?.urls?.png)?.urls.png || '').split('?')[0] : '';
-                slim = { at: Date.now(), species, colors, styles: styles.map(s => [s.id, s.species_id, tokBase(s.thumbnail_url), s.series_main_name || '', s.adjective_name || '', s.color_id || 0, art(s)]) };
-                if (away) npStoreSet('tokcat', slim);
-                else try { localStorage.removeItem('dti_tok_catalog_v1'); localStorage.removeItem('dti_tok_catalog_v2'); localStorage.setItem(LS, JSON.stringify(slim)); } catch (_) {}
+            if (slim && !Array.isArray(slim.styles)) slim = null;
+            let why = !slim || Date.now() - slim.at > (away ? 7 : 1) * 864e5 ? 'old' : '';
+            if (!why && Date.now() - (slim.checked || slim.at) > (away ? 60 : 20) * 60e3) {
+                const page = await (away ? dtiGetText('/rainbow-pool/styles', 20000) : fetch('/rainbow-pool/styles', { credentials: 'include' }).then(r => r.ok ? r.text() : '')).catch(() => '');
+                if (page) {
+                    const doc = new DOMParser().parseFromString(page, 'text/html');
+                    if (!away) tokHarvestDates(doc);   // (its dates, while it's here)
+                    if (tokCatBehind(slim, tokStylesOnPage(doc))) why = 'new';
+                    else { slim.checked = Date.now(); keep(slim); }
+                }
+            }
+            if (why) {
+                onFetch?.(why);
+                try {
+                    const [styles, home] = await Promise.all([
+                        away ? dtiGetText('/rainbow-pool/styles.json').then(t => JSON.parse(t))
+                            : fetch('/rainbow-pool/styles.json', { credentials: 'include' }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+                        away ? dtiGetText('/').catch(() => '') : fetch('/', { credentials: 'include' }).then(r => r.text()).catch(() => ''),
+                    ]);
+                    const species = {}, colors = {}, hd = new DOMParser().parseFromString(home, 'text/html');
+                    hd.querySelectorAll('select[name="species"] option').forEach(o => { if (/^\d+$/.test(o.value)) species[o.value] = o.textContent.trim(); });
+                    hd.querySelectorAll('select[name="color"] option').forEach(o => { if (/^\d+$/.test(o.value)) colors[o.value] = o.textContent.trim(); });
+                    // (a style with DTI's placeholder picture: its own picture of the style worn, so the tile shows what it is)
+                    const art = s => /mall_bg_circle/.test(s.thumbnail_url || '') ? String((s.swf_assets || []).find(a => a?.urls?.png)?.urls.png || '').split('?')[0] : '';
+                    slim = { at: Date.now(), species, colors, styles: styles.map(s => [s.id, s.species_id, tokBase(s.thumbnail_url), s.series_main_name || '', s.adjective_name || '', s.color_id || 0, art(s)]) };
+                    keep(slim);
+                } catch (e) {
+                    if (!slim) throw e;   // (DTI didn't answer: the copy there is, till next time)
+                }
             }
             return buildTokenCatalog(slim);
         })();
         _tokCatP.catch(() => { _tokCatP = null; });
         return _tokCatP;
+    }
+    // DTI's NC Styles page: [style id, its name there] for each style on it
+    function tokStylesOnPage(doc) {
+        return [...doc.querySelectorAll('.rainbow-pool-list > li')]
+            .map(li => [Number(li.querySelector('a')?.getAttribute('href')?.match(/[?&]style=(\d+)/)?.[1] || 0), li.querySelector('.name')?.textContent || ''])
+            .filter(r => r[0]);
+    }
+    // Is the kept copy behind those — a style it doesn't have, or one whose name there doesn't start with the copy's (renamed)?
+    function tokCatBehind(slim, onPage) {
+        const by = new Map(slim.styles.map(r => [r[0], r]));
+        return onPage.some(([id, name]) => { const r = by.get(id); return !r || !tokNorm(name).startsWith(tokNorm(r[4])); });
     }
     // Cached copy only (no network) — for painting tiles right away
     // A DTI page's text from anywhere (on Neopets: through Tampermonkey, with your DTI login) — rejects unless it's a 200
@@ -703,13 +860,16 @@
         try { const slim = JSON.parse(localStorage.getItem('dti_tok_catalog_v3') || 'null'); return slim?.styles ? buildTokenCatalog(slim) : null; } catch (_) { return null; }
     }
     let _tokCatBuilt = null;
-    function buildTokenCatalog(slim) {
-        if (_tokCatBuilt?.at === slim.at) return _tokCatBuilt;
+    // pn: DTI's unnamed styles matched to their tokens (TokMatch) — built again when those change
+    function buildTokenCatalog(slim, pn = tokPhNames()) {
+        if (_tokCatBuilt?.at === slim.at && _tokCatBuilt.pnAt === (pn?.at || 0)) return _tokCatBuilt;
         const FALLBACK = 'Acara Aisha Blumaroo Bori Bruce Buzz Chia Chomby Cybunny Draik Elephante Eyrie Flotsam Gelert Gnorbu Grarrl Grundo Hissi Ixi Jetsam Jubjub Kacheek Kau Kiko Koi Korbat Kougra Krawk Kyrii Lenny Lupe Lutari Meerca Moehog Mynci Nimmo Ogrin Peophin Poogle Pteri Quiggle Ruki Scorchio Shoyru Skeith Techo Tonu Tuskaninny Uni Usul Wocky Xweetok Yurble Zafara Vandagyre Varwolf'.split(' ');
         const sp = id => slim.species?.[id] || FALLBACK[id - 1] || '';
         const imgNames = new Map();
         const styleOf = new Map();   // style id → [species id, color id]
-        const extraSids = new Map();   // (TOK_EXTRA color → its unnamed styles, one per pet DTI has seen it on)
+        const extraSids = new Map();   // (TOK_EXTRA name → its unnamed styles DTI has)
+        const dtiNames = new Set(slim.styles.map(r => tokNorm(r[4])));   // (an essence DTI has named: its styles are its own)
+        const extraOf = new Map(TOK_EXTRA.filter(e => !dtiNames.has(tokNorm(e[0]))).flatMap(e => e[2].map(id => [id, e[0]])));
         // The series there are (one Habbo Hotel, typo and all; "Bouncing" is Bouncing Baby) — for reading names
         const famOf = x => { x = String(x).replace(/^<new\??>\s*/i, '').trim(); return /^hab+o+ hotel\b/i.test(x) ? 'Habbo Hotel' : /^bouncing$/i.test(x) ? 'Bouncing Baby' : x; };
         const fams = [...new Set(slim.styles.map(r => famOf(r[3])))].filter(f => f && !/^(essence of|treasured)$/i.test(f));
@@ -717,9 +877,18 @@
         const rows = slim.styles.map(([id, spId, img, ser, adj, colorId, art]) => {
             styleOf.set(id, [spId, colorId || 0]);
             const isNew = /^<new\??>/i.test(adj) || /^<new\??>/i.test(ser);
-            if (isNew && id >= TOK_EXTRA_FROM && /^mall_bg_circle\./.test(img) && TOK_EXTRA.some(e => e[2] === colorId)) {
-                extraSids.set(colorId, [...(extraSids.get(colorId) || []), id]);
+            if (isNew && extraOf.has(id)) {
+                extraSids.set(extraOf.get(id), [...(extraSids.get(extraOf.get(id)) || []), id]);
                 return null;
+            }
+            const nm = isNew && /^mall_bg_circle\./i.test(img) && pn?.m?.[id];
+            if (nm) {   // (an unnamed one matched to its token: under the token's Neopets name and picture — DTI's picture of the style kept as its big one)
+                const c = tokClassify(`${nm[6] ? `Prismatic ${nm[6]}: ` : ''}${nm[3]} ${nm[5]}`, fams.includes(nm[3]) ? fams : [...fams, nm[3]], slim.colors?.[colorId] || nm[5], colorNames);
+                const pic = tokBase(nm[1] + '.gif');
+                if (!imgNames.has(pic)) imgNames.set(pic, new Set());
+                imgNames.get(pic).add(nm[0]);
+                return { id, img: pic, art: art || '', name: nm[0], essence: false, isNew: true, species: sp(spId), color: c.color, colors: c.colors, type: c.series ? c.type : '',
+                    series: c.series || 'New', spId, colorId, ph: false, rel: nm[2] || '' };
             }
             const adjClean = adj.replace(/^<new\??>\s*/i, '').trim();
             // (DTI files a few under a series only once it's named them: the name says it too)
@@ -734,9 +903,12 @@
         }).filter(Boolean);
         // DTI's unnamed styles (its placeholder picture, a color for a name — "25th Anniversary Grundo"): named after the
         // style they most likely are, so they sort with it — the one style of that color the pet doesn't have yet, else the
-        // color's only style (an unnamed version of it) — with "(unnamed)" after; when that can't be told, after the color
-        const named = new Map(), petHas = new Set();   // color → its styles (not Prismatic versions); "pet|style" pairs DTI has
+        // color's only style (an unnamed version of it) — with "(unnamed)" after; when that can't be told, after the color.
+        // (Only when the pet has just the one unnamed style of that color: several are a release's style and its Prismatic
+        // versions — Oct 2026's Ghost ones were four Prismatic Eerie Ghosts each, not four of the Nostalgic Ghost a pet lacked.)
+        const named = new Map(), petHas = new Set(), phCount = new Map();   // color → its styles (not Prismatic versions); "pet|style" pairs DTI has
         rows.forEach(r => {
+            if (r.ph) phCount.set(r.spId + '|' + r.colorId, (phCount.get(r.spId + '|' + r.colorId) || 0) + 1);
             if (r.ph || r.essence || !r.type || /^prismatic /i.test(r.type)) return;
             named.set(r.colorId, (named.get(r.colorId) || new Set()).add(r.type));
             petHas.add(r.spId + '|' + r.type);
@@ -745,7 +917,7 @@
         rows.forEach(r => {
             if (!r.ph) return;
             const styles = [...(named.get(r.colorId) || [])], missing = styles.filter(b => !petHas.has(r.spId + '|' + b));
-            const guess = missing.length === 1 ? missing[0] : styles.length === 1 ? styles[0] : '';
+            const guess = phCount.get(r.spId + '|' + r.colorId) > 1 ? '' : missing.length === 1 ? missing[0] : styles.length === 1 ? styles[0] : '';
             const c = guess ? tokClassify(guess, fams, r.color, colorNames) : null;
             const base = `${guess || r.color || 'New'} ${r.species}`.replace(/\s+/g, ' '), n = (phNames.get(base) || 0) + 1;
             phNames.set(base, n);
@@ -757,16 +929,16 @@
         rows.forEach(r => {
             const key = tokNorm(r.name);
             let t = byKey.get(key);
-            if (!t) { t = { key, name: r.name, img: r.img, art: r.art, species: r.species, color: r.color, colors: r.colors, type: r.type, series: r.series, essence: r.essence, isNew: r.isNew, sid: r.id, sids: [] }; byKey.set(key, t); }
+            if (!t) { t = { key, name: r.name, img: r.img, art: r.art, species: r.species, color: r.color, colors: r.colors, type: r.type, series: r.series, essence: r.essence, isNew: r.isNew, ph: r.ph, rel: r.rel, sid: r.id, sids: [] }; byKey.set(key, t); }
             if (r.id > t.sid) t.sid = r.id;   // newest style id — for "Newest first"
             bySid.set(r.id, t);
             t.sids.push(r.id);   // (one style per pet it's for — essences and Treasured are each for one species)
             if (imgNames.get(r.img).size === 1) byImg.set(r.img, t);   // pictures shared by different styles are placeholders
         });
-        TOK_EXTRA.forEach(([name, img, colorId]) => {   // (not named on DTI yet: listed as New, for any pet, with DTI's unnamed styles of it)
+        TOK_EXTRA.forEach(([name, img]) => {   // (not named on DTI yet: listed as New, for any pet, with DTI's unnamed styles of it)
             const key = tokNorm(name);
             if (byKey.has(key)) return;
-            const sids = extraSids.get(colorId) || [];
+            const sids = extraSids.get(name) || [];
             const t = { key, name, img, species: '', anyPet: true, series: TOK_ESSENCE_RE.test(name) ? (/^treasured/i.test(name) ? 'Treasured' : /^all-star/i.test(name) ? 'All-Star Essence' : 'Essence') : 'New',
                 essence: TOK_ESSENCE_RE.test(name), isNew: true, sid: sids.length ? Math.max(...sids) : 1e9, sids };
             byKey.set(key, t);
@@ -778,7 +950,7 @@
         // A name that reads like a style token: [Prismatic …: ]<series> … <species>
         const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const looks = new RegExp(`^(?:prismatic [^:]+: )?(?:${series.map(s => esc(s.toLowerCase())).join('|')})(?: .+)? (?:${speciesNames.map(s => esc(s.toLowerCase())).join('|')})$`);
-        return _tokCatBuilt = { at: slim.at, byKey, byImg, bySid, series, speciesNames, looks, styleOf, spName: sp, colorName: id => slim.colors?.[id] || '', colorNames };
+        return _tokCatBuilt = { at: slim.at, pnAt: pn?.at || 0, slim, byKey, byImg, bySid, series, speciesNames, looks, styleOf, spName: sp, colorName: id => slim.colors?.[id] || '', colorNames };
     }
     // The token a captured item is, in the catalog's words when the catalog knows it (by name, else by picture)
     function tokKeyFor(item, cat) {
@@ -789,7 +961,7 @@
     // Inventory and Styling Chamber imports are tokens already; a gallery holds anything, so only what reads as one
     function tokIsToken(item, cat) {
         const k = tokNorm(item.name);
-        if (TOK_ESSENCE_RE.test(k)) return true;
+        if (TOK_ESSENCE_RE.test(k) || tokKnownKeys()?.has(k)) return true;   // (… or one the Studio's lists named, that DTI may not have yet)
         if (!cat) return false;
         return cat.byKey.has(k) || cat.byImg.has(tokBase(item.img)) || cat.looks.test(k);
     }
@@ -896,19 +1068,47 @@
         const prismatic = m ? m[1].trim() : '';
         return { series, color, colors, base, prismatic, type: prismatic ? `Prismatic ${prismatic}: ${base}` : base };
     }
-    // ── The Styling Studio's rotation: the style tokens Neopets has in its Studio right now. Read from itemdb's Pet Styles
-    // list (?available=1, 12 a page — asked the way the page asks for its next page, half the page's size; the plain page if
-    // that ever stops working) only for someone who uses "Available now", then kept 12 hours: GM `dti_tok_studio`
-    // { at, total, t: [[name, imageId]] }. An empty or unreadable answer is never kept. ──
-    const TOK_STUDIO_URL = 'https://itemdb.com.br/rainbow-pool/pet-styles?available=1';
-    const TOK_STUDIO_AGE = 12 * 3600e3;
+    // ── The Styling Studio's rotation: the style tokens Neopets has in its Studio right now, their Prismatic versions too. Read from
+    // itemdb's Pet Styles list (?prismatic=1&available=1, 12 a page — asked the way the page asks for its next page, half the page's
+    // size; the plain page if that ever stops working) once My Tokens is opened (or Available now on the Mini): all of it every 12
+    // hours, and its first page every half hour — the newest are first, so a release (or a different total: the rotation changed)
+    // shows there, and all of it is read again. GM `dti_tok_studio` { at, chk: its first page last looked at, total,
+    // t: [[name, imageId, released (YYYY-MM-DD), series, species, color, Prismatic version]], k: the same, from earlier rotations
+    // (four months) } — the Neopets names of tokens DTI may not have named yet: Browse all lists them. An empty or unreadable
+    // answer is never kept. (Lists read before 3.5 have [name, imageId] only.) ──
+    const TOK_STUDIO_URL = 'https://itemdb.com.br/rainbow-pool/pet-styles?prismatic=1&available=1';
+    const TOK_STUDIO_AGE = 12 * 3600e3, TOK_STUDIO_CHECK = 30 * 60e3;
     const tokStudio = () => GM_getValue('dti_tok_studio', null);
-    let _tokStudioKeys = null;
-    function tokStudioKeys() {   // token key (its name, lower-case) → [name, imageId]; null = not read yet
+    let _tokStudioKeys = null, _tokKnownKeys = null;
+    function tokStudioKeys() {   // token key (its name, lower-case) → its row; null = not read yet
         const d = tokStudio();
         if (!d?.t?.length) return null;
-        if (_tokStudioKeys?.at !== d.at) _tokStudioKeys = { at: d.at, map: new Map(d.t.map(r => [String(r[0]).toLowerCase(), r])) };
+        if (_tokStudioKeys?.at !== d.at) _tokStudioKeys = { at: d.at, map: new Map(d.t.map(r => [tokNorm(r[0]), r])) };
         return _tokStudioKeys.map;
+    }
+    // Every token the Studio's lists have named: this rotation's and earlier ones' (key → row) — null when never read
+    function tokKnownKeys() {
+        const d = tokStudio();
+        if (!d?.t?.length) return null;
+        if (_tokKnownKeys?.at !== d.at) _tokKnownKeys = { at: d.at, map: new Map([...(d.k || []), ...d.t].map(r => [tokNorm(r[0]), r])) };
+        return _tokKnownKeys.map;
+    }
+    // DTI's unnamed styles the Studio's lists have names for: a pet's unnamed styles of a color, when there are at least as many
+    // named tokens of that pet and color that DTI doesn't have (a release: each token and its Prismatic versions). Browse all shows
+    // the names in their place — which name is which style can't be told (DTI's picture of each is all it has of them).
+    function tokCoveredPh(cat, named) {
+        const out = new Set();
+        if (!cat || !named?.size) return out;
+        const g = (sp, co) => `${sp}|${co}`.toLowerCase(), n = new Map(), ph = new Map();
+        named.forEach((r, k) => { if (r[4] && r[5] && !cat.byKey.has(k)) n.set(g(r[4], r[5]), (n.get(g(r[4], r[5])) || 0) + 1); });
+        cat.byKey.forEach((t, k) => {
+            if (!t.ph || !t.species || !t.color) return;
+            const x = g(t.species, t.color);
+            if (!ph.has(x)) ph.set(x, []);
+            ph.get(x).push(k);
+        });
+        ph.forEach((keys, x) => { if ((n.get(x) || 0) >= keys.length) keys.forEach(k => out.add(k)); });
+        return out;
     }
     function tokStudioGet(url, rsc) {
         return new Promise((res, rej) => GM_xmlhttpRequest({
@@ -926,18 +1126,21 @@
                 if (str) { if (bs) bs = false; else if (c === '\\') bs = true; else if (c === '"') str = false; continue; }
                 if (c === '"') str = true; else if (c === '[' || c === '{') depth++; else if ((c === ']' || c === '}') && --depth === 0) break;
             }
-            try { return JSON.parse(text.slice(i + 9, j + 1)).filter(x => x?.name).map(x => [String(x.name), String(x.imageId || '')]); } catch (_) {}
+            try {
+                return JSON.parse(text.slice(i + 9, j + 1)).filter(x => x?.name).map(x => [String(x.name), String(x.imageId || '').replace(/[^\w-]/g, ''), String(x.releasedAt || '').slice(0, 10),
+                    String(x.series || ''), String(x.speciesName || ''), String(x.colorName || ''), x.isPrismatic ? String(x.prismaticVariant || '') : '']);
+            } catch (_) {}
         }
         const cards = [...new DOMParser().parseFromString(text, 'text/html').querySelectorAll('a[href^="/rainbow-pool/pet-styles/"] img[alt]')];
         return cards.length ? cards.map(im => [im.alt, (im.getAttribute('src') || '').match(/preview\/([a-z0-9]+)\.png/i)?.[1] || '']) : null;
     }
-    let _tokStudioRun = null;
+    let _tokStudioRun = null, _tokStudioChk = null;
     function tokStudioRefresh(onStep) {
         if (_tokStudioRun) return _tokStudioRun;
         _tokStudioRun = (async () => {
             const all = new Map();
             let total = 0;
-            for (let pg = 1; pg <= 40; pg++) {
+            for (let pg = 1; pg <= 60; pg++) {
                 const url = `${TOK_STUDIO_URL}&page=${pg}`;
                 let text = await tokStudioGet(url, true), rows = tokStudioParse(text);
                 if (!rows) { text = await tokStudioGet(url, false); rows = tokStudioParse(text); }
@@ -950,30 +1153,71 @@
                 await new Promise(r => setTimeout(r, 300));   // (gently: one page at a time)
             }
             if (!all.size) throw new Error('empty');
-            const d = { at: Date.now(), total: total || all.size, t: [...all.values()] };
+            const now = Date.now(), t = [...all.values()], prev = tokStudio();
+            // (the ones that left the Studio: kept a while, by name, for Browse all — DTI may not have named them yet)
+            const k = new Map([...(prev?.k || []), ...(prev?.t || [])].filter(r => r[2] && now - Date.parse(r[2]) < 120 * 864e5 && !all.has(r[0].toLowerCase())).map(r => [tokNorm(r[0]), r]));
+            const d = { at: now, chk: now, total: total || all.size, t, k: [...k.values()].slice(-1500) };
             GM_setValue('dti_tok_studio', d);
             return d;
         })().finally(() => { _tokStudioRun = null; });
         return _tokStudioRun;
     }
+    // Keep the rotation up to date once it's been read (My Tokens reads it the first time): all of it when it's 12 hours old,
+    // else its first page every half hour — anything new on it, or another total, and all of it is read again. Its promise (the list),
+    // or null when there's nothing to do now.
+    function tokStudioEnsure(onStep) {
+        const d = tokStudio();
+        if (!d) return null;
+        if (_tokStudioRun || Date.now() - d.at > TOK_STUDIO_AGE) return tokStudioRefresh(onStep);
+        if (_tokStudioChk || Date.now() - (d.chk || d.at) < TOK_STUDIO_CHECK) return _tokStudioChk;
+        _tokStudioChk = (async () => {
+            let changed = false;
+            try {
+                const text = await tokStudioGet(`${TOK_STUDIO_URL}&page=1`, true), rows = tokStudioParse(text), have = tokStudioKeys() || new Map();
+                const total = +(text.match(/\\?"total(?:Count)?\\?":(\d+)/)?.[1] || 0);
+                changed = !rows || (!!total && total !== d.total) || rows.some(r => !have.has(tokNorm(r[0])) || (r.length > 2 && have.get(tokNorm(r[0])).length < 3));
+            } catch (_) {}   // (itemdb didn't answer: asked again in half an hour)
+            if (changed) return tokStudioRefresh(onStep);
+            const cur = tokStudio();
+            if (cur) GM_setValue('dti_tok_studio', { ...cur, chk: Date.now() });
+            return cur;
+        })().finally(() => { _tokStudioChk = null; });
+        return _tokStudioChk;
+    }
     function tokInfo(key, cat, mine, imported) {
         const t = cat?.byKey.get(key), m = mine[key], im = imported.get(key);
-        const name = t?.name || im?.name || m?.name || key;
+        const kr = t ? null : tokKnownKeys()?.get(key);   // (not on DTI, but the Studio's lists know it: its Neopets name, picture and facts)
+        const name = t?.name || im?.name || m?.name || kr?.[0] || key;
         const essence = t ? t.essence : TOK_ESSENCE_RE.test(name);
-        let species = t?.species || '';
-        if (!t && !essence) species = (cat?.speciesNames || []).find(s => name.toLowerCase().endsWith(' ' + s.toLowerCase())) || '';
+        const spOf = s => (cat?.speciesNames || []).find(x => x.toLowerCase() === s.toLowerCase()) || s;   // (in DTI's spelling: JubJub → Jubjub)
+        let species = t?.species || (kr?.[4] ? spOf(kr[4]) : '');
+        if (!t && !essence && !species) species = (cat?.speciesNames || []).find(s => name.toLowerCase().endsWith(' ' + s.toLowerCase())) || '';
         const impAll = im ? TOK_SOURCES.reduce((n, s) => n + (im[s.key] || 0), 0) : 0;   // (every place imported)
         const gone = m?.gone && (m.goneAt || 0) >= (im?.at || 0) ? Math.min(m.gone, impAll) : 0;   // (imported ones you took away — till it's imported again)
         const imp = impAll - gone;
-        const c = !t && !essence && species ? tokClassify(name.slice(0, -(species.length + 1)), cat?.series || [], '', cat?.colorNames || []) : null;
+        // (what it is: from the Studio's list when it says — its series may be one DTI doesn't have yet — else read from its name)
+        const fams = kr?.[3] && cat?.series && !cat.series.includes(kr[3]) ? [...cat.series, kr[3]] : cat?.series || (kr?.[3] ? [kr[3]] : []);
+        const c = t || essence ? null : kr?.[3] && kr[5] ? tokClassify(`${kr[6] ? `Prismatic ${kr[6]}: ` : ''}${kr[3]} ${kr[5]}`, fams, kr[5], cat?.colorNames || [])
+            : species ? tokClassify(name.slice(0, -(species.length + 1)), cat?.series || [], '', cat?.colorNames || []) : null;
         const cls = t || (c?.series ? c : null), [base, prismatic] = cls?.type ? tokTypeSplit(cls.type) : ['', ''];
+        // (its release, when the Studio's lists say — not on DTI yet, or matched to one of its unnamed styles: the newest first in
+        // "Newest", with the rest of that release)
+        const relDay = t?.rel || kr?.[2] || '', rel = relDay && Date.parse(relDay);
         return {
             key, name, essence, species, anyPet: !!t?.anyPet, known: !!t, isNew: !!t?.isNew, color: cls?.color || '', colors: cls?.colors || [], type: cls?.type || '', base, prismatic,
-            series: t?.series || (essence ? (/^treasured/i.test(name) ? 'Treasured' : /^all-star/i.test(name) ? 'All-Star Essence' : 'Essence') : c?.series || ''), sid: t?.sid || 0, date: t ? tokDateOf(t) : '',
-            img: t?.art || tokImg(t?.img || im?.img || tokBase(m?.img)),
+            series: t?.series || (essence ? (/^treasured/i.test(name) ? 'Treasured' : /^all-star/i.test(name) ? 'All-Star Essence' : 'Essence') : c?.series || ''),
+            sid: rel ? 1e9 + Math.floor(rel / 864e5) : t?.sid || 0, date: (rel ? relDay : '') || (t && tokDateOf(t)) || '', rel: rel ? relDay : '',   // (Neopets' release over DTI's first sight)
+            img: (/^mall_bg_circle\./i.test(t?.img || '') && t.art) || tokImg(t?.img || im?.img || tokBase(m?.img) || (kr?.[1] ? kr[1] + '.gif' : '')),
+            art: t?.art || '',   // (DTI's own big picture of the style — when itemdb has none)
             hand: m?.own || 0, imp, gone, own: (m?.own || 0) + imp, want: m?.want || 0, from: im || null,
             uft: (m?.own || 0) + imp > 0 && m?.uft ? 1 : 0,   // (up for trade — only while you have one)
         };
+    }
+    // Tokens as new as each other (a release DTI hasn't named yet: one day for all of it): by style, then pet — each token, then its
+    // Prismatic versions — not by name, which put every "Prismatic …" after all the rest
+    function tokSameRelease(a, b) {
+        return (a.base || a.name).localeCompare(b.base || b.name) || (a.species || '').localeCompare(b.species || '')
+            || (!!a.prismatic - !!b.prismatic) || (a.prismatic || '').localeCompare(b.prismatic || '') || a.name.localeCompare(b.name);
     }
     const tokFromText = from => from ? TOK_SOURCES.filter(s => from[s.key]).map(s => `${s.label} ${from[s.key]}`).join(' · ') : '';
     function tokOwnStep(info, delta, meta, cat, scope = acctActive()) {   // (scope: the DTI panel on Neopets names the account it's on)
@@ -1006,8 +1250,11 @@
         // My Tokens' "Import from Neopets" (valid 30 min, for the place it opened) — instead of the item capture
         const tokAsk = GM_getValue('dti_tok_capture', 0);
         const tokSrc = location.pathname === '/inventory.phtml' ? 'inv' : location.pathname === '/safetydeposit.phtml' ? 'sdb' : location.pathname.startsWith('/gallery') ? 'gal' : location.pathname.startsWith('/stylingchamber') ? 'sc' : '';
+        const closetAsk = GM_getValue('dti_closet_load', null);   // (My Closet's "Load from Neopets", an hour)
         if (tokSrc && tokAsk && tokAsk.src === tokSrc && Date.now() - tokAsk.at < 30 * 60 * 1000) {
             if (document.body) runTokenCapture(tokSrc, tokAsk.at); else document.addEventListener('DOMContentLoaded', () => runTokenCapture(tokSrc, tokAsk.at), { once: true });
+        } else if (location.pathname === '/closet.phtml' && closetAsk?.at && Date.now() - closetAsk.at < 60 * 60 * 1000) {
+            if (document.body) runClosetLoad(closetAsk); else document.addEventListener('DOMContentLoaded', () => runClosetLoad(closetAsk), { once: true });
         } else if (src) {
             const fromDTI = document.referrer.includes('impress.openneo.net');
             const session = GM_getValue('dti_capture_flag', 0);
@@ -1733,6 +1980,54 @@
     // account's capture never replaces another's; `<base>` alone is one from before side accounts (Main's). Whose
     // it is gets worked out as it's read, so naming an account later sorts its earlier captures too.
     function capStoreKey(base, np) { return np ? `${base}@${np}` : base; }
+
+    // ── My Closet: your Neopets closet, loaded from neopets.com (user, 2026-10-17: "page solely for items in your closet on neopets.com
+    // (often items you aren't trading or like more than others) which can also be linked to one of your trade lists"). (Function
+    // declarations only, like the ones above: the Neopets side uses them too.)
+    //   dti_my_closet (GM)      { [account id]: { at, np, items: [{ name, qty, img, id?, nc? }], prev: { at, items: [[name, qty, img, id]] } | null } }
+    //                           — a whole closet at a time (every page of it), replacing the one before; prev: the one before (new / gone)
+    //   dti_closet_load (GM)    { at, acct } — My Closet's "Load from Neopets" (an hour): the closet page shows its loading panel
+    //   dti_closet_loading (GM) { at, np, per, of, pages: { [n]: [[name, qty, img], …] }, seen: { [n]: key } } — that load, page by page
+    //   dti_closet_link (GM)    { [account id]: { id, name } } — the DTI list kept in step with it (after a preview, by a click)
+    //   dti_closet_opts (GM)    { notrade, marks } — closet items left out of what you have to trade (on); marked across DTI (on)
+    // Paint brush clothes are left out, as with every import (user rule); what your pets are wearing isn't on the closet page.
+    function closetAll() { return GM_getValue('dti_my_closet', {}) || {}; }
+    function closetOpts() { return { notrade: true, marks: true, ...(GM_getValue('dti_closet_opts', {}) || {}) }; }
+    // DTI item id → how many of it your closet holds: the account picked in the nav (All accounts: every one's) — kept till the closet changes
+    function closetIdx(scope) {
+        const f = closetIdx;
+        if (scope === undefined) scope = acctActive();
+        if (!f.watch && typeof GM_addValueChangeListener === 'function') { f.watch = true; GM_addValueChangeListener('dti_my_closet', () => { f.cache = null; }); }
+        if (f.cache?.scope === scope) return f.cache.map;
+        const m = new Map();
+        Object.entries(closetAll()).forEach(([a, c]) => {
+            if (scope === 'all' || a === scope) (c?.items || []).forEach(it => { if (it.id) m.set(+it.id, (m.get(+it.id) || 0) + (it.qty || 1)); });
+        });
+        f.cache = { scope, map: m };
+        return m;
+    }
+    function closetQtyOf(id) { return closetIdx().get(+id) || 0; }
+    function closetNameQty(name) {   // (by name — all a Neopets page has of an item): copies in your closet, the account picked
+        const f = closetNameQty, scope = acctActive();
+        if (!f.watch && typeof GM_addValueChangeListener === 'function') { f.watch = true; GM_addValueChangeListener('dti_my_closet', () => { f.cache = null; }); }
+        if (f.cache?.scope !== scope) {
+            const m = new Map();
+            Object.entries(closetAll()).forEach(([a, c]) => { if (scope === 'all' || a === scope) (c?.items || []).forEach(it => { const k = String(it.name).toLowerCase(); m.set(k, (m.get(k) || 0) + (it.qty || 1)); }); });
+            f.cache = { scope, map: m };
+        }
+        return f.cache.map.get(String(name || '').trim().toLowerCase()) || 0;
+    }
+    function closetLinkedTo(listId) { return !!listId && Object.values(GM_getValue('dti_closet_link', {}) || {}).some(L => String(L?.id) === String(listId)); }
+    // How many of an item are yours to trade: what your DTI lists hold, less your closet's copies — "Leave my closet out" (on unless
+    // turned off). (The closet's copies are in your lists when they're in one: the linked list, or an import of the closet.)
+    // (and lists you keep — marked Not for trade on My Items: closetTradeable.keep, item id → copies in them, set as your lists are read)
+    function closetTradeable(id, own) {
+        const kept = Math.max(closetOpts().notrade ? closetQtyOf(id) : 0, closetTradeable.keep?.get(+id) || 0);
+        return Math.max(0, (own || 0) - kept);
+    }
+    // List priorities (user asked: mark lists high / medium / low priority — and owned ones you keep, as your closet is — so a trader's
+    // match can say "2 high priority"): GM dti_list_prio { [list id]: 'high' | 'med' | 'low' (a wishlist) | 'keep' (an owned list: Not for trade) }
+    function listPrio() { return GM_getValue('dti_list_prio', {}) || {}; }
     function capStoresFor(base, scope) {   // → [{ key, np, acct, data }] for 'all' or one account
         const keys = (typeof GM_listValues === 'function' ? GM_listValues() : [base]).filter(k => k === base || k.startsWith(base + '@'));
         return keys.map(k => {
@@ -2939,6 +3234,16 @@
         if (document.body) say(); else document.addEventListener('DOMContentLoaded', say, { once: true });
     }
     GM_addStyle(`a.dti-pool-tile:hover { border-color: var(--accent) !important; box-shadow: 0 0 0 1px var(--accent) !important; }
+        /* (the capsule page's items: their numbers — cap value, offering and seeking with the ratio — on the theme's own surface) */
+        a.dti-pool-tile .dti-ip-pool-stats { display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 100%; margin-top: auto; }
+        a.dti-pool-tile .dti-ip-pool-stats .cap { align-self: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 8px; border-radius: 99px;
+            background: var(--accent-glow); color: var(--accent-text, var(--accent)); font-size: 10px; font-weight: 800; line-height: 1.45; }
+        a.dti-pool-tile .dti-ip-pool-stats .tr { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; column-gap: 2px; font-size: 10px; line-height: 1.3; color: var(--text-muted); }
+        a.dti-pool-tile .dti-ip-pool-stats .tr b { font-weight: 800; color: var(--text); }
+        a.dti-pool-tile .dti-ip-pool-stats .tr em { font-style: normal; margin-right: 4px; }
+        a.dti-pool-tile .dti-ip-pool-stats .tr small { flex-basis: 100%; text-align: center; font-size: 9.5px; font-weight: 800; color: var(--text); }
+        a.dti-pool-tile .dti-ip-pool-stats .tr .bar { flex-basis: 100%; height: 4px; margin-bottom: 2px; border-radius: 99px; background: linear-gradient(90deg, var(--accent) var(--o), color-mix(in srgb, var(--accent) 22%, var(--border)) var(--o)); }
+        a.dti-pool-tile .dti-ip-pool-stats .tr.none { font-style: italic; }
         a.dti-idb-full { opacity: .8; } a.dti-idb-full:hover { opacity: 1; }
         a.dti-hover-acc:hover { border-color: var(--accent) !important; }`);
     function dtiSafe(where, fn) { try { return fn(); } catch (e) { dtiReportError(where, e); } }
@@ -2962,6 +3267,79 @@
             else if (img.dataset.pfb && img.src !== img.dataset.pfb) img.src = img.dataset.pfb;
             else img.src = POOL_PIC_NONE;
         }, true);
+    }
+    // DTI's own item of exactly that name → its id ('' when DTI has none). A capsule's items come from itemdb by name; when DTI has
+    // one, its own item page is the one to show (user: "it needs to display the same on the item page as the real one"). Kept in
+    // localStorage `dti_name_ids_v1` { [name, lower case]: { id, at } } — found for good, not found for a day (DTI adds new items).
+    const DTI_NAME_IDS = 'dti_name_ids_v1';
+    function dtiNameMap() {   // (read once a page — a closet asks about hundreds — and saved a moment after it changes)
+        const f = dtiNameMap;
+        if (!f.m) { try { f.m = JSON.parse(localStorage.getItem(DTI_NAME_IDS) || '{}') || {}; } catch (_) { f.m = {}; } }
+        return f.m;
+    }
+    function dtiNameSave() {
+        clearTimeout(dtiNameSave.t);
+        dtiNameSave.t = setTimeout(() => { try { localStorage.setItem(DTI_NAME_IDS, JSON.stringify(dtiNameMap())); } catch (_) {} }, 400);
+    }
+    function dtiNameInfo(name) { return dtiNameMap()[String(name || '').trim().toLowerCase()] || null; }   // ({ id, nc, at } — id '' = not on DTI; null = never asked)
+    function dtiIdCached(name) { return dtiNameInfo(name)?.id || ''; }
+    const _dtiIdAsk = new Map();
+    function dtiItemIdByName(name) {
+        const k = String(name || '').trim().toLowerCase();
+        if (!k) return Promise.resolve('');
+        const m = dtiNameMap();
+        if (m[k] && (m[k].id || Date.now() - m[k].at < 864e5)) return Promise.resolve(m[k].id || '');
+        if (_dtiIdAsk.has(k)) return _dtiIdAsk.get(k);
+        const p = fetch('/items.json?per_page=10&q=' + encodeURIComponent('"' + String(name).trim().replace(/"/g, '') + '"'), { credentials: 'same-origin' })
+            .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+            .then(d => {
+                const it = (d?.items || []).find(x => String(x.name).trim().toLowerCase() === k), id = String(it?.id || '');
+                dtiNameMap()[k] = { id, at: Date.now(), ...(it ? { nc: it['nc?'] ? 1 : 0 } : {}) };
+                dtiNameSave();
+                return id;
+            }, () => '')   // (DTI didn't answer: not kept — asked again next time)
+            .finally(() => _dtiIdAsk.delete(k));
+        _dtiIdAsk.set(k, p);
+        return p;
+    }
+    // A capsule item's link: DTI's own page when DTI has it (known already), else the page made for it (/items/0#pool-<itemdb id>)
+    const poolHref = x => { const id = dtiIdCached(x.name); return id ? `/items/${id}` : `/items/0#pool-${String(x.iid || '').replace(/[^\w.-]/g, '')}`; };
+    // A capsule's items with their numbers (the popup's "Inside this capsule ›" view, and the capsule's own page — user asked for
+    // both): each item's cap value (Lebron, then Valisar) and how many people offer and seek it on DTI — with the ratio — read once,
+    // four items at a time. Finding an item on DTI also points its tile at DTI's own page.
+    const _poolTradeN = new Map();   // DTI id → { o, s, at }
+    function poolStatsFill(popup, sel = '.dti-ip-pool-item[data-pin]') {
+        if (popup.dataset.dtiPoolStats) return;
+        popup.dataset.dtiPoolStats = '1';
+        const tiles = [...popup.querySelectorAll(sel)];
+        tiles.forEach(a => { if (!a.querySelector('.dti-ip-pool-stats')) a.insertAdjacentHTML('beforeend', '<span class="dti-ip-pool-stats"><span class="cap">…</span><span class="tr"></span></span>'); });
+        const paintTrades = (a, t) => {
+            const el = a.querySelector('.dti-ip-pool-stats .tr');
+            if (!el) return;
+            if (!t) { el.textContent = 'not on DTI'; el.className = 'tr none'; return; }
+            const sum = t.o + t.s, pct = sum ? Math.round(t.o / sum * 100) : 50;
+            const ratio = !t.o && !t.s ? '' : !t.s ? `${t.o}:0` : !t.o ? `0:${t.s}` : t.o >= t.s ? `${+(t.o / t.s).toFixed(1)}:1` : `1:${+(t.s / t.o).toFixed(1)}`;
+            el.className = 'tr';
+            el.title = `${t.o} offering · ${t.s} seeking on DTI${ratio ? ` (${ratio})` : ''}`;
+            el.innerHTML = `<i class="bar" style="--o:${pct}%"></i><b>${t.o}</b><em>offer</em><b>${t.s}</b><em>seek</em>${ratio ? `<small>${ratio}</small>` : ''}`;
+        };
+        const one = async a => {
+            const name = a.dataset.pin || '';
+            lookupNcValue(name, val => { const el = a.querySelector('.dti-ip-pool-stats .cap'); if (el) el.textContent = capsLabel(val) || '? caps'; });
+            const id = await dtiItemIdByName(name);
+            if (!id) return paintTrades(a, null);
+            a.setAttribute('href', `/items/${id}`);   // (DTI has it: its own page)
+            let t = _poolTradeN.get(id);
+            if (!t || Date.now() - t.at > 10 * 60e3) {
+                const d = await fetch(`/items/${id}.json`, { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null);
+                t = d ? { o: d.num_trades_offering || 0, s: d.num_trades_seeking || 0, at: Date.now() } : null;
+                if (t) _poolTradeN.set(id, t);
+            }
+            paintTrades(a, t);
+        };
+        const queue = tiles.slice();
+        const worker = async () => { while (queue.length && popup.isConnected) await one(queue.shift()).catch(() => {}); };
+        for (let i = 0; i < 4; i++) worker();
     }
     const POOL_PIC_NONE = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 80 80%22%3E%3Crect x=%225%22 y=%2228%22 width=%2270%22 height=%2245%22 rx=%224%22 fill=%22%2330363d%22/%3E%3Crect x=%222%22 y=%2222%22 width=%2276%22 height=%2214%22 rx=%223%22 fill=%22%2321262d%22/%3E%3Cline x1=%2240%22 y1=%2222%22 x2=%2240%22 y2=%2273%22 stroke=%22%237c3aed%22 stroke-width=%223%22/%3E%3Cpath d=%22M40 22 C40 22 30 14 22 18 C14 22 20 30 40 22Z%22 fill=%22%237c3aed%22/%3E%3Cpath d=%22M40 22 C40 22 50 14 58 18 C66 22 60 30 40 22Z%22 fill=%22%237c3aed%22/%3E%3C/svg%3E';
 
@@ -3045,6 +3423,11 @@
     // Who's offering / seeking an item: one popup with an Offering | Seeking switch. Both lists load
     // up front so the switch can show how long each one is. Opened from the item info popup and from
     // the Offering / Seeking links on item pages.
+    // Each trader's match (user asked: the comparison here — only the ones on screen, more as you scroll; wider, a column on the
+    // right; "2 high priority", "4 items on their WL", suggestions): their Items page read once their row is in sight, two at a time
+    // (kept 12 hours; their Neomail name comes from the same page), set against your lists — what they have that you want (your
+    // lists' priorities and Seeking's tiers first), and what they want that you have to give (your closet and lists you keep left
+    // out). A click on it: the items, a trade suggested by cap values, and a trade report started from it.
     function _openTradesModal(itemId, itemName, type, itemImg, itemCapval) {
         _injectPageModalCSS();
         document.getElementById('dti-trades-modal')?.remove();
@@ -3065,13 +3448,18 @@
                     <a class="dti-pm-ext dti-tm-ext" target="_blank" rel="noopener" title="Open this list as a page">${POP_ICO.ext}</a>
                     <button class="dti-pm-close" type="button" title="Close (Esc)">${POP_ICO.close}</button>
                 </div>
+                <div class="dti-tm-bar" hidden>
+                    <span class="dti-tm-sum"></span>
+                    <button type="button" class="dti-tm-all" hidden></button>
+                    <label class="dti-tm-sortl">Sort <select class="dti-tm-sort"><option value="">Last active</option><option value="best">Best match</option></select></label>
+                </div>
                 <div class="dti-tm-body"><div class="dti-pm-loading">Loading…</div></div>
             </div>`;
         modal.querySelector('.dti-tm-title').textContent = itemName || 'Trades';
         document.body.appendChild(modal);
         _wirePopupClose(modal, modal.querySelector('.dti-pm-close'));
 
-        const seg = modal.querySelector('.dti-tm-switch'), body = modal.querySelector('.dti-tm-body');
+        const seg = modal.querySelector('.dti-tm-switch'), body = modal.querySelector('.dti-tm-body'), bar = modal.querySelector('.dti-tm-bar');
         const listUrl = t => `/items/${itemId}/trades/${t}`;
         const lists = {};
         const fetchList = t => lists[t] || (lists[t] = fetch(listUrl(t), { credentials: 'same-origin' })
@@ -3079,11 +3467,139 @@
             .then(html => [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('table tbody tr')]
                 .filter(row => row.querySelectorAll('td').length >= 3)));
 
+        // ── the match: your lists (read once), their Items page (as their row comes into sight) ──
+        let me = null, seekTier = new Map();
+        const mineP = Promise.all([mineLoad(), nfMine()]).then(([, m]) => {
+            me = m;
+            if (seekOn()) DTISeek.list('all').forEach(e => seekTier.set(+e.id, DTISeek.tierOf(e)));
+        });
+        const prioOf = id => { const a = mineOf(id)?.prio, b = seekTier.get(+id); const v = Math.min(a ?? 9, b ?? 9); return v > 2 ? null : v; };
+        const iWant = id => (mineOf(id)?.want || 0) > 0 || seekTier.has(+id);
+        const iGive = id => closetTradeable(id, mineOf(id)?.own || 0) > 0;
+        const PRIO_W = ['high', 'medium', 'low'];
+        const capsP = x => new Promise(r => tradeItemCaps(x, r));
+        const itemCapsP = parseCaps(itemCapval) ? Promise.resolve(parseCaps(itemCapval)) : capsP({ id: String(itemId), name: itemName || '' });
+        const rowsNow = [];   // ({ tr, closet, uid, owner, state: '' | 'wait' | 'busy' | 'done' | 'err', m })
+        const queue = [];
+        let busy = 0, rowObs = null;
+        const pump = () => {
+            while (busy < 2 && queue.length) {
+                const r = queue.shift();
+                if (r.state !== 'wait') continue;
+                r.state = 'busy'; busy++;
+                paintMatch(r);
+                mineP.then(() => tfTheirWants(r.closet)).then(w => { r.w = w; r.m = matchOf(w); r.state = 'done'; })
+                    .catch(() => { r.state = 'err'; })
+                    .finally(() => { busy--; if (modal.isConnected) { paintMatch(r); paintBar(); pump(); } });
+            }
+        };
+        const want = r => { if (r.closet && !r.state) { r.state = 'wait'; queue.push(r); pump(); } };
+        // (what you'd trade with them: items besides this one — theirs you want, high priority first; yours they want)
+        function matchOf(w) {
+            const has = [...w.own.keys()].filter(id => id !== +itemId && iWant(id)).sort((a, b) => (prioOf(a) ?? 3) - (prioOf(b) ?? 3));
+            const wants = [...w.want.keys()].filter(id => id !== +itemId && iGive(id));
+            const kept = [...w.want.keys()].filter(id => id !== +itemId && (mineOf(id)?.own || 0) > 0 && !iGive(id)).length;
+            const pr = [0, 0, 0];
+            has.forEach(id => { const p = prioOf(id); if (p != null) pr[p]++; });
+            return { has, wants, kept, pr, score: has.reduce((t, id) => t + ([4, 3, 2][prioOf(id)] ?? 1), 0) + wants.length, wl: w.want.size };
+        }
+        const itemOf = (w, id) => {
+            const a = w.items[id] || me?.items?.[id] || [];
+            return { id: String(id), name: a[0] || `Item ${id}`, img: tokImg(a[1] || ''), nc: !!a[2] };
+        };
+        function paintMatch(r) {
+            const td = r.tr.querySelector('.dti-tm-match');
+            if (!td) return;
+            if (r.state === 'err') { td.innerHTML = '<span class="dti-tm-mmsg">Couldn’t read their items <button type="button" class="dti-tm-retry">Try again</button></span>'; return; }
+            if (r.state !== 'done') { td.innerHTML = '<span class="dti-tm-mmsg loading">Comparing…</span>'; return; }
+            const { has, wants, pr, wl } = r.m, offer = cur === 'offering';
+            const sl = r.tr.querySelector('.dti-nm-slot:not([data-done])');   // (their Neomail name: read with their page — else asked)
+            if (sl) { if (r.w.np != null) nmPaint(sl, r.w.np); else { sl.classList.add('loading'); neomailOf(r.closet).then(np => nmPaint(sl, np)); } }
+            const hasChip = has.length ? `<span class="dti-tm-chip has" title="Items on your wishlists (and Seeking) that they have">Has <b>${has.length}</b> ${offer ? 'more ' : ''}you want</span>` : '';
+            const prChip = pr.map((n, i) => n ? `<span class="dti-tm-chip p${i}" title="On your ${PRIO_W[i]} priority wishlists (or Seeking)">${n} ${PRIO_W[i]}</span>` : '').join('');
+            const wantChip = wants.length ? `<span class="dti-tm-chip wants" title="Items of yours (to trade) on their wishlist">${wants.length} on their wishlist</span>`
+                : wl ? '' : '<span class="dti-tm-chip none" title="Their wishlist is empty or private">No wishlist</span>';
+            const chips = offer ? wantChip + hasChip + prChip : hasChip + prChip + wantChip;
+            const thumbs = (offer ? [...wants.slice(0, 3), ...has.slice(0, 2)] : [...has.slice(0, 3), ...wants.slice(0, 2)]).slice(0, 5).map(id => {
+                const it = itemOf(r.w, id), p = has.includes(id) ? prioOf(id) : null;
+                return it.img ? `<img src="${noteEsc(it.img)}" alt="" loading="lazy" title="${noteEsc(it.name)}${has.includes(id) ? ' — they have it' : ' — they want it'}"${p != null ? ` class="p${p}"` : ''}>` : '';
+            }).join('');
+            td.innerHTML = has.length || wants.length
+                ? `<button type="button" class="dti-tm-mbtn" aria-expanded="${!!r.open}" title="The items and a suggested trade"><span class="dti-tm-chips">${chips}</span>${thumbs ? `<span class="dti-tm-thumbs">${thumbs}</span>` : ''}</button>`
+                : `<span class="dti-tm-mmsg">Nothing else in common${wantChip ? ' ' + wantChip : ''}</span>`;
+            if (r.open) paintDetail(r);
+        }
+        // (the detail: both sides, each item's caps — and a suggestion that weighs about what this item does)
+        async function paintDetail(r) {
+            let row = r.tr.nextElementSibling?.classList.contains('dti-tm-detail') ? r.tr.nextElementSibling : null;
+            if (!r.open) { row?.remove(); return; }
+            if (!row) { row = document.createElement('tr'); row.className = 'dti-tm-detail'; row.innerHTML = '<td colspan="4"></td>'; r.tr.after(row); }
+            const td = row.firstElementChild, offer = cur === 'offering', { has, wants, kept } = r.m;
+            const lblOf = id => { const q = r.w.qty?.get(+id) || 0; return q >= 20 ? q : 0; };   // (×999, ×99: a label of theirs, not a count)
+            const tile = (id, side) => {
+                const it = itemOf(r.w, id), p = side === 'has' ? prioOf(id) : null, lb = side === 'has' ? lblOf(id) : 0;
+                return `<a class="dti-tm-it" href="/items/${it.id}" target="_blank" rel="noopener" data-id="${it.id}" title="${noteEsc(it.name)}${lb ? ` \u2014 they marked it \u00d7${lb}: often \u201ckeeping\u201d or \u201cask\u201d (see their list)` : ''}">${it.img ? `<img src="${noteEsc(it.img)}" alt="" loading="lazy">` : ''}<span>${noteEsc(it.name)}</span>${p != null ? `<i class="p${p}">${PRIO_W[p]}</i>` : ''}${lb ? `<b class="dti-tm-lbl">\u00d7${lb}</b>` : ''}<em class="dti-tm-cap"></em></a>`;
+            };
+            const col = (ids, side, head, empty) => `<div class="dti-tm-dcol"><div class="dti-tm-dh">${head} <b>${ids.length}</b></div>${ids.length ? `<div class="dti-tm-its">${ids.map(id => tile(id, side)).join('')}</div>` : `<div class="dti-tm-mmsg">${empty}</div>`}</div>`;
+            const hasCol = col(has, 'has', offer ? 'They also have — you want' : 'They have — you want', 'Nothing else on your wishlists');
+            const wantCol = col(wants, 'wants', offer ? 'They want — you have' : 'They also want — you have', kept ? `Only ones you keep (${kept} — your closet / lists not for trade)` : 'Nothing of yours on their wishlist');
+            td.innerHTML = `<div class="dti-tm-dwrap"><div class="dti-tm-dcols">${offer ? wantCol + hasCol : hasCol + wantCol}</div><div class="dti-tm-sugg"><span class="dti-tm-mmsg loading">Working out a suggestion…</span></div></div>`;
+            // each item's cap value, as it's known
+            const capOf = new Map();
+            await Promise.all([...has, ...wants].map(async id => {
+                const it = itemOf(r.w, id), c = await capsP(it);
+                capOf.set(id, c);
+                const el = td.querySelector(`.dti-tm-it[data-id="${id}"] .dti-tm-cap`);
+                if (el && c) el.textContent = fmtCaps(c[0], c[1]);
+            }));
+            const target = await itemCapsP;
+            if (!td.isConnected) return;
+            // offering: what to offer them for it (yours on their wishlist); seeking: what to ask for (theirs you want, high first)
+            const pool = (offer ? wants : has).map(id => ({ id, c: capOf.get(id), p: offer ? null : prioOf(id), lb: offer ? 0 : lblOf(id) }))
+                .sort((a, b) => !!a.lb - !!b.lb);   // (what they marked ×999 or the like: last)
+            let pick = [];
+            if (target && pool.some(x => x.c)) {
+                const [lo, hi] = target, mid = c => (c[0] + c[1]) / 2;
+                const order = pool.filter(x => x.c).sort((a, b) => !!a.lb - !!b.lb || (a.p ?? 3) - (b.p ?? 3) || mid(b.c) - mid(a.c));
+                let sum = 0;
+                for (const x of order) { if (sum >= lo) break; if (sum + mid(x.c) <= hi + .5) { pick.push(x); sum += mid(x.c); } }
+            }
+            if (!pick.length) pick = pool.slice(0, 2);
+            const sugg = td.querySelector('.dti-tm-sugg');
+            if (!pick.length) { sugg.innerHTML = `<span class="dti-tm-mmsg">${offer ? 'Nothing of yours on their wishlist to offer — ask what they’d take' : 'Nothing of theirs on your wishlists to ask for'}</span>${r.closet ? tradeBtns(r, []) : ''}`; return; }
+            const lo = pick.reduce((t, x) => t + (x.c?.[0] || 0), 0), hi = pick.reduce((t, x) => t + (x.c?.[1] || 0), 0), valued = pick.every(x => x.c);
+            const names = pick.map(x => `<b>${noteEsc(itemOf(r.w, x.id).name)}</b>`).join(' + ');
+            sugg.innerHTML = `<span class="dti-tm-sl">${offer ? 'Suggested offer' : 'Suggested ask'}</span><span class="dti-tm-st">${offer ? 'Offer' : 'Ask for'} ${names}${valued && lo ? ` — about ${fmtCaps(lo, hi)}` : ''}${target ? `, for this item’s ${fmtCaps(target[0], target[1])}` : ''}${!valued ? ' (not all have cap values)' : ''}</span>${tradeBtns(r, pick.map(x => x.id))}`;
+        }
+        const tradeBtns = (r, ids) => `<span class="dti-tm-sacts"><button type="button" class="dti-tm-report" data-ids="${ids.join(',')}">Start a trade report</button></span>`;
+
+        function paintBar() {
+            const all = rowsNow.filter(r => r.closet), done = all.filter(r => r.state === 'done' || r.state === 'err').length;
+            bar.hidden = !all.length;
+            if (!all.length) return;
+            const best = all.filter(r => r.state === 'done' && (r.m.has.length || r.m.wants.length)).sort((a, b) => b.m.score - a.m.score)[0];
+            const noPrio = !Object.values(listPrio()).some(p => p !== 'keep') && !seekTier.size;
+            bar.querySelector('.dti-tm-sum').innerHTML = `${done < all.length ? `Compared <b>${done}</b> of ${all.length} — the rest as you scroll` : `Compared all ${all.length}`}`
+                + (best ? ` · best so far: <b>${noteEsc(best.owner)}</b>` : '')
+                + (noPrio ? ' · <span class="dti-tm-tip" title="On My Items: a wishlist’s ⚑ button marks it High, Medium or Low">Mark your wishlists High / Medium / Low on My Items to see priorities</span>' : '');
+            const ab = bar.querySelector('.dti-tm-all');
+            ab.hidden = done >= all.length;
+            ab.textContent = `Compare all ${all.length}`;
+            ab.disabled = all.every(r => r.state);
+        }
+        function sortRows() {
+            const tb = body.querySelector('tbody');
+            if (!tb) return;
+            const best = bar.querySelector('.dti-tm-sort').value === 'best';
+            const order = [...rowsNow].sort((a, b) => best ? (b.state === 'done' ? b.m.score : -1) - (a.state === 'done' ? a.m.score : -1) || a.i - b.i : a.i - b.i);
+            order.forEach(r => { const d = r.tr.nextElementSibling?.classList.contains('dti-tm-detail') ? r.tr.nextElementSibling : null; tb.appendChild(r.tr); if (d) tb.appendChild(d); });
+        }
+
         function buildTable(rows) {
             const tbl = document.createElement('table');
-            tbl.innerHTML = '<thead><tr><th>Last active</th><th>Owner</th><th>Lists</th></tr></thead><tbody></tbody>';
+            tbl.innerHTML = '<thead><tr><th>Last active</th><th>Owner</th><th>Lists</th><th class="dti-tm-mh" title="Set against your lists — as each row comes into sight">Match</th></tr></thead><tbody></tbody>';
             const tbody = tbl.querySelector('tbody');
-            rows.forEach(row => {
+            rows.forEach((row, i) => {
                 const cells = row.querySelectorAll('td');
                 const tr = document.createElement('tr');
                 const tdTime = document.createElement('td');
@@ -3100,7 +3616,13 @@
                 addTraderNote(tdOwner, row);
                 const nfb = closet && nfFollowBtn(closet, owner.textContent);
                 if (nfb) tdOwner.appendChild(nfb);
-                if (closet) tdOwner.appendChild(neomailSlot(closet));
+                if (closet) {   // (their Neomail name: from their Items page as their match is read — a friend's, at once)
+                    const sl = document.createElement('span');
+                    sl.className = 'dti-nm-slot'; sl.dataset.closet = closet;
+                    tdOwner.appendChild(sl);
+                    const known = nmKnown(closet);
+                    if (known != null) nmPaint(sl, known);
+                }
                 if (closet && dtiAvoid.has(userIdOf(closet))) {   // (someone you marked to avoid)
                     tr.classList.add('dti-avoid');
                     owner.insertAdjacentHTML('afterend', '<em class="dti-avoid-tag" title="You marked this person to avoid">Avoid</em>');
@@ -3120,11 +3642,36 @@
                     ul.appendChild(li);
                 }
                 tdLists.appendChild(ul);
-                tr.append(tdTime, tdOwner, tdLists);
+                const tdMatch = document.createElement('td');
+                tdMatch.className = 'dti-tm-match';
+                if (!closet) tdMatch.innerHTML = '<span class="dti-tm-mmsg">—</span>';
+                tr.append(tdTime, tdOwner, tdLists, tdMatch);
                 tbody.appendChild(tr);
+                const r = { tr, closet, uid: userIdOf(closet), owner: owner.textContent, state: '', i };
+                rowsNow.push(r);
+                tr._dtiRow = r;
+                if (closet) rowObs.observe(tr);
             });
             return tbl;
         }
+        body.addEventListener('click', e => {
+            const tr = e.target.closest('tr'), r = tr?._dtiRow || tr?.previousElementSibling?._dtiRow;
+            if (!r) return;
+            if (e.target.closest('.dti-tm-retry')) { r.state = ''; want(r); return; }
+            if (e.target.closest('.dti-tm-mbtn')) { r.open = !r.open; paintMatch(r); if (!r.open) paintDetail(r); return; }
+            const rep = e.target.closest('.dti-tm-report');
+            if (rep) {   // (a trade report with them: this item, and the suggestion — to change as you go)
+                const ids = rep.dataset.ids ? rep.dataset.ids.split(',') : [], m = r.closet.match(/\/user\/((\d+)(?:-([^/?#]*))?)/), key = newNoteKey('trade');
+                const one = id => { const it = itemOf(r.w, id); return { id: it.id, name: it.name, img: it.img, qty: 1 }; };
+                const self = { id: String(itemId), name: itemName || '', img: itemImg || '', qty: 1 }, picked = ids.map(one);
+                DTINotes.save(key, { trade: { partner: { name: r.owner, id: m?.[2] || '', slug: m?.[1] || '' }, give: cur === 'offering' ? picked : [self],
+                    get: cur === 'offering' ? [self] : picked, status: 'planned', date: noteToday() } });
+                modal.remove();
+                _openNotesModal(key, { stack: !!document.getElementById('dti-page-modal') });
+            }
+        });
+        bar.querySelector('.dti-tm-all').addEventListener('click', () => { rowsNow.forEach(want); paintBar(); });
+        bar.querySelector('.dti-tm-sort').addEventListener('change', sortRows);
 
         let cur = '';
         function show(t) {
@@ -3132,6 +3679,10 @@
             seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.t === t));
             modal.querySelector('.dti-tm-ext').href = listUrl(t);
             body.innerHTML = '<div class="dti-pm-loading">Loading…</div>';
+            rowObs?.disconnect();
+            rowsNow.length = 0; queue.length = 0; bar.hidden = true;
+            // (only the rows in sight — the popup's own scroll — and a little past it)
+            rowObs = new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting) { rowObs.unobserve(en.target); want(en.target._dtiRow); } }), { root: body, rootMargin: '120px 0px' });
             fetchList(t).then(rows => {
                 if (cur !== t || !modal.isConnected) return;
                 if (!rows.length) {
@@ -3141,6 +3692,10 @@
                 body.innerHTML = '';
                 body.appendChild(buildTable(rows));
                 body.scrollTop = 0;
+                // (someone compared on the other tab: theirs at once)
+                rowsNow.forEach(r => { const w = r.uid && tfWantsKept(r.uid); if (w) mineP.then(() => { if (r.state) return; r.w = w; r.m = matchOf(w); r.state = 'done'; paintMatch(r); paintBar(); }); });
+                if (bar.querySelector('.dti-tm-sort').value) sortRows();
+                paintBar();
             }).catch(() => {
                 if (cur === t && modal.isConnected) body.innerHTML = `<div class="dti-pm-empty">Couldn’t load the list.<a href="${listUrl(t)}" target="_blank" rel="noopener">Open it in a new tab ↗</a></div>`;
             });
@@ -3294,7 +3849,7 @@
     // (a paperclip — two overlapping squares already means "open in a popup" here)
     const COPY_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
     const COPIED_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5"/></svg>';
-    const COPY_NAME_SEL = 'body.items-show h2.item-name, .dti-ip-name, #dti-tokens-app:not(.selecting) .dti-tk-name, .dti-tkv-name, .dti-tkp .dti-lp-title b';   // (and token names)
+    const COPY_NAME_SEL = 'body.items-show h2.item-name, .dti-ip-name, #dti-tokens-app:not(.selecting) .dti-tk-name, .dti-tkv-name, .dti-tkp .dti-lp-title b, body.items-sources td.name-cell a.item-name';   // (and token names, and the shopping list's items)
     function copyBtnHtml(name) {
         return name ? `<button type="button" class="dti-copy-btn" title="Copy the name" aria-label="Copy the name" data-copy="${noteEsc(name)}">${COPY_ICO}</button>` : '';
     }
@@ -3345,7 +3900,7 @@
             if (!t || (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ')) return;
             e.preventDefault();
             const p = t.closest('#dti-item-info-popup');
-            p.classList.toggle('dti-ip-poolfocus');
+            if (p.classList.toggle('dti-ip-poolfocus') && !t.classList.contains('dti-stk-title')) poolStatsFill(p);   // (each item's caps and trades)
             p.scrollTop = 0;
             const r = p.getBoundingClientRect();
             if (r.bottom > innerHeight - 8) p.style.top = Math.max(8, innerHeight - r.height - 8) + 'px';
@@ -3386,6 +3941,7 @@
             }
             const h = e.target.closest?.(COPY_NAME_SEL);
             if (!h) return;
+            if (h.closest('a')) { if (e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); }   // (a name that's a link — the shopping list's: copied, not opened; Ctrl+click still opens it)
             const t = [...h.childNodes].find(n => n.nodeType === 3 && n.textContent.trim());
             const name = (t ? t.textContent : h.textContent).trim();
             if (name) dtiCopyText(name, () => {
@@ -3393,7 +3949,7 @@
                 clearTimeout(h._dtiCopyT); h._dtiCopyT = setTimeout(() => h.classList.remove('dti-copied'), 1400);
             });
         }, true);
-        document.addEventListener('mouseover', e => { const h = e.target.closest?.(COPY_NAME_SEL); if (h && !h.title) h.title = 'Click to copy the name'; });
+        document.addEventListener('mouseover', e => { const h = e.target.closest?.(COPY_NAME_SEL); if (h && !h.title) h.title = h.closest('a') ? 'Click to copy the name · Ctrl+click opens its page' : 'Click to copy the name'; });
         document.addEventListener('click', e => {
             const b = e.target.closest?.('.dti-note-btn');
             if (!b) return;
@@ -3515,6 +4071,7 @@
                 <button type="button" class="dti-lp-x" title="Close (Esc)" aria-label="Close">${POP_ICO.close}</button>
             </div>
             ${seekBtnHtml(ref, 'dti-lp-seek').replace(/<span>(Seeking|Seek)<\/span>/, '<span><b>Seeking now</b><small>Your short list of items you want ASAP</small></span><i class="dti-lp-sw"></i>')}
+            ${closetQtyOf(id) ? `<div class="dti-lp-cl">${CLOSET_ICO}<span>In your Neopets closet${closetQtyOf(id) > 1 ? ' \u00d7' + closetQtyOf(id) : ''} \u2014 <a href="/items?q=dti-enhance#closet" target="_blank" rel="noopener">My Closet</a>${closetOpts().notrade ? ', kept out of your trades' : ''}</span></div>` : ''}
             <div class="dti-lp-body"></div>
             <div class="dti-lp-foot" hidden></div>`;
         document.body.appendChild(pop);
@@ -3663,7 +4220,11 @@
                 <button type="button" class="dti-ne-pin" title="Pin to the top of your notes">${NOTE_PIN}<span>Pin</span></button>
                 <button type="button" class="dti-ne-del" title="Delete note">${NOTE_TRASH}</button>
                 ${o.openLink === false ? '' : `<a class="dti-ne-open" href="/items?q=dti-enhance#notes/${noteEsc(key)}" title="Open in Notes">All notes ↗</a>`}
-            </div>`;
+            </div>
+            ${o.neomail ? `<div class="dti-ne-mailrow">
+                <button type="button" class="dti-ne-copy" title="Copy the note">${COPY_ICO}<span>Copy</span></button>
+                <button type="button" class="dti-ne-send" title="Copy the note, delete it (Undo for a few seconds) and open a Neomail to ${noteEsc(o.neomail)} — subject “NC Trade”: paste it in">${COPY_ICO}<span>Copy, delete &amp; Neomail</span></button>
+            </div>` : ''}`;
         const ta = el.querySelector('.dti-ne-text'), titleInp = el.querySelector('.dti-ne-title');
         const status = el.querySelector('.dti-ne-status'), pinBtn = el.querySelector('.dti-ne-pin'), delBtn = el.querySelector('.dti-ne-del');
         let timer = 0, dirty = false;
@@ -3718,6 +4279,28 @@
             if (gone && !noteIsBlank(gone)) noteUndoToast(gone);
             o.onRemoved?.(gone);
         });
+        // (notes on someone — user asked: "a copy button and maybe a copy, delete, open NM link button with subject filled out as 'NC
+        // Trade'": the note is the message you'll send them; the Neomail opens in a new tab, its subject filled in — paste the message in)
+        if (o.neomail) {
+            const copy = () => {
+                const t = ta.value.trim();
+                if (!t) { dtiToast('Nothing to copy yet — write your message first', { variant: 'error' }); return ''; }
+                (navigator.clipboard?.writeText(t) || Promise.reject()).catch(() => { ta.select(); document.execCommand('copy'); });
+                return t;
+            };
+            el.querySelector('.dti-ne-copy').addEventListener('click', () => { if (copy()) dtiToast('Copied'); });
+            el.querySelector('.dti-ne-send').addEventListener('click', () => {
+                save();
+                if (!copy()) return;
+                window.open(`https://www.neopets.com/neomessages.phtml?type=send&recipient=${encodeURIComponent(o.neomail)}&subject=${encodeURIComponent('NC Trade')}`, '_blank', 'noopener');
+                clearTimeout(timer); dirty = false;
+                const gone = DTINotes.remove(key);
+                fill();
+                if (gone) noteUndoToast(gone);
+                dtiToast(`Copied — paste it into your Neomail to ${o.neomail}`, { duration: 5000 });
+                o.onRemoved?.(gone);
+            });
+        }
         // Once the editor has been on the page and is gone (popover closed, Turbo navigation), let go
         let seen = false;
         const gone = () => {
@@ -3922,6 +4505,9 @@
             box.appendChild(el);
             return el;
         };
+        // (in your Neopets closet — My Closet: each account's copies)
+        const inCl = Object.entries(closetAll()).map(([a, c]) => [a, (c?.items || []).filter(i => String(i.id) === String(id)).reduce((t, i) => t + (i.qty || 1), 0)]).filter(([, q]) => q);
+        if (inCl.length) strip('dti-item-closet', CLOSET_ICO, 'My Closet', inCl.map(([a, q]) => `<a class="dti-item-chip" href="/items?q=dti-enhance#closet" title="In ${acctMany() ? noteEsc(acctName(acctGet(a))) + '\u2019s' : 'your'} Neopets closet"><b>${acctMany() ? noteEsc(acctName(acctGet(a))) : 'In your closet'}</b><i class="has">${q > 1 ? '\u00d7' + q : 'has it'}</i></a>`).join(''));
         const isNc = (header.querySelector('abbr.item-kind')?.textContent || '').includes('NC') || !!header.querySelector('.item-kind[data-type="nc"], [data-item-kind="nc"]');
         if (isNc && name) dyeLookup(name).then(e => {
             if (!e?.v?.length || !box.isConnected) return;
@@ -4421,7 +5007,7 @@
                                     : isTokTrade(x) ? `<span class="dti-tr-iname dti-tr-tok" role="button" tabindex="0" data-tok="${noteEsc(x.id.slice(TOK_TRADE_ID.length))}" title="${noteEsc(x.name)} \u2014 a style token (click to see it)">${noteEsc(x.name)}</span>`
                                     : x.id.startsWith('np-') ? `<span class="dti-tr-iname" title="${noteEsc(x.name)}">${noteEsc(x.name)}</span>`
                                     : `<a class="dti-tr-iname" href="/items/${noteEsc(x.id)}" title="${noteEsc(x.name)}">${noteEsc(x.name)}</a>`}
-                                <span class="dti-tr-isub">${g ? `<span class="dti-tr-gfull">${noteEsc(g.full)}</span>` : ''}${isTokTrade(x) ? `<span class="dti-tr-gfull dti-tr-toktag">${TOK_ICO}Token</span>` : ''}<span class="dti-tr-ival" title="Cap value each">…</span></span>
+                                <span class="dti-tr-isub">${g ? `<span class="dti-tr-gfull">${noteEsc(g.full)}</span>` : ''}${isTokTrade(x) ? `<span class="dti-tr-gfull dti-tr-toktag">${TOK_ICO}Token</span>` : ''}${box.dataset.side === 'give' && /^\d+$/.test(x.id) && closetQtyOf(x.id) ? '<span class="dti-tr-gfull dti-tr-cltag" title="It’s in your Neopets closet (My Closet) — the items you keep">In your closet</span>' : ''}<span class="dti-tr-ival" title="Cap value each">…</span></span>
                             </span>
                             <span class="dti-tr-qty"><button type="button" data-d="-1" title="Fewer"${x.qty > 1 ? '' : ' disabled'}>−</button><span>${x.qty}</span><button type="button" data-d="1" title="More">+</button></span>
                             <button type="button" class="dti-tr-irm" title="Remove">✕</button>
@@ -4931,7 +5517,7 @@
     function openTokenPreview(info) {
         injectTokensCSS();
         document.getElementById('dti-tk-preview')?.remove();
-        const big = tokBigSrc(info.img);
+        const big = info.art || tokBigSrc(info.img);   // (DTI's own picture of the style, when it has one)
         const slug = info.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
         const meta = [info.series || (info.essence ? 'Essence' : ''), info.species || (info.anyPet ? 'any pet' : '')].filter(Boolean).join(' \u00b7 ');
         const ov = document.createElement('div');
@@ -5732,7 +6318,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 sel.value = vals.includes(ui[sel.dataset.ui]) ? ui[sel.dataset.ui] : '';
             };
             opts(spSel, 'All species', cat?.speciesNames || []);
-            opts(seSel, 'All series', cat?.series || []);
+            const newSeries = [...(tokKnownKeys()?.entries() || [])].filter(([k, r]) => r[3] && !cat?.byKey.has(k)).map(([, r]) => r[3]);   // (a new one DTI hasn't named yet)
+            opts(seSel, 'All series', [...new Set([...(cat?.series || []), ...newSeries])].sort((a, b) => a.localeCompare(b)));
             fillColors();
             $('select[data-ui="sort"]').value = ui.sort;
             app.querySelectorAll('.dti-tk-sel').forEach(sel => {
@@ -6148,8 +6735,9 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         }
         $('.dti-tk-barmin').addEventListener('click', () => { ui.barMin = true; saveUi(); paintBarMin(); });
         $('.dti-tk-barpill').addEventListener('click', () => { ui.barMin = false; saveUi(); paintBarMin(); });
-        // Available now: what the Styling Studio has right now (its rotation, from itemdb) — every one of them (Browse all),
-        // or yours among them (My tokens). Read when first used, then every 12 hours; cards of those get an "Available" tag.
+        // Available now: what the Styling Studio has right now (its rotation, from itemdb — Prismatic versions too) — every one of
+        // them (Browse all), or yours among them (My tokens). Read when first used, then kept up to date (tokStudioEnsure: a look at
+        // its newest every half hour, all of it every 12 hours); cards of those get an "Available" tag.
         function paintStudio() {
             const availBtn = $('.dti-tk-availbtn'), studioBox = $('.dti-tk-studio'), d = tokStudio(), keys = tokStudioKeys();
             availBtn.classList.toggle('on', !!ui.avail);
@@ -6158,42 +6746,51 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             studioBox.hidden = !ui.avail;
             if (!ui.avail) return;
             const src = `<a href="${TOK_STUDIO_URL}" target="_blank" rel="noopener">itemdb</a>`;
-            const off = keys && cat ? [...keys.keys()].filter(k => !cat.byKey.has(k)).length : 0;
+            const off = keys && cat ? [...keys.keys()].filter(k => !cat.byKey.has(k)).length : 0, pz = keys ? [...keys.values()].filter(r => r[6]).length : 0;
             studioBox.innerHTML = studioState === 'loading'
                 ? `<span class="dti-tk-studio-spin"></span>Reading the Styling Studio\u2019s current rotation from ${src}${studioStep ? ` \u2014 ${studioStep}` : ''}\u2026`
                 : studioState === 'error' ? `Couldn\u2019t reach ${src} for the Styling Studio\u2019s rotation${d ? ` \u2014 this is what it had ${tokAgo(d.at)}` : ''}. <button type="button" class="dti-tk-studio-re">Try again</button>`
-                : keys ? `<span><b>${keys.size}</b> style tokens in the Styling Studio right now \u00b7 from ${src}, checked ${tokAgo(d.at)}${off ? ` \u00b7 ${off} not on DTI yet` : ''} \u00b7 <a href="https://www.neopets.com/mall/stylingstudio/" target="_blank" rel="noopener">Styling Studio \u2197</a></span>${share ? '' : `<button type="button" class="dti-tk-wfirst${ui.wantFirst ? ' on' : ''}" aria-pressed="${!!ui.wantFirst}" title="The ones you\u2019ve marked wanted at the top">Wanted first</button>`}<button type="button" class="dti-tk-studio-re">Check again</button>`
+                : keys ? `<span><b>${keys.size}</b> style tokens in the Styling Studio right now${pz ? ` (${pz} Prismatic)` : ''} \u00b7 from ${src}, checked ${tokAgo(Math.max(d.at, d.chk || 0))}${off ? ` \u00b7 ${off} not on DTI yet` : ''} \u00b7 <a href="https://www.neopets.com/mall/stylingstudio/" target="_blank" rel="noopener">Styling Studio \u2197</a></span>${share ? '' : `<button type="button" class="dti-tk-wfirst${ui.wantFirst ? ' on' : ''}" aria-pressed="${!!ui.wantFirst}" title="The ones you\u2019ve marked wanted at the top">Wanted first</button>`}<button type="button" class="dti-tk-studio-re">Check again</button>`
                 : '';
         }
-        function readStudio() {
-            studioState = 'loading'; studioStep = '';
-            paintStudio();
-            tokStudioRefresh((n, total) => { studioStep = total ? `${n} of ${total}` : `${n}`; if (studioState === 'loading' && app.isConnected) paintStudio(); })
-                .then(() => { studioState = ''; })
+        // all = read all of it now (first use, Check again); else only if it's due (tokStudioEnsure) — "Reading…" once it reads
+        function readStudio(all) {
+            const step = (n, total) => { studioState = 'loading'; studioStep = total ? `${n} of ${total}` : `${n}`; if (app.isConnected) paintStudio(); };
+            const p = all ? tokStudioRefresh(step) : tokStudioEnsure(step);
+            if (!p) return;
+            if (all) { studioState = 'loading'; studioStep = ''; paintStudio(); }
+            p.then(() => { studioState = ''; matchNew(); })
                 .catch(() => { studioState = 'error'; })
                 .finally(() => { if (app.isConnected) render(); });
         }
+        // New tokens DTI has under no name: matched to its unnamed styles (TokMatch) — then they're on its list under their names,
+        // with its pictures of them; another tab's matches show here too
+        function matchNew() {
+            if (share || !cat?.slim) return;
+            TokMatch.run(cat, tokKnownKeys()).then(found => { if (found && app.isConnected) { cat = buildTokenCatalog(cat.slim); fillSelects(); render(); } }, () => {});
+        }
+        gmWatch('dti_tok_phnames', app, (n, o, v, remote) => { if (remote && cat?.slim) { cat = buildTokenCatalog(cat.slim); render(); } });
         $('.dti-tk-availbtn').addEventListener('click', () => {
             ui.avail = !ui.avail;
             if (ui.avail && ui.view === 'mine' && !share) ui.view = 'all';   // (all of them — "My tokens" then shows yours among them)
             saveUi(); render();
-            const d = tokStudio();
-            if (ui.avail && (!d || Date.now() - d.at > TOK_STUDIO_AGE)) readStudio();
+            if (ui.avail) readStudio(!tokStudio());
         });
         $('.dti-tk-studio').addEventListener('click', e => {
             if (e.target.closest('.dti-tk-wfirst')) { ui.wantFirst = !ui.wantFirst; saveUi(); render(); return; }
-            if (e.target.closest('.dti-tk-studio-re') && studioState !== 'loading') readStudio();
+            if (e.target.closest('.dti-tk-studio-re') && studioState !== 'loading') readStudio(true);
         });
-        if (!share && tokStudio() && Date.now() - tokStudio().at > TOK_STUDIO_AGE) readStudio();   // (you use it: kept up to date)
-        gmWatch('dti_tok_studio', app, () => { if (studioState !== 'loading') render(); });
+        if (!share) readStudio(!tokStudio());   // (read the first time, then kept up to date: it names new tokens DTI hasn't named yet)
+        gmWatch('dti_tok_studio', app, (n, o, v) => { if (studioState !== 'loading' && o?.at !== v?.at) render(); else if (ui.avail && studioState !== 'loading') paintStudio(); });
         const searchInp = $('.dti-tk-search input');
         let qT = 0;
         searchInp.addEventListener('input', () => { clearTimeout(qT); qT = setTimeout(() => { ui.q = searchInp.value.trim().toLowerCase(); render(); }, 120); });
 
         // The picture: the token's own, or (bigger tiles) the style worn on a pet — cropped to the pet once measured
         // (not at Full size, which shows the picture as it is)
+        // (DTI's own picture of the style when it has one — a new token matched to its unnamed style, too — else itemdb's)
         function bigPic(info) {
-            const big = ['big', 'three', 'two', 'full'].includes(ui.size) && tokBigSrc(info.img);
+            const big = ['big', 'three', 'two', 'full'].includes(ui.size) && (info.art || tokBigSrc(info.img));
             if (!big) return info.img ? `<img src="${noteEsc(info.img)}" alt="" loading="lazy">` : '';
             const c = ui.size !== 'full' && TokCrop.get(big);   // (not measured yet: kept hidden until it is, so it doesn't jump in size)
             return `<img src="${noteEsc(big)}" data-small="${noteEsc(info.img)}"${c ? ` class="crop" style="${tokCropCss(c)}"` : ui.size !== 'full' && c === undefined ? ' class="wait"' : ''} alt="" loading="lazy">`;
@@ -6215,7 +6812,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 <span class="dti-tk-val" hidden></span>
                 <div class="dti-tk-sub">
                     <div class="dti-tk-meta">${noteEsc(meta)}${info.known || info.essence ? '' : ' <i title="Not on DTI’s style list yet">• not on DTI</i>'}</div>
-                    <div class="dti-tk-date" title="Release date (from DTI)">${info.date ? 'Released ' + tokFmtDate(info.date) : ''}</div>
+                    <div class="dti-tk-date" title="Release date (from ${info.rel ? 'itemdb' : 'DTI'})">${info.date ? 'Released ' + tokFmtDate(info.date) : ''}</div>
                 </div>
                 ${share ? shareBits(info, wl) : `<div class="dti-tk-steps">
                     <div class="dti-tk-step${info.own ? ' on' : ''}" data-f="own"${info.own || info.gone ? ` title="${noteEsc(tokOwnTitle(info))}"` : ''}><span>Own</span><button type="button" data-d="-1" aria-label="One less"${info.own ? (!info.hand && info.imp ? ' title="One less (traded it?) \u2014 an import of that place again counts afresh"' : '') : ' disabled'}>−</button><b>${info.own}</b><button type="button" data-d="1" aria-label="One more">+</button></div>
@@ -6249,10 +6846,13 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             ui.match = ui.match === b.dataset.m ? '' : b.dataset.m;
             render();
         });
-        // (a big picture that isn't there → the token's own picture)
+        // (a big picture that isn't there — itemdb hasn't made one of a new token yet → the token's own picture, as big as the rest)
         grid.addEventListener('error', e => {
             const img = e.target;
-            if (img.tagName === 'IMG' && img.dataset.small && img.getAttribute('src') !== img.dataset.small) { img.classList.remove('crop', 'wait'); img.removeAttribute('style'); img.src = img.dataset.small; img.classList.add('small'); }
+            if (img.tagName === 'IMG' && img.dataset.small && img.getAttribute('src') !== img.dataset.small) {
+                img.classList.remove('crop', 'wait'); img.removeAttribute('style'); img.src = img.dataset.small; img.classList.add('small');
+                img.closest('.dti-tk-pic')?.setAttribute('title', 'No big picture of this one yet — neither DTI nor itemdb has one. It shows here once either does.');
+            }
         }, true);
         grid.addEventListener('click', e => {
             if (selecting) {
@@ -6308,21 +6908,23 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         }
 
         function paintDates() {
-            list.forEach(i => { const t = cat?.byKey.get(i.key); if (t) i.date = tokDateOf(t); });
+            list.forEach(i => { const t = cat?.byKey.get(i.key); if (t && !i.rel) i.date = tokDateOf(t); });
             grid.querySelectorAll('.dti-tk-card').forEach(c => {
-                const t = cat?.byKey.get(c.dataset.key), el = c.querySelector('.dti-tk-date'), d = t ? tokDateOf(t) : '';
+                const t = cat?.byKey.get(c.dataset.key), el = c.querySelector('.dti-tk-date'), d = t && !t.rel ? tokDateOf(t) : '';
                 if (el && d) el.textContent = 'Released ' + tokFmtDate(d);
             });
         }
         const NO_IMP = new Map();
         function allInfos() {
             const mine = share ? share.mine : DTITokens.read().mine;
-            let imported = share ? NO_IMP : tokImported(cat);
+            const imported = share ? NO_IMP : tokImported(cat);
             const keys = new Set([...Object.keys(mine), ...imported.keys()]);
-            if (ui.view === 'all' && cat) cat.byKey.forEach((t, k) => keys.add(k));
-            if (ui.view === 'all' && ui.avail && studioMap) {   // (in the Studio, but not on DTI's list yet: by its Neopets name and picture)
-                imported = new Map(imported);
-                studioMap.forEach((r, k) => { keys.add(k); if (!cat?.byKey.has(k) && !imported.has(k)) imported.set(k, { name: r[0], img: r[1] ? r[1] + '.gif' : '' }); });
+            if (ui.view === 'all') {
+                // every token: DTI's, and the ones the Studio's lists named that DTI doesn't have yet (by their Neopets names and
+                // pictures) — in place of DTI's unnamed styles of that pet and color, when they account for all of them
+                const named = tokKnownKeys(), hide = tokCoveredPh(cat, named);
+                if (cat) cat.byKey.forEach((t, k) => { if (!hide.has(k)) keys.add(k); });
+                if (named) named.forEach((r, k) => { if (!cat?.byKey.has(k)) keys.add(k); });
             }
             return [...keys].map(k => tokInfo(k, cat, mine, imported));
         }
@@ -6404,15 +7006,20 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 color: (a, b) => (a.color || '~').localeCompare(b.color || '~') || (a.species || '~').localeCompare(b.species || '~') || a.name.localeCompare(b.name),
                 type: (a, b) => { const x = tokTypeSplit(a.type || '~'), y = tokTypeSplit(b.type || '~');
                     return x[0].localeCompare(y[0]) || (!!x[1] - !!y[1]) || x[1].localeCompare(y[1]) || (a.species || '~').localeCompare(b.species || '~') || a.name.localeCompare(b.name); },
-                new: (a, b) => (b.sid || 0) - (a.sid || 0) || a.name.localeCompare(b.name),
+                new: (a, b) => (b.sid || 0) - (a.sid || 0) || tokSameRelease(a, b),
                 own: (a, b) => b.own - a.own || b.want - a.want || a.name.localeCompare(b.name),
                 list: (a, b) => (ui.view === 'mine' && ['own', 'uft'].includes(ui.state) ? listRank('own', a) - listRank('own', b) : tlRank(a) - tlRank(b)) || a.name.localeCompare(b.name),   // (your want lists in their order — Owned / UFT: your owned lists; no list, then not in that kind, after)
             }[ui.sort] || ((a, b) => a.name.localeCompare(b.name));
             const top = i => wantTop(i) ? 0 : 1, byTop = (a, b) => top(a) - top(b) || by(a, b);
             groups = ui.group ? buildGroups(list) : null;
+            // (Newest, grouped: the groups — and each one's styles — in the order of their newest token, essences among them)
+            const newest = groups && ui.sort === 'new' ? new Map() : null;
+            if (newest) list.forEach(i => { const g = groups.get(i.key); [g.s, g.s + '\u0001' + g.t].forEach(k => newest.set(k, Math.max(newest.get(k) || 0, i.sid || 0))); });
+            const nw = (x, y, k) => newest ? newest.get(k(y)) - newest.get(k(x)) : 0;
             list.sort(groups ? (a, b) => {   // grouped: series, then style (each style's own tokens before its Prismatic versions), then the order picked
                 const x = groups.get(a.key), y = groups.get(b.key);
-                return gRank(a) - gRank(b) || x.s.localeCompare(y.s) || (!x.t) - (!y.t) || x.t.localeCompare(y.t) || (a.base || '').localeCompare(b.base || '')
+                return (newest ? top(a) - top(b) : gRank(a) - gRank(b)) || nw(x, y, g => g.s) || x.s.localeCompare(y.s)
+                    || nw(x, y, g => g.s + '\u0001' + g.t) || (!x.t) - (!y.t) || x.t.localeCompare(y.t) || (a.base || '').localeCompare(b.base || '')
                     || (!!a.prismatic - !!b.prismatic) || by(a, b);
             } : byTop);
             // One style's tokens, all of its versions: the regular ones first, then each Prismatic version (in the chips' order)
@@ -6471,8 +7078,11 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         // A series' styles with just one token share "Other styles"; a series with one style has no style headings.
         const wantTop = i => !share && ui.avail && ui.wantFirst && !!i.want;   // (Available now: the ones you want at the top — grouped, their own group)
         const gRank = i => wantTop(i) ? -1 : i.essence ? 1 : i.series ? 0 : 2;
+        // (Newest: a release's tokens — the ones the Studio's lists date — a group of their own per series, "Eerie · Oct 16, 2026",
+        // so all of it comes first, not a big series' few new ones dragging the whole series up)
         function buildGroups(items) {
-            const sOf = i => wantTop(i) ? 'You want' : i.series || (i.essence ? 'Essence' : 'Other'), per = new Map(), g = new Map();
+            const ser = i => i.series || (i.essence ? 'Essence' : 'Other');
+            const sOf = i => wantTop(i) ? 'You want' : ui.sort === 'new' && i.rel ? `${ser(i)} · ${tokFmtDate(i.rel)}` : ser(i), per = new Map(), g = new Map();
             items.forEach(i => { if (i.base) { const k = sOf(i) + '\u0001' + i.base; per.set(k, (per.get(k) || 0) + 1); } });
             items.forEach(i => { const s = sOf(i); g.set(i.key, { s, t: i.base && per.get(s + '\u0001' + i.base) > 1 ? i.base : '' }); });
             g.count = new Map(); g.subs = new Map();
@@ -6539,6 +7149,14 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 clearTimeout(show);
                 cropObs.unobserve(e.target);
                 if (!img.isConnected) return;
+                // (itemdb didn't answer in time — a new token's big picture is made when it's first asked for: asked once more, a little
+                // later, if it's still there to be seen; till then it shows as it is)
+                if (!c && TokCrop.get(img.getAttribute('src')) === undefined && !img.dataset.retried) {
+                    img.dataset.retried = '1'; delete img.dataset.asked;
+                    img.classList.remove('wait');
+                    setTimeout(() => { if (img.isConnected) cropObs.observe(e.target); }, 5000);
+                    return;
+                }
                 if (c && !img.classList.contains('small') && ['big', 'three', 'two'].includes(ui.size)) { img.style.cssText = tokCropCss(c); img.classList.add('crop'); }
                 img.classList.remove('wait');
             });
@@ -6755,10 +7373,173 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             note.hidden = false;
             note.textContent = 'Loading DTI’s list of every token… (the first time takes a few seconds)';
         }
-        loadTokenCatalog().then(c => { cat = c; note.hidden = true; fillSelects(); render(); })
+        loadTokenCatalog(false, why => {   // (new ones on DTI: say so while its list is read again)
+            if (why !== 'new' || !cat) return;
+            note.hidden = false;
+            note.textContent = 'New tokens on DTI — reading its list again…';
+        }).then(c => { cat = c; note.hidden = true; fillSelects(); render(); matchNew(); })
             .catch(() => { note.hidden = false; note.textContent = 'Couldn’t load DTI’s token list right now — your own tokens still show. Reload to try again.'; });
     }
 
+    // ── Neopets side: My Closet's loading panel on your closet, when My Closet asked for it (dti_closet_load, an hour) ──
+    // Every page of the whole closet — no search, every category — read as you look at it: one click a page, the same as clicking Next
+    // yourself (nothing is done on Neopets by itself), 90 a page for the fewest. Once every page has been seen the closet is saved as a
+    // whole for My Closet (dti_my_closet), the one before kept to tell what's new and what's gone. (Runs before the rest of the script on
+    // Neopets pages — self-contained.)
+    function runClosetLoad(req) {
+        if (document.getElementById('dti-closet-load')) return;
+        const np = npWhoAmI(), acct = acctOfNp(np), A = acctGet(acct);
+        let st = GM_getValue('dti_closet_loading', null);
+        if (!st || st.np !== np || (st.at || 0) < (req.at || 0)) st = { at: req.at || Date.now(), np, per: '', of: 0, pages: {}, seen: {} };
+        const host = document.createElement('div');
+        host.id = 'dti-closet-load';
+        let theme = {};
+        try { theme = JSON.parse(GM_getValue('dti_theme_tokens', '') || '{}'); } catch (_) {}
+        const v = (k, fb) => theme[k] || fb;
+        const root = host.attachShadow({ mode: 'open' });
+        root.innerHTML = `
+            <style>
+                :host { all: initial; position: fixed; right: 20px; bottom: 20px; z-index: 2147483000;
+                    font: 13px/1.45 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
+                    --surface: ${v('--surface', '#fbfbff')}; --surface-2: ${v('--surface-2', '#f2f1fe')}; --border: ${v('--border', '#c9c6f6')};
+                    --text: ${v('--text', '#1a1e2a')}; --muted: ${v('--text-muted', '#6b7491')}; --accent: ${v('--accent', '#4f46e5')};
+                    --accent-fg: ${v('--accent-fg', '#ffffff')}; --glow: ${v('--accent-glow', 'rgba(79,70,229,.12)')}; --ok: ${v('--success', '#16a34a')};
+                    --warn: ${v('--nc', '#d97706')};
+                    color: var(--text); }
+                * { box-sizing: border-box; }
+                [hidden] { display: none !important; }
+                .card { width: 312px; background: var(--surface); border: 1.5px solid var(--border); border-radius: 16px; overflow: hidden;
+                    box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 4px var(--glow); animation: pop .22s ease-out; }
+                @keyframes pop { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+                .head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 10px 14px; border-bottom: 1px solid var(--border); }
+                .logo { width: 30px; height: 30px; flex-shrink: 0; border-radius: 9px; display: grid; place-items: center; background: var(--accent); color: var(--accent-fg); }
+                .logo svg { width: 16px; height: 16px; }
+                .brand { flex: 1; min-width: 0; line-height: 1.2; }
+                .brand b { display: block; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+                .brand span { font-size: 15px; font-weight: 700; }
+                .x { width: 26px; height: 26px; border: none; border-radius: 7px; background: transparent; color: var(--muted); font-size: 15px; cursor: pointer; }
+                .x:hover { background: var(--surface-2); color: var(--text); }
+                .body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+                .stat { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+                .stat b { font-size: 24px; font-weight: 800; line-height: 1; }
+                .stat span { font-size: 12px; color: var(--muted); }
+                .ok .stat b { color: var(--ok); }
+                .who { font-size: 11.5px; color: var(--muted); }
+                .warn { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; font-size: 12px;
+                    background: color-mix(in srgb, var(--warn) 14%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); }
+                .warn span { flex: 1; }
+                .warn button { flex-shrink: 0; border: none; border-radius: 7px; padding: 6px 9px; font: 700 12px/1 inherit; background: var(--warn); color: #111; cursor: pointer; }
+                .pages { display: flex; flex-direction: column; gap: 7px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); }
+                .ph { display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+                .ph b { letter-spacing: 0; text-transform: none; font-size: 12px; color: var(--text); }
+                .cells { display: flex; flex-wrap: wrap; gap: 3px; }
+                .cell { width: 13px; height: 13px; border-radius: 3px; background: var(--surface); border: 1px solid var(--border); }
+                .cell.on { background: var(--accent); border-color: var(--accent); }
+                .cell.cur { outline: 2px solid var(--accent); outline-offset: 1px; }
+                .todo { font-size: 11.5px; color: var(--muted); }
+                .ok .todo { color: var(--ok); font-weight: 700; }
+                .next { height: 38px; border-radius: 10px; font: 700 14px/1 inherit; cursor: pointer; }
+                .next { border: 1.5px solid var(--accent); background: var(--accent); color: var(--accent-fg); }
+                .next:hover { filter: brightness(1.08); }
+                .hint { font-size: 11.5px; color: var(--muted); }
+                .back { text-align: center; font-weight: 700; font-size: 13px; color: var(--accent); text-decoration: none; padding: 6px; border-radius: 9px; }
+                .back:hover { background: var(--glow); }
+            </style>
+            <div class="card">
+                <div class="head">
+                    <span class="logo"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="1.8" width="11" height="12.4" rx="1.6"/><path d="M8 1.8v12.4M6.3 7.3v1.6M9.7 7.3v1.6"/></svg></span>
+                    <div class="brand"><b>DTI · My Closet</b><span>Loading your closet</span></div>
+                    <button class="x" title="Stop loading">✕</button>
+                </div>
+                <div class="body">
+                    <div class="who"></div>
+                    <div class="stat"><b class="n">0</b><span class="what">items so far</span></div>
+                    <div class="warn" hidden><span class="wt"></span><button class="fix" type="button"></button></div>
+                    <div class="pages" hidden><div class="ph"><span>Pages</span><b class="pc"></b></div><div class="cells"></div><div class="todo"></div></div>
+                    <button class="next" type="button" hidden>Next page ›</button>
+                    <div class="hint"></div>
+                    <a class="back" href="https://impress.openneo.net/items?q=dti-enhance#closet" hidden>Open My Closet →</a>
+                </div>
+            </div>`;
+        (document.body || document.documentElement).appendChild(host);
+        const $ = s => root.querySelector(s);
+        $('.who').textContent = np ? `Neopets account: ${np}${A && acct !== 'main' ? ` (${A.nick || A.np})` : ''}` : '';
+        const keyOf = names => { let h = 5381; const s = names.join('|'); for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return names.length + ':' + (h >>> 0).toString(36); };
+        const names = () => { const m = new Map(); Object.values(st.pages).forEach(p => p.forEach(([n, q, img]) => { const e = m.get(n); if (!e || e[0] < q) m.set(n, [q, img]); })); return m; };
+        let saved = false, fixAct = null;
+        const save = () => {   // (the whole closet: every page seen — the one before kept as "prev")
+            const all = GM_getValue('dti_my_closet', {}) || {}, old = all[acct];
+            const ids = new Map((old?.items || []).filter(i => i.id).map(i => [i.name, i]));
+            const items = [...names()].map(([name, [qty, img]]) => ({ name, qty, img, ...(ids.has(name) ? { id: ids.get(name).id, nc: ids.get(name).nc } : {}) }))
+                .sort((a, b) => a.name.localeCompare(b.name));
+            all[acct] = { at: Date.now(), np, items, pb: Object.values(st.pb || {}).reduce((t, n) => t + n, 0), prev: old && (!old.np || !np || old.np === np) ? { at: old.at, items: (old.items || []).map(i => [i.name, i.qty, i.img || '', i.id || '']) } : null };   // (another Neopets account's closet before it: nothing to compare)
+            GM_setValue('dti_my_closet', all);
+            GM_setValue('dti_closet_load', null);
+            GM_setValue('dti_closet_loading', null);
+            GM_setValue('dti_closet_ping', Date.now());
+            saved = true;
+        };
+        const scan = () => {
+            if (saved) return render(null);
+            const search = (document.querySelector('.closet-search-field')?.value || new URLSearchParams(location.search).get('obj_name') || '').trim();
+            const catSel = document.querySelector('.closet-dropdown--category'), perSel = document.querySelector('.closet-dropdown--perpage');
+            const loading = [...document.querySelectorAll('img[src*="loading-large"]')].some(i => i.offsetParent);
+            const nums = [...document.querySelectorAll('.closet-pagination-btn')].map(b => parseInt(b.textContent, 10)).filter(n => n > 0);
+            const cur = parseInt(document.querySelector('.closet-pagination-btn.active')?.textContent, 10) || 1;
+            const of = Math.max(1, cur, ...nums);
+            const here = scrapeNeoItems('closet');
+            const empty = !loading && !here.size && !!document.querySelector('.closet-empty');
+            fixAct = null;
+            let warn = '';
+            if (search) { warn = 'A search is on — every item is needed.'; fixAct = ['Show everything', () => { location.href = '/closet.phtml'; }]; }
+            else if (catSel && catSel.value) { warn = 'Only one category is shown — every item is needed.'; fixAct = ['All items', () => { catSel.value = ''; catSel.dispatchEvent(new Event('change', { bubbles: true })); }]; }
+            if (!warn && !loading && (here.size || empty)) {
+                const per = perSel?.value || '';
+                if (per !== st.per) { st.per = per; st.pages = {}; st.seen = {}; }   // (another page size numbers the pages differently: starts over)
+                const key = keyOf([...here.keys()]);
+                const stale = Object.entries(st.seen).some(([n, k]) => +n !== cur && k === key);   // (another page's items, still on screen)
+                if (!stale) {
+                    st.pages[cur] = [...here].filter(([, x]) => !x.pb).map(([n, x]) => [n, x.qty || 1, x.img || '']);
+                    (st.pb ||= {})[cur] = [...here.values()].filter(x => x.pb).length;   // (Paint brush clothes on it: left out, counted)
+                    st.seen[cur] = key;
+                    st.of = of;
+                    GM_setValue('dti_closet_loading', st);
+                }
+                // (every page seen: saved at once — that's what you came for)
+                if (Array.from({ length: of }, (_, i) => i + 1).every(n => st.pages[n])) { save(); return render(null); }
+            }
+            render({ warn, of, cur, per: perSel?.value || '', loading, empty });
+        };
+        const render = s => {
+            const got = names(), all = s ? Array.from({ length: s.of }, (_, i) => i + 1) : [], missing = all.filter(n => !st.pages[n]);
+            $('.card').classList.toggle('ok', saved);
+            $('.n').textContent = (saved ? (closetAll()[acct]?.items || []).length : got.size).toLocaleString();
+            $('.what').textContent = saved ? 'items saved to My Closet ✓' : 'items so far';
+            $('.warn').hidden = !s?.warn;
+            if (s?.warn) { $('.wt').textContent = s.warn; $('.fix').textContent = fixAct?.[0] || ''; $('.fix').hidden = !fixAct; }
+            $('.pages').hidden = saved || !s || s.of < 2;
+            if (s && s.of >= 2) {
+                $('.pc').textContent = `${s.of - missing.length} of ${s.of}`;
+                $('.cells').innerHTML = all.map(n => `<span class="cell${st.pages[n] ? ' on' : ''}${n === s.cur ? ' cur' : ''}" title="Page ${n}${st.pages[n] ? ' ✓' : ''}"></span>`).join('');
+                $('.todo').textContent = missing.length ? `Still to see: page${missing.length > 1 ? 's' : ''} ${missing.slice(0, 8).join(', ')}${missing.length > 8 ? ', …' : ''}` : 'Every page seen ✓';
+            }
+            const next = document.querySelector('.closet-pagination-next');
+            $('.next').hidden = saved || !s || !!s.warn || !next || next.disabled || !missing.length;
+            $('.back').hidden = !saved;
+            const pbN = closetAll()[acct]?.pb || 0;
+            $('.hint').textContent = saved ? `Every page was seen, so it\u2019s saved \u2014 you can close this tab.${pbN ? ` ${pbN} Paint brush clothe${pbN === 1 ? '' : 's'} left out, as with every import.` : ''}`
+                : s?.warn ? ''
+                : s && s.per && s.per !== '90' && s.of > 1 ? 'Tip: “Display per page: 90” above means fewer pages to go through.'
+                : 'Go through the pages — each one is read as you look at it, and the closet is saved once every page is seen. Paint brush clothes are left out.';
+        };
+        $('.fix').addEventListener('click', () => fixAct?.[1]());
+        $('.next').addEventListener('click', () => { const b = document.querySelector('.closet-pagination-next'); if (b && !b.disabled) b.click(); });
+        $('.x').addEventListener('click', () => { GM_setValue('dti_closet_load', null); obs.disconnect(); host.remove(); });
+        let t = 0;
+        const obs = new MutationObserver(() => { clearTimeout(t); t = setTimeout(scan, 350); });
+        obs.observe(document.body, { childList: true, subtree: true });
+        scan();
+    }
     // ── Neopets side: read tokens from the Inventory, Gallery or Styling Chamber when My Tokens asked for it ──
     // (Runs before the rest of the script on Neopets pages — keep it self-contained.)
     function runTokenCapture(srcKey, session) {
@@ -7242,7 +8023,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 position: absolute; max-width: none; max-height: none; width: var(--w); height: var(--w);
                 left: calc(50% - var(--cx) * var(--w)); top: calc(50% - var(--cy) * var(--w));
             }
-            #dti-tokens-app.big .dti-tk-pic img.small { width: 42%; height: 42%; }
+            #dti-tokens-app.big .dti-tk-pic img.small { width: 58%; height: 58%; }   /* (no big picture anywhere yet: the token's own 80px one — any bigger and it blurs) */
             #dti-tokens-app.big .dti-tk-pic:hover img { transform: scale(1.03); }
             #dti-tokens-app.big .dti-tk-new { top: 9px; left: 9px; }
             #dti-tokens-app.big :is(.dti-tk-name, .dti-tk-sub) { box-sizing: border-box; padding: 0 12px; }
@@ -7681,7 +8462,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 const desc = [...(l.querySelector('.closet-list-content')?.children || [])].filter(p => p.tagName === 'P')
                     .map(p => p.textContent.trim()).filter(Boolean).join('\n').slice(0, 600);
                 const cont = l.querySelector('.closet-list-content');
-                lists.push({ id: l.dataset.id || '', owned, unlisted, desc, items: its, ...(tokPubCodeIn(cont) ? { tok: 1, ...(tokPubHidden(cont, its.length > 0) ? { tokHide: 1 } : {}) } : {}),
+                const vis = (l.querySelector('form.visibility-form select, select[name*="visibility"]') || sec.querySelector('form.visibility-form select, select[name*="visibility"]'))?.value;   // (your own page: who sees it — 2 = Trading)
+                lists.push({ id: l.dataset.id || '', owned, unlisted, desc, items: its, ...(vis != null ? { vis } : {}), ...(tokPubCodeIn(cont) ? { tok: 1, ...(tokPubHidden(cont, its.length > 0) ? { tokHide: 1 } : {}) } : {}),
                     name: unlisted ? 'Not in a list' : (l.querySelector(':scope > header h4, :scope > header h3, :scope > header h2')?.textContent.trim() || 'List') });
             });
         });
@@ -7699,7 +8481,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 its.push([+id, it.qty || 1]);
             });
             if (l.isUnlisted && !its.length) return;
-            lists.push({ id: l.listId || '', owned, unlisted: !!l.isUnlisted, items: its, ...(l.tokShare || l.tokLinked ? { tok: 1 } : {}), name: l.isUnlisted ? 'Not in a list' : l.listName,
+            lists.push({ id: l.listId || '', owned, unlisted: !!l.isUnlisted, items: its, ...(l.visVal != null ? { vis: String(l.visVal) } : {}), ...(l.tokShare || l.tokLinked ? { tok: 1 } : {}), name: l.isUnlisted ? 'Not in a list' : l.listName,
                 desc: String(l.description || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim().slice(0, 600) });
         }));
         return { lists, items };
@@ -7764,19 +8546,28 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         _nmObs.unobserve(e.target);
         const el = e.target;
         el.classList.add('loading');
-        neomailOf(el.dataset.closet).then(np => {
-            el.classList.remove('loading');
-            el.innerHTML = np
-                ? `<a href="${neomailUrl(np)}" target="_blank" rel="noopener" title="Send ${noteEsc(np)} a Neomail on Neopets">${NF_ICO.mail}<span>${noteEsc(np)}</span></a>`
-                : '<span class="none" title="They haven\u2019t added a Neopets username on DTI">No Neomail set</span>';
-        });
+        neomailOf(el.dataset.closet).then(np => nmPaint(el, np));
     }), { rootMargin: '150px' }));
-    function neomailSlot(closetHref) {
-        const el = document.createElement('span');
-        el.className = 'dti-nm-slot';
-        el.dataset.closet = closetHref;
-        neomailObs().observe(el);
-        return el;
+    function nmPaint(el, np) {
+        el.classList.remove('loading'); el.dataset.done = '1';
+        el.innerHTML = np
+            ? `<a href="${neomailUrl(np)}" target="_blank" rel="noopener" title="Send ${noteEsc(np)} a Neomail on Neopets">${NF_ICO.mail}<span>${noteEsc(np)}</span></a>`
+            : '<span class="none" title="They haven\u2019t added a Neopets username on DTI">No Neomail set</span>';
+    }
+    function nmKnown(closetHref) {   // (their Neomail name if it's known here — '' for none set; null: not known yet)
+        const id = String(closetHref || '').match(/\/user\/(\d+)/)?.[1];
+        if (!id) return null;
+        const f = NF.get(id);
+        if (f?.np) return f.np;
+        if (!_nmMap) try { _nmMap = JSON.parse(localStorage.getItem(NEOMAIL_LS) || '{}') || {}; } catch (_) { _nmMap = {}; }
+        const c = _nmMap[id];
+        return c && Date.now() - c.at < 7 * 864e5 ? c.np : null;
+    }
+    function nmRemember(id, np) {   // (read from their whole Items page, for something else: kept as if asked)
+        if (!id) return;
+        if (!_nmMap) try { _nmMap = JSON.parse(localStorage.getItem(NEOMAIL_LS) || '{}') || {}; } catch (_) { _nmMap = {}; }
+        _nmMap[id] = { np: np || '', at: Date.now() };
+        try { localStorage.setItem(NEOMAIL_LS, JSON.stringify(_nmMap)); } catch (_) {}
     }
     function nfParseWho(doc) {
         const c = doc.getElementById('closet-hangers-contact');
@@ -8113,25 +8904,29 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             }
         }, 25000);
     }
-    // What a trader wants that you have: their wanted lists (from their Items page, or a fresh Neofriends copy) — kept 12 hours
+    // What a trader wants that you have: their wanted lists (from their Items page, or a fresh Neofriends copy) — kept 12 hours.
+    // Their owned lists too (the Trades popup's match), and their Neomail name when the page was read here (np: '' none set)
     const _tfWants = new Map();
+    const tfWantsKept = id => { const h = _tfWants.get(String(id)); return h && Date.now() - h.at < 12 * 3600e3 ? h : null; };
     async function tfTheirWants(closetHref) {
         const id = userIdOf(closetHref);
         const hit = _tfWants.get(id);
         if (hit && Date.now() - hit.at < 12 * 3600e3) return hit;
-        let p = null;
+        let p = null, np = null;
         const snap = id && NF.isFriend(id) ? await NFDB.get(id).catch(() => null) : null;
-        if (snap?.lists && Date.now() - snap.at < 12 * 3600e3) p = snap;
+        if (snap?.lists && Date.now() - snap.at < 12 * 3600e3) { p = snap; np = NF.get(id)?.np || null; }
         else {
             const r = await fetch(String(closetHref).replace(/#.*$/, ''), { credentials: 'include' });
             if (!r.ok) throw new Error(r.status);
             const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
             if (!doc.getElementById('closet-hangers')) throw new Error('no items page');
             p = nfParseCloset(doc);
+            np = nfParseWho(doc).np || '';
+            nmRemember(id, np);
         }
-        const want = new Map();   // their wanted item id → their list names
-        p.lists.filter(l => !l.owned).forEach(l => l.items.forEach(([iid]) => { const a = want.get(iid) || []; if (!a.includes(l.name)) a.push(l.name); want.set(iid, a); }));
-        const res = { at: Date.now(), want, items: p.items || {} };
+        const want = new Map(), own = new Map(), qty = new Map();   // their item id → their list names; owned: the most of it in one list
+        p.lists.forEach(l => { const m = l.owned ? own : want; l.items.forEach(([iid, q]) => { const a = m.get(iid) || []; if (!a.includes(l.name)) a.push(l.name); m.set(iid, a); if (l.owned) qty.set(iid, Math.max(qty.get(iid) || 0, q || 1)); }); });
+        const res = { at: Date.now(), want, own, qty, items: p.items || {}, np };
         _tfWants.set(id, res);
         return res;
     }
@@ -9081,11 +9876,11 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             }
             // (tiers: headings once more than one is used; yours now: a bar on top, a line on the row; a month on it: "still after it?")
             const grouped = new Set(list.map(e => DTISeek.tierOf(e))).size > 1, now = Date.now();
-            ownedNow = list.filter(e => mineOf(e.id)?.own > 0).map(e => e.id);
+            ownedNow = list.filter(e => mineOf(e.id)?.own > 0 || closetQtyOf(e.id) > 0).map(e => e.id);   // (in your lists, or your closet — My Closet)
             let lastTier = -1;
             listEl.innerHTML = (ownedNow.length ? `<div class="dti-sk-gotbar"><span>\u2713 You have ${ownedNow.length === 1 ? `<b>${noteEsc(list.find(e => e.id === ownedNow[0]).name || 'one of these')}</b>` : `<b>${ownedNow.length}</b> of these`} now</span><button type="button" class="dti-sk-gotall">Take ${ownedNow.length === 1 ? 'it' : 'them'} off</button></div>` : '')
                 + list.map((e, i) => {
-                const a = many && all ? acctGet(DTISeek.acctOf(e)) : null, t = DTISeek.tierOf(e), tn = skTrade(e.id), have = mineOf(e.id)?.own || 0;
+                const a = many && all ? acctGet(DTISeek.acctOf(e)) : null, t = DTISeek.tierOf(e), tn = skTrade(e.id), have = (mineOf(e.id)?.own || 0) || closetQtyOf(e.id);
                 const head = grouped && t !== lastTier ? `<div class="dti-sk-tierh t${t}" data-tier="${t}"><b>${SEEK_TIERS[t]}</b><span>${list.filter(x => DTISeek.tierOf(x) === t).length}</span></div>` : '';
                 lastTier = t;
                 return head + `<div class="dti-sk-row${i === 0 ? ' first' : ''}" data-id="${noteEsc(e.id)}" draggable="true">
@@ -9547,6 +10342,585 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         `;
         document.head.appendChild(st);
     }
+    // ══ My Closet (/items?q=dti-enhance#closet, and a popup) — your Neopets closet: loaded from neopets.com (its own panel there, a click a
+    // page), matched to DTI's items by name, kept in step with a DTI list of yours (a preview first, then one click — user's pick), its items
+    // left out of what you have to trade and marked across DTI. The extras the user picked: what's new and gone since the last load, closet
+    // items sitting in your trading lists (with a fix), extra copies (into a trade list). New lists made here are private (user's pick). ══
+    const CLOSET_ICO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="1.8" width="11" height="12.4" rx="1.6"/><path d="M8 1.8v12.4M6.3 7.3v1.6M9.7 7.3v1.6"/></svg>';
+    function initClosetAppPage() {
+        if (document.querySelector('#dti-cl-app:not(.in-modal)')) return;   // runPageInit also runs on turbo:load
+        document.getElementById('dti-page-modal')?.remove();
+        [...document.body.children].forEach(c => { if (c.id !== 'main-nav' && !/^dti-/.test(c.id || '')) c.style.setProperty('display', 'none', 'important'); });
+        document.title = 'DTI | My Closet';
+        mountClosetApp(document.body);
+    }
+    function _openClosetModal() {
+        const modal = _buildPageModal('My Closet', '/items?q=dti-enhance#closet', '', { icon: CLOSET_ICO, cls: 'dti-pm-cl' });
+        const content = modal.querySelector('#dti-pm-content');
+        content.innerHTML = '';
+        mountClosetApp(content, { inModal: true });
+    }
+    // A closet's items matched to DTI's by exact name (all the closet has): their DTI ids — and NC or not — saved into the closet, so marks and
+    // compares (on Neopets too) know them. Asked before: known at once (dtiItemIdByName keeps every answer); the rest six at a time. One DTI
+    // doesn't have is asked about again after a day. → Promise (how many were asked about); onStep(done, total) as they come
+    const _closetRes = new Map();
+    function closetResolve(acct, onStep) {
+        if (_closetRes.has(acct)) return _closetRes.get(acct);
+        const p = (async () => {
+            const todo = (closetAll()[acct]?.items || []).filter(i => !i.id && (!i.nd || Date.now() - i.nd > 864e5)).map(i => i.name);
+            if (!todo.length) return 0;
+            const got = new Map(), queue = todo.slice();
+            let done = 0, last = 0;
+            const flush = () => {   // (into the closet as it is now — another tab may have loaded it again meanwhile)
+                if (!got.size) return;
+                const all = closetAll(), cur = all[acct];
+                if (cur) { cur.items.forEach(i => { const g = got.get(i.name); if (g) Object.assign(i, g); }); GM_setValue('dti_my_closet', all); }
+                got.clear();
+            };
+            const worker = async () => {
+                while (queue.length) {
+                    const name = queue.shift(), id = await dtiItemIdByName(name), info = dtiNameInfo(name);
+                    if (id) got.set(name, { id, nc: info?.nc ? 1 : 0 });
+                    else if (info) got.set(name, { nd: Date.now() });   // (asked, and DTI doesn't have it — not asked again for a day)
+                    done++;
+                    onStep?.(done, todo.length);
+                    if (done - last >= 80) { last = done; flush(); }
+                }
+            };
+            await Promise.all(Array.from({ length: 6 }, worker));
+            flush();
+            return done;
+        })().finally(() => _closetRes.delete(acct));
+        _closetRes.set(acct, p);
+        return p;
+    }
+    // How many of an item one of your DTI lists holds, set — 0 takes it out (DTI's own step, as the list steppers use it)
+    async function dtiSetListQty(id, name, listId, qty) {
+        const slug = GM_getValue('dti_user_slug', ''), csrf = document.querySelector('meta[name="csrf-token"]')?.content;
+        if (!slug || !csrf) throw new Error('not logged in');
+        const path = `${id}-${String(name || 'item').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '') || 'item'}`;
+        const r = await fetch(`/user/${slug}/items/${path}/closet_hangers/update_quantities`, {
+            method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': csrf },
+            body: `_method=put&quantity%5B${encodeURIComponent(listId)}%5D=${Math.max(0, qty | 0)}`,
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+    }
+    // Writes to your lists, six at a time: [{ id, name, list, to, from }] → { done: [...], failed: [...] }; onStep(n, total)
+    async function dtiListOps(ops, onStep) {
+        const queue = ops.slice(), done = [], failed = [];
+        const worker = async () => {
+            while (queue.length) {
+                const op = queue.shift();
+                try { await dtiSetListQty(op.id, op.name, op.list, op.to); done.push(op); } catch (_) { failed.push(op); }
+                onStep?.(done.length + failed.length, ops.length);
+            }
+        };
+        await Promise.all(Array.from({ length: 6 }, worker));
+        if (done.length) { mineLoad(true); window.__dtiClosetDirty?.(); }   // (marks and My Items: as they are now)
+        return { done, failed };
+    }
+    // A new list of yours for the closet — private unless picked otherwise (user's pick) → its id ('' if it couldn't be made)
+    async function closetMakeList(name, vis = 0) {
+        const slug = GM_getValue('dti_user_slug', ''), csrf = document.querySelector('meta[name="csrf-token"]')?.content;
+        if (!slug || !csrf) return '';
+        const before = new Set((await tokPubMyLists(slug).catch(() => [])).map(l => l.id));
+        const fd = new FormData();
+        fd.append('authenticity_token', csrf);
+        fd.append('closet_list[name]', name);
+        fd.append('closet_list[hangers_owned]', 'true');
+        fd.append('closet_list[visibility]', String(vis));
+        fd.append('closet_list[description]', '');
+        const r = await fetch(`/user/${slug}/closet/lists`, { method: 'POST', credentials: 'include', body: fd }).catch(() => null);
+        if (!r?.ok) return '';
+        const made = (await tokPubMyLists(slug).catch(() => [])).filter(l => !before.has(l.id) && l.owned);
+        return made.find(l => l.name === name)?.id || made[0]?.id || '';
+    }
+    // What syncing the linked list would do: the closet's items DTI has, at the closet's numbers; what's in the list and not the closet out
+    // → { add: [op], change: [op], remove: [op] } (op as dtiListOps), or null without a list / your lists
+    function closetLinkDiff(closet, me, listId) {
+        const list = me?.lists?.find(l => l.owned && String(l.id) === String(listId));
+        if (!closet || !list) return null;
+        const inList = new Map(list.items.map(([id, q]) => [+id, q])), want = new Map();
+        (closet.items || []).forEach(i => { if (i.id) { const w = want.get(+i.id) || { name: i.name, q: 0 }; w.q += i.qty || 1; want.set(+i.id, w); } });
+        const add = [], change = [], remove = [];
+        want.forEach((w, id) => {
+            const has = inList.get(id) || 0;
+            if (!has) add.push({ id, name: w.name, list: listId, to: w.q, from: 0 });
+            else if (has !== w.q) change.push({ id, name: w.name, list: listId, to: w.q, from: has });
+        });
+        inList.forEach((q, id) => { if (!want.has(id)) remove.push({ id, name: me.items?.[id]?.[0] || `Item ${id}`, list: listId, to: 0, from: q }); });
+        return { add, change, remove };
+    }
+    async function mountClosetApp(host, { inModal = false } = {}) {
+        injectClosetCSS();
+        _injectPageModalCSS();
+        const app = document.createElement('div');
+        app.id = 'dti-cl-app';
+        if (inModal) app.classList.add('in-modal');
+        host.appendChild(app);
+        const ui = Object.assign({ q: '', kind: '', quick: '', sort: 'name', big: false, acct: '' }, GM_getValue('dti_closet_ui', {}) || {});
+        const saveUi = () => { const { q, quick, ...keep } = ui; GM_setValue('dti_closet_ui', keep); };
+        // (the account picked in the nav — All accounts: one at a time, picked here)
+        const acctNow = () => { const a = acctActive(); return a !== 'all' ? a : ui.acct && acctGet(ui.acct) ? ui.acct : 'main'; };
+        const C = () => closetAll()[acctNow()] || null;
+        const links = () => GM_getValue('dti_closet_link', {}) || {};
+        const link = () => links()[acctNow()] || null;
+        let me = await nfMine().catch(() => null), meFresh = false;   // (your lists: what's in the linked list, which are trading)
+        let resolving = null, busy = '', panel = '', shown = 0, list = [];
+        const esc = noteEsc;
+
+        // ── what's known of each item ──
+        const prevMap = c => { const m = new Map(); (c?.prev?.items || []).forEach(([n, q, img, id]) => m.set(n, { q, img, id })); return m; };
+        function tradingOf() {   // DTI id → [[list name, copies]] in your trading lists (not the linked one)
+            const L = link(), m = new Map();
+            (me?.lists || []).forEach(l => {
+                if (!l.owned || String(l.vis) !== '2' || (L && String(l.id) === String(L.id))) return;
+                l.items.forEach(([id, q]) => { const a = m.get(+id) || []; a.push([l.name, q || 1]); m.set(+id, a); });
+            });
+            return m;
+        }
+        function rowsNow() {
+            const c = C();
+            if (!c) return [];
+            const prev = c.prev ? prevMap(c) : null, trading = tradingOf(), seeking = seekOn() ? DTISeek.idSet() : new Set();
+            const rows = (c.items || []).map(i => {
+                const info = i.id ? null : dtiNameInfo(i.name), id = String(i.id || info?.id || ''), was = prev?.get(i.name);
+                return { name: i.name, qty: i.qty || 1, img: i.img || '', id, nc: i.id ? !!i.nc : !!info?.nc,
+                    isNew: !!prev && !was, more: was && was.q !== i.qty ? (i.qty || 1) - was.q : 0,
+                    trade: id ? trading.get(+id) || null : null, nodti: !id && !!(i.nd || (info && !info.id)), seek: !!id && seeking.has(id), gone: false };
+            });
+            if (prev) prev.forEach((v, name) => { if (!c.items.some(i => i.name === name)) rows.push({ name, qty: v.q || 1, img: v.img || '', id: String(v.id || ''), nc: false, gone: true }); });
+            return rows;
+        }
+
+        // ── the page ──
+        app.innerHTML = `<header class="dti-cl-head">
+                <span class="dti-cl-hico">${CLOSET_ICO}</span>
+                <div class="dti-cl-htxt"><h1>My Closet</h1><p>Your Neopets closet — the items you keep</p></div>
+                <div class="dti-cl-hstats"></div>
+                <div class="dti-cl-hacts"><button type="button" class="dti-cl-load">Load from Neopets</button><span class="dti-cl-when"></span></div>
+            </header>
+            <div class="dti-cl-accts" hidden></div>
+            <div class="dti-cl-match" hidden><span></span><i><b></b></i></div>
+            <div class="dti-cl-top"></div>
+            <div class="dti-cl-panel" hidden></div>
+            <div class="dti-cl-bar" hidden>
+                <label class="dti-cl-search"><input type="search" placeholder="Search your closet…" autocomplete="off" spellcheck="false" aria-label="Search your closet"></label>
+                <div class="dti-cl-seg" data-ui="kind">${[['', 'All'], ['nc', 'NC'], ['np', 'NP']].map(([v, l]) => `<button type="button" data-v="${v}">${l}</button>`).join('')}</div>
+                <select class="dti-cl-sort" aria-label="Order">${[['name', 'A–Z'], ['new', 'New first'], ['qty', 'Most copies'], ['caps', 'Cap value'], ['kind', 'NC first']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+                <button type="button" class="dti-cl-size" title="Bigger pictures">▦</button>
+                <button type="button" class="dti-cl-gear" title="My Closet’s settings">⚙</button>
+                <div class="dti-cl-quick"></div>
+            </div>
+            <div class="dti-cl-grid"></div>
+            <div class="dti-cl-more" hidden></div>
+            <div class="dti-cl-empty" hidden></div>`;
+        const $ = s => app.querySelector(s);
+        const grid = $('.dti-cl-grid'), more = $('.dti-cl-more');
+
+        function paintHead(rows) {
+            const c = C(), kept = rows.filter(r => !r.gone), nc = kept.filter(r => r.nc).length, np = kept.filter(r => r.id && !r.nc).length;
+            $('.dti-cl-hstats').innerHTML = c ? `<span><b>${kept.length.toLocaleString()}</b> items</span>${kept.length ? `<span><b>${kept.reduce((t, r) => t + r.qty, 0).toLocaleString()}</b> copies</span><span><b>${nc}</b> NC · <b>${np}</b> NP</span>` : ''}<span class="dti-cl-worth" hidden></span>` : '';
+            $('.dti-cl-when').textContent = c ? `Loaded ${noteAgo(c.at)}${c.np ? ` · ${c.np}` : ''}` : '';
+            $('.dti-cl-load').textContent = c ? 'Load again' : 'Load from Neopets';
+            const ncs = kept.filter(r => r.nc);
+            if (ncs.length && showNcValues) ncCapTotal(ncs.map(r => ({ name: r.name, qty: r.qty }))).then(t => {
+                const el = $('.dti-cl-worth');
+                if (!el || !t?.valued) return;
+                el.innerHTML = `\u2248 <b>${esc(capTotalText(t).replace(/^\u2248\s*/, '').replace(/ caps?$/, ''))}</b> caps`;
+                el.title = capTotalTitle(t);
+                el.hidden = false;
+            });
+            // (All accounts in the nav: whose closet — the ones with one)
+            const many = acctActive() === 'all' && acctMany();
+            $('.dti-cl-accts').hidden = !many;
+            if (many) $('.dti-cl-accts').innerHTML = acctAll().map(a => `<button type="button" data-acct="${esc(a.id)}" class="${a.id === acctNow() ? 'on' : ''}" style="--ac:${esc(a.color)}"><i></i>${esc(acctName(a))}<small>${(closetAll()[a.id]?.items || []).length || '—'}</small></button>`).join('');
+        }
+        // The cards on top: the linked list (or linking one), then what's changed and what's worth a look — each a click to see those
+        function paintTop(rows) {
+            const c = C(), L = link(), top = $('.dti-cl-top');
+            if (!c) { top.innerHTML = ''; return; }
+            const kept = rows.filter(r => !r.gone), d = L && me ? closetLinkDiff(c, me, L.id) : null;
+            const owned = (me?.lists || []).filter(l => l.owned && !l.unlisted);
+            const diffTxt = !d ? '' : [d.add.length && `+${d.add.length} to add`, d.change.length && `${d.change.length} to change`, d.remove.length && `−${d.remove.length} not in your closet`].filter(Boolean).join(' · ');
+            const linkCard = L
+                ? `<div class="dti-cl-card dti-cl-link${d && !diffTxt ? ' ok' : ''}"><div class="t">${CLOSET_ICO}<b>Linked to “${esc(L.name)}”</b></div>
+                    <div class="s">${!me ? 'Reading your lists…' : !d ? 'That list isn’t on DTI any more — link another' : diffTxt ? `Out of step: ${esc(diffTxt)}` : 'In step with your closet ✓'}</div>
+                    <div class="a">${d && diffTxt ? '<button type="button" class="pri" data-act="sync">Preview the sync</button>' : ''}<button type="button" data-act="unlink">Unlink</button></div></div>`
+                : `<div class="dti-cl-card dti-cl-link"><div class="t">${CLOSET_ICO}<b>Link a DTI list</b></div>
+                    <div class="s">Keep one of your lists in step with your closet: DTI itself then knows you own these — its ✓ marks, its “You own” search, your lists page.</div>
+                    <div class="a"><select class="dti-cl-pick" aria-label="Your list"><option value="">Pick one of your lists…</option>${owned.map(l => `<option value="${esc(l.id)}">${esc(l.name)}${String(l.vis) === '2' ? ' (Trading)' : String(l.vis) === '0' ? ' (Private)' : ''}</option>`).join('')}<option value="+">+ A new private list…</option></select><button type="button" class="pri" data-act="link">Link</button></div></div>`;
+            const newN = kept.filter(r => r.isNew).length, goneN = rows.filter(r => r.gone).length, moreN = kept.filter(r => r.more).length;
+            const tradeN = kept.filter(r => r.trade).length, extraN = kept.filter(r => r.qty > 1).length, nodtiN = kept.filter(r => r.nodti).length, seekN = kept.filter(r => r.seek).length;
+            const chip = (q, n, label, cls = '') => n ? `<button type="button" class="dti-cl-note ${cls}${ui.quick === q ? ' on' : ''}" data-quick="${q}"><b>${n}</b> ${label}</button>` : '';
+            top.innerHTML = linkCard + `<div class="dti-cl-notes">
+                ${c.prev ? `<div class="dti-cl-since">Since the load before (${noteAgo(c.prev.at)}):${newN || goneN || moreN ? '' : ' nothing’s changed'}</div>` : ''}
+                ${chip('new', newN, 'new')}${chip('gone', goneN, 'gone')}${chip('more', moreN, `${moreN === 1 ? 'has' : 'have'} more or fewer`)}
+                ${chip('trade', tradeN, `${tradeN === 1 ? 'is' : 'are'} in your trading lists`, 'warn')}
+                ${chip('seek', seekN, `${seekN === 1 ? 'is' : 'are'} on your Seeking list \u2014 you have ${seekN === 1 ? 'it' : 'them'} now`)}
+                ${chip('extra', extraN, `${extraN === 1 ? 'has' : 'have'} extra copies`)}
+                ${chip('nodti', nodtiN, 'not on DTI', 'mute')}
+            </div>`;
+        }
+        // The buttons that go with a quick filter (fixing your trading lists; the extras into a trade list)
+        function paintQuick(rows) {
+            const q = $('.dti-cl-quick'), kept = rows.filter(r => !r.gone);
+            q.innerHTML = ui.quick === 'trade' && kept.some(r => r.trade) ? '<button type="button" class="pri" data-act="untrade">Take them out of your trading lists…</button>'
+                : ui.quick === 'seek' && kept.some(r => r.seek) ? '<button type="button" class="pri" data-act="unseek">Take them off your Seeking list</button>'
+                : ui.quick === 'extra' && kept.some(r => r.qty > 1) ? '<button type="button" class="pri" data-act="extras">Put the extra copies in a trade list…</button>' : '';
+            q.hidden = !q.innerHTML;
+        }
+        const capCache = new Map();   // (name → [min, max] caps, for the order)
+        function filtered(rows) {
+            const q = ui.q.trim().toLowerCase();
+            const out = rows.filter(r => {
+                if (ui.quick === 'gone' ? !r.gone : r.gone) return false;
+                if (ui.quick === 'new' && !r.isNew) return false;
+                if (ui.quick === 'more' && !r.more) return false;
+                if (ui.quick === 'trade' && !r.trade) return false;
+                if (ui.quick === 'extra' && !(r.qty > 1)) return false;
+                if (ui.quick === 'nodti' && !r.nodti) return false;
+                if (ui.quick === 'seek' && !r.seek) return false;
+                if (ui.kind === 'nc' && !r.nc) return false;
+                if (ui.kind === 'np' && (r.nc || !r.id)) return false;
+                return !q || r.name.toLowerCase().includes(q);
+            });
+            const by = { name: (a, b) => a.name.localeCompare(b.name), new: (a, b) => (b.isNew - a.isNew) || a.name.localeCompare(b.name),
+                qty: (a, b) => b.qty - a.qty || a.name.localeCompare(b.name), kind: (a, b) => (b.nc - a.nc) || a.name.localeCompare(b.name),
+                caps: (a, b) => ((capCache.get(b.name)?.[1] ?? -1) - (capCache.get(a.name)?.[1] ?? -1)) || a.name.localeCompare(b.name) }[ui.sort] || ((a, b) => a.name.localeCompare(b.name));
+            return out.sort(by);
+        }
+        const card = r => {
+            const tags = (r.gone ? '<i class="gone">Gone</i>' : '') + (r.isNew ? '<i class="new">New</i>' : '') + (r.more ? `<i class="new">${r.more > 0 ? '+' : ''}${r.more}</i>` : '')
+                + (r.trade ? `<i class="warn" title="Also in your trading list${r.trade.length > 1 ? 's' : ''}: ${esc(r.trade.map(([n, q]) => `${n}${q > 1 ? ' ×' + q : ''}`).join(', '))}">Trading</i>` : '')
+                + (r.nodti ? '<i class="mute" title="DTI doesn’t have an item of this name">Not on DTI</i>' : '');
+            return `<div class="dti-cl-item${r.gone ? ' gone' : ''}" data-name="${esc(r.name)}"${r.id ? ` data-dti-item="${esc(r.id)}"` : ''} role="button" tabindex="0" title="${esc(r.name)}">
+                <span class="pic">${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : ''}${r.qty > 1 ? `<b class="qty">×${r.qty}</b>` : ''}</span>
+                <span class="nm">${esc(r.name)}</span>
+                <span class="sub">${r.id ? `<em class="${r.nc ? 'nc' : 'np'}">${r.nc ? 'NC' : 'NP'}</em>` : ''}<span class="cap" hidden></span></span>
+                ${tags ? `<span class="tags">${tags}</span>` : ''}
+            </div>`;
+        };
+        function fillCaps(els) {
+            if (!showNcValues) return;
+            els.forEach(el => {
+                const r = list.find(x => x.name === el.dataset.name);
+                if (!r?.nc) return;
+                lookupNcValue(r.name, val => {
+                    const s = el.querySelector('.cap');
+                    capCache.set(r.name, capNums(val));
+                    if (s && capsLabel(val)) { s.textContent = capsLabel(val); s.hidden = false; }
+                });
+            });
+        }
+        function showMore() {
+            const next = list.slice(shown, shown + 150);
+            grid.insertAdjacentHTML('beforeend', next.map(card).join(''));
+            fillCaps([...grid.querySelectorAll('.dti-cl-item:not([data-cap])')].map(el => { el.dataset.cap = '1'; return el; }));
+            mineLoad().then(() => grid.querySelectorAll('.dti-cl-item[data-dti-item]:not([data-mk])').forEach(el => { el.dataset.mk = '1'; paintMineMark(el); }));   // (✓ in your lists, ♥ wanted, Seeking)
+            shown += next.length;
+            more.hidden = shown >= list.length;
+            more.textContent = `Showing ${shown.toLocaleString()} of ${list.length.toLocaleString()}`;
+        }
+        new IntersectionObserver(es => { if (es.some(e => e.isIntersecting) && shown < list.length) showMore(); }, { rootMargin: '600px' }).observe(more);
+        function render() {
+            if (!app.isConnected) return;
+            const c = C(), rows = rowsNow();
+            paintHead(rows);
+            paintTop(rows);
+            app.classList.toggle('big', !!ui.big);
+            $('.dti-cl-bar').hidden = !c || !(c.items || []).length && !c.prev;
+            $('.dti-cl-search input').value = ui.q;
+            app.querySelectorAll('.dti-cl-seg button').forEach(b => b.classList.toggle('on', b.dataset.v === ui.kind));
+            $('.dti-cl-sort').value = ui.sort;
+            paintQuick(rows);
+            list = filtered(rows);
+            grid.innerHTML = ''; shown = 0;
+            showMore();
+            const empty = $('.dti-cl-empty');
+            empty.hidden = !!list.length;
+            if (!c) {
+                empty.innerHTML = `<b>Your closet isn’t here yet</b>
+                    <ol><li><b>Load it from Neopets.</b> “Load from Neopets” opens your closet there with a small DTI panel — go through the pages (90 a page is fewest) and it’s saved once every page has been seen.</li>
+                    <li><b>Link a DTI list</b> (if you like). DTI itself then knows you own them — its ✓ marks, its “You own” search, your lists page.</li>
+                    <li><b>That’s it.</b> Your closet items are left out of what you have to trade and marked across DTI (each one a switch, under ⚙), and the customs editor’s <b>Closet</b> button (by NC / NP) shows just them. Load it again any time — what’s new and gone shows here.</li></ol>
+                    <button type="button" class="pri" data-act="load">Load from Neopets</button>`;
+            } else empty.innerHTML = !(c.items || []).length && !ui.quick ? (c.pb ? `<b>Only Paint brush clothes</b><span>Your closet had ${c.pb} Paint brush clothe${c.pb === 1 ? '' : 's'} \u2014 left out, as with every import. Load it again once there\u2019s more in it.</span>`
+                : '<b>Your closet was empty</b><span>Load it again once there’s something in it.</span>')
+                : `<b>Nothing here</b><span>${ui.q ? 'Nothing matches your search.' : 'Try another filter.'}</span>`;
+        }
+
+        // ── matching to DTI ──
+        function resolve() {
+            const acct = acctNow();
+            if (resolving || !C()) return;
+            const bar = $('.dti-cl-match');
+            resolving = closetResolve(acct, (n, total) => {
+                if (!app.isConnected) return;
+                bar.hidden = false;
+                bar.querySelector('span').textContent = `Matching your closet with DTI’s items — ${n.toLocaleString()} of ${total.toLocaleString()}`;
+                bar.querySelector('b').style.width = Math.round(100 * n / total) + '%';
+            }).then(n => { resolving = null; bar.hidden = true; if (n) render(); }, () => { resolving = null; bar.hidden = true; });
+        }
+
+        // ── the panels: a sync preview, taking closet items out of trading lists, the extras into a trade list ──
+        const panelEl = $('.dti-cl-panel');
+        const opsList = (ops, verb) => ops.length ? `<div class="g"><b>${verb} (${ops.length})</b><span>${ops.slice(0, 40).map(o => esc(o.name) + (o.to > 1 || o.from > 1 ? ` <small>${o.from ? o.from + '→' : '×'}${o.to}</small>` : '')).join(', ')}${ops.length > 40 ? `, and ${ops.length - 40} more` : ''}</span></div>` : '';
+        function openPanel(kind, html, ops) {
+            panel = kind;
+            panelEl.hidden = false;
+            panelEl.innerHTML = `<div class="dti-cl-card">${html}<div class="a"><button type="button" class="pri" data-act="run">${kind === 'sync' ? 'Sync now' : 'Do it'}</button><button type="button" data-act="cancel">Cancel</button></div></div>`;
+            panelEl._ops = ops;
+            panelEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+        function closePanel() { panel = ''; panelEl.hidden = true; panelEl.innerHTML = ''; panelEl._ops = null; }
+        async function runOps(ops, label) {
+            if (busy) return;
+            busy = label;
+            const btn = panelEl.querySelector('[data-act="run"]');
+            const res = await dtiListOps(ops, (n, t) => { if (btn) { btn.disabled = true; btn.textContent = `${n} of ${t}…`; } });
+            busy = '';
+            closePanel();
+            me = await nfMine(true).catch(() => me);
+            render();
+            const undo = res.done.map(o => ({ ...o, to: o.from, from: o.to }));
+            dtiToast(res.failed.length ? `${label}: ${res.done.length} done, ${res.failed.length} couldn’t be changed — try again in a moment` : `${label} — ${res.done.length} change${res.done.length === 1 ? '' : 's'}`,
+                { variant: res.failed.length ? 'error' : undefined, duration: 9000, action: undo.length ? { label: 'Undo', run: async () => { await dtiListOps(undo); me = await nfMine(true).catch(() => me); render(); } } : undefined });
+        }
+        async function freshLists() { if (!meFresh) { me = await nfMine(true).catch(() => me); meFresh = true; } }
+
+        // ── what you do ──
+        app.addEventListener('click', async e => {
+            const b = e.target.closest('button');
+            if (b?.dataset.acct) { ui.acct = b.dataset.acct; saveUi(); closePanel(); render(); resolve(); return; }
+            if (b?.dataset.quick != null) { ui.quick = ui.quick === b.dataset.quick ? '' : b.dataset.quick; render(); return; }
+            if (b?.closest('.dti-cl-seg')) { ui.kind = b.dataset.v; saveUi(); render(); return; }
+            const act = b?.dataset.act || (b?.classList.contains('dti-cl-load') ? 'load' : '');
+            if (act === 'load') {
+                GM_setValue('dti_closet_load', { at: Date.now(), acct: acctNow() });
+                GM_setValue('dti_closet_loading', null);
+                window.open('https://www.neopets.com/closet.phtml', '_blank', 'noopener');
+                dtiToast('Your closet opens on Neopets — go through its pages there; it shows here once every page has been seen', { duration: 7000 });
+                return;
+            }
+            if (act === 'link') {
+                const sel = $('.dti-cl-pick'), v = sel?.value;
+                if (!v) return sel?.focus();
+                let id = v, name = sel.selectedOptions[0]?.textContent.replace(/ \((Trading|Private)\)$/, '') || '';
+                if (v === '+') {
+                    name = (prompt('A name for the new private list:', 'Closet') || '').trim();
+                    if (!name) return;
+                    b.disabled = true; b.textContent = 'Making it…';
+                    id = await closetMakeList(name, 0);
+                    if (!id) { b.disabled = false; b.textContent = 'Link'; return dtiToast('Couldn’t make the list — try again in a moment', { variant: 'error' }); }
+                }
+                const all = links(); all[acctNow()] = { id: String(id), name };
+                GM_setValue('dti_closet_link', all);
+                me = await nfMine(true).catch(() => me); meFresh = true;
+                render();
+                const d = closetLinkDiff(C(), me, id);
+                if (d && (d.add.length || d.change.length || d.remove.length)) openSync();
+                return;
+            }
+            if (act === 'unlink') { const all = links(); delete all[acctNow()]; GM_setValue('dti_closet_link', all); closePanel(); render(); return; }
+            if (act === 'sync') { await freshLists(); render(); openSync(); return; }
+            if (act === 'untrade') { await freshLists(); render(); openUntrade(); return; }
+            if (act === 'extras') { await freshLists(); render(); openExtras(); return; }
+            if (act === 'unseek') {   // (yours now: off your Seeking list — with Undo)
+                const gone = rowsNow().filter(r => !r.gone && r.seek).map(r => DTISeek.get(r.id) ? { id: r.id, e: DTISeek.get(r.id) } : null).filter(Boolean);
+                gone.forEach(g => DTISeek.remove(g.id));
+                ui.quick = ''; render();
+                dtiToast(`Taken off your Seeking list \u2014 ${gone.length} item${gone.length === 1 ? '' : 's'}`, { duration: 8000, action: { label: 'Undo', run: () => { const d = DTISeek.raw(); gone.forEach(g => { d.items[g.id] = g.e; }); DTISeek._ids = null; GM_setValue('dti_seeking', d); seekLinkSoon(); render(); } } });   // (each as it was: tier, note, place)
+                return;
+            }
+            if (act === 'cancel') return closePanel();
+            if (act === 'run') {
+                const ops = panelEl._ops || [];
+                if (panel === 'extras') { const sel = panelEl.querySelector('select'); if (!sel?.value) return sel?.focus(); ops.forEach(o => { o.list = sel.value; }); }
+                if (!ops.length) return closePanel();
+                return runOps(ops, panel === 'sync' ? 'Synced your list' : panel === 'untrade' ? 'Taken out of your trading lists' : 'Extra copies added');
+            }
+            if (b?.classList.contains('dti-cl-size')) { ui.big = !ui.big; saveUi(); render(); return; }
+            if (b?.classList.contains('dti-cl-gear')) return openSettings(b);
+            const it = e.target.closest('.dti-cl-item');
+            if (it) {
+                const r = list.find(x => x.name === it.dataset.name);
+                if (r?.id) _showItemInfoPopup(r.id, r.name, r.img, it);
+                else if (r) window.open(itemdbHref(r.name), '_blank', 'noopener');
+            }
+        });
+        app.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList?.contains('dti-cl-item')) { e.preventDefault(); e.target.click(); } });
+        let qT = 0;
+        $('.dti-cl-search input').addEventListener('input', e => { clearTimeout(qT); qT = setTimeout(() => { ui.q = e.target.value; render(); }, 140); });
+        $('.dti-cl-sort').addEventListener('change', async e => {
+            ui.sort = e.target.value; saveUi();
+            if (ui.sort === 'caps') await Promise.all(rowsNow().filter(r => r.nc && !capCache.has(r.name)).map(r => ncCapRange(r.name).then(v => capCache.set(r.name, v))));
+            render();
+        });
+        function openSync() {
+            const L = link(), d = L && closetLinkDiff(C(), me, L.id);
+            if (!d) return;
+            const ops = [...d.add, ...d.change, ...d.remove];
+            const unmatched = (C()?.items || []).filter(i => !i.id).length;
+            openPanel('sync', `<div class="t"><b>Sync “${esc(L.name)}” with your closet</b></div>
+                <div class="s">Nothing is changed on DTI until you click Sync now — and it can be undone after.${unmatched ? ` (${unmatched} of your closet’s items aren’t matched with DTI${resolving ? ' yet' : ''}: they’re left out.)` : ''}</div>
+                ${opsList(d.add, 'Add')}${opsList(d.change, 'Change how many')}${opsList(d.remove, 'Take out — not in your closet any more')}`, ops);
+        }
+        function openUntrade() {
+            const ops = [], c = C();
+            rowsNow().filter(r => !r.gone && r.trade).forEach(r => {
+                let keep = r.qty;   // (your closet's copies come out of your trading lists; any more than that stay)
+                (me?.lists || []).filter(l => l.owned && String(l.vis) === '2' && (!link() || String(l.id) !== String(link().id))).forEach(l => {
+                    const has = l.items.find(([id]) => String(id) === r.id)?.[1] || 0;
+                    if (!has || keep <= 0) return;
+                    const out = Math.min(has, keep);
+                    keep -= out;
+                    ops.push({ id: r.id, name: `${r.name} (${l.name})`, list: l.id, to: has - out, from: has });
+                });
+            });
+            if (!c || !ops.length) return;
+            openPanel('untrade', `<div class="t"><b>Take your closet items out of your trading lists</b></div>
+                <div class="s">They’re in your closet — the items you keep — so they come out of the lists people trade from. Any copies you have beyond your closet’s stay. It can be undone after.</div>
+                ${opsList(ops, 'Out of')}`, ops);
+        }
+        function openExtras() {
+            const owned = (me?.lists || []).filter(l => l.owned && !l.unlisted && (!link() || String(l.id) !== String(link().id)))
+                .sort((a, b) => (String(b.vis) === '2') - (String(a.vis) === '2') || a.name.localeCompare(b.name));
+            const ops = [];
+            rowsNow().filter(r => !r.gone && r.id && r.qty > 1).forEach(r => ops.push({ id: r.id, name: r.name, list: '', to: r.qty - 1, from: 0 }));
+            if (!ops.length) return;
+            openPanel('extras', `<div class="t"><b>Put the extra copies in a trade list</b></div>
+                <div class="s">Your closet keeps one of each; the rest go in the list you pick (a list that has some already ends up with at least that many).
+                <select aria-label="The trade list"><option value="">Which list…</option>${owned.map(l => `<option value="${esc(l.id)}">${esc(l.name)}${String(l.vis) === '2' ? ' (Trading)' : ''}</option>`).join('')}</select></div>
+                ${opsList(ops, 'Extra copies')}`, ops);
+            panelEl.querySelector('select').addEventListener('change', e => {   // (what the list has already: at least the extras)
+                const l = owned.find(x => String(x.id) === e.target.value);
+                ops.forEach(o => { const has = l?.items.find(([id]) => String(id) === String(o.id))?.[1] || 0; o.from = has; o.to = Math.max(has, o.to); });
+            });
+        }
+        function openSettings(anchor) {
+            document.querySelector('.dti-cl-opts')?.remove();
+            const o = closetOpts(), pop = document.createElement('div');
+            pop.className = 'dti-cl-opts';
+            pop.innerHTML = `<label><input type="checkbox" data-o="notrade"${o.notrade ? ' checked' : ''}><span><b>Leave my closet out of what I have to trade</b><small>Compare on someone’s items, Trade Finder’s “What do they want from me?” and Neofriends don’t count your closet’s copies</small></span></label>
+                <label><input type="checkbox" data-o="marks"${o.marks ? ' checked' : ''}><span><b>Mark closet items across DTI</b><small>A small closet mark on items you have in your closet — search, item pages, other people’s lists</small></span></label>`;
+            app.appendChild(pop);
+            const r = anchor.getBoundingClientRect(), ar = app.getBoundingClientRect();
+            pop.style.top = (r.bottom - ar.top + 6) + 'px'; pop.style.right = Math.max(8, ar.right - r.right) + 'px';
+            pop.addEventListener('change', e => { const k = e.target.dataset.o; if (k) GM_setValue('dti_closet_opts', { ...closetOpts(), [k]: e.target.checked }); });
+            const off = ev => { if (!pop.contains(ev.target) && ev.target !== anchor) { pop.remove(); document.removeEventListener('pointerdown', off, true); } };
+            document.addEventListener('pointerdown', off, true);
+        }
+
+        // ── kept up to date: a load from Neopets (another tab), the account in the nav, your lists ──
+        gmWatch('dti_my_closet', app, () => { if (!resolving) { render(); resolve(); } });
+        gmWatch('dti_closet_link', app, (n, o, v, remote) => { if (remote) render(); });
+        gmWatch('dti_seeking', app, () => render());
+        gmWatch('dti_acct_active', app, () => { closePanel(); render(); resolve(); });
+        render();
+        resolve();
+        if (link() && !inModal) { me = await nfMine(true).catch(() => me); meFresh = true; if (app.isConnected) render(); }   // (the linked list as it is now)
+    }
+    function injectClosetCSS() {
+        if (document.getElementById('dti-closet-app-css')) return;
+        const s = GM_addStyle(`
+            #dti-cl-app { position: relative; max-width: 1240px; margin: 0 auto; padding: 22px 20px 60px; box-sizing: border-box; color: var(--text); font-family: inherit; }
+            #dti-cl-app.in-modal { padding: 4px 4px 30px; }
+            #dti-cl-app [hidden] { display: none !important; }
+            #dti-cl-app button { font-family: inherit; }
+            .dti-cl-head { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px; margin-bottom: 14px; }
+            .dti-cl-hico { width: 42px; height: 42px; flex: none; border-radius: 12px; display: grid; place-items: center; background: var(--accent-glow); color: var(--accent-text, var(--accent)); }
+            .dti-cl-hico svg { width: 22px; height: 22px; }
+            .dti-cl-htxt h1 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -.4px; line-height: 1.2; }
+            .dti-cl-htxt p { margin: 2px 0 0; font-size: 12.5px; color: var(--text-muted); }
+            .dti-cl-hstats { display: flex; flex-wrap: wrap; gap: 6px; }
+            .dti-cl-hstats > span { padding: 4px 11px; border-radius: 99px; border: 1px solid var(--border); background: var(--surface); font-size: 12px; color: var(--text-muted); }
+            .dti-cl-hstats b { color: var(--text); }
+            .dti-cl-hacts { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+            .dti-cl-when { font-size: 11.5px; color: var(--text-muted); }
+            #dti-cl-app button.pri, .dti-cl-load { height: 36px; padding: 0 16px; border: none; border-radius: 10px; background: var(--accent); color: var(--accent-fg, #fff); font-size: 13px; font-weight: 700; cursor: pointer; }
+            #dti-cl-app button.pri:hover, .dti-cl-load:hover { filter: brightness(1.08); }
+            #dti-cl-app button:disabled { opacity: .6; cursor: default; }
+            .dti-cl-accts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+            .dti-cl-accts button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 99px; border: 1.5px solid var(--border); background: var(--surface); color: var(--text); font-size: 12.5px; font-weight: 700; cursor: pointer; }
+            .dti-cl-accts button i { width: 9px; height: 9px; border-radius: 50%; background: var(--ac); }
+            .dti-cl-accts button small { color: var(--text-muted); font-weight: 600; }
+            .dti-cl-accts button.on { border-color: var(--ac); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ac) 30%, transparent); }
+            .dti-cl-match { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); font-size: 12.5px; color: var(--text-muted); }
+            .dti-cl-match i { display: block; height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+            .dti-cl-match b { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+            .dti-cl-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 12px; margin-bottom: 12px; }
+            .dti-cl-top:empty { display: none; }
+            @media (max-width: 860px) { .dti-cl-top { grid-template-columns: 1fr; } }
+            .dti-cl-card { display: flex; flex-direction: column; gap: 7px; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); }
+            .dti-cl-card .t { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+            .dti-cl-card .t svg { width: 16px; height: 16px; color: var(--accent-text, var(--accent)); flex: none; }
+            .dti-cl-card .s { font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
+            .dti-cl-card .a { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 2px; }
+            .dti-cl-card .a button:not(.pri) { height: 34px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12.5px; font-weight: 700; cursor: pointer; }
+            .dti-cl-card .a button:not(.pri):hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-cl-card select { height: 34px; max-width: 100%; padding: 0 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; }
+            .dti-cl-card .s select { display: block; margin-top: 8px; }
+            .dti-cl-link.ok .s { color: var(--success); font-weight: 700; }
+            .dti-cl-card .g { display: flex; flex-direction: column; gap: 3px; font-size: 12px; line-height: 1.5; }
+            .dti-cl-card .g span { color: var(--text-muted); }
+            .dti-cl-card .g small { font-weight: 800; color: var(--text); }
+            .dti-cl-notes { display: flex; flex-wrap: wrap; align-content: flex-start; align-items: center; gap: 7px; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); }
+            .dti-cl-since { flex-basis: 100%; font-size: 12px; font-weight: 700; color: var(--text-muted); }
+            .dti-cl-note { height: 30px; padding: 0 12px; border-radius: 99px; border: 1.5px solid var(--border); background: var(--surface); color: var(--text); font-size: 12.5px; cursor: pointer; }
+            .dti-cl-note b { font-weight: 800; }
+            .dti-cl-note:hover, .dti-cl-note.on { border-color: var(--accent); background: var(--accent-glow); }
+            .dti-cl-note.warn { border-color: color-mix(in srgb, var(--nc) 60%, var(--border)); }
+            .dti-cl-note.warn.on, .dti-cl-note.warn:hover { background: color-mix(in srgb, var(--nc) 16%, transparent); border-color: var(--nc); }
+            .dti-cl-note.mute { color: var(--text-muted); }
+            .dti-cl-panel { margin-bottom: 12px; }
+            .dti-cl-bar { position: sticky; top: 62px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; padding: 9px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); }
+            #dti-cl-app.in-modal .dti-cl-bar { top: 0; }
+            .dti-cl-search { flex: 1 1 220px; min-width: 0; }
+            .dti-cl-search input { width: 100%; height: 36px; box-sizing: border-box; padding: 0 12px; border-radius: 10px; font-size: 13px; }
+            .dti-cl-seg { display: flex; gap: 2px; height: 36px; box-sizing: border-box; padding: 3px; border-radius: 10px; border: 1.5px solid var(--border); }
+            .dti-cl-seg button { padding: 0 12px; border: none; border-radius: 7px; background: transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 700; cursor: pointer; }
+            .dti-cl-seg button.on { background: var(--accent); color: var(--accent-fg, #fff); }
+            .dti-cl-sort { flex: none; width: auto !important; height: 36px; margin: 0; padding: 0 10px !important; border-radius: 10px; border: 1.5px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; }
+            .dti-cl-size, .dti-cl-gear { flex: none; width: 36px !important; height: 36px; margin: 0; padding: 0; border-radius: 10px; border: 1.5px solid var(--border); background: var(--surface); color: var(--text-muted); font-size: 16px; cursor: pointer; }
+            .dti-cl-size:hover, .dti-cl-gear:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            #dti-cl-app.big .dti-cl-size { background: var(--accent-glow); border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-cl-quick { flex-basis: 100%; display: flex; justify-content: flex-end; }
+            .dti-cl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+            #dti-cl-app.big .dti-cl-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+            .dti-cl-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 8px 9px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; transition: border-color .12s, transform .12s, box-shadow .12s; }
+            #dti-cl-app .dti-mine .dti-cl { display: none; }   /* (here everything's in your closet: that part of the mark says nothing) */
+            #dti-cl-app .dti-mine.closet:not(.own):not(.want):not(.seek) { display: none; }
+            .dti-cl-item:hover, .dti-cl-item:focus-visible { border-color: var(--accent); transform: translateY(-1px); box-shadow: var(--shadow-md, 0 4px 14px rgba(0,0,0,.12)); outline: none; }
+            .dti-cl-item.gone { opacity: .55; }
+            .dti-cl-item .pic { position: relative; width: 80px; height: 80px; border-radius: 9px; background: #fff; display: grid; place-items: center; }
+            #dti-cl-app.big .dti-cl-item .pic { width: 120px; height: 120px; }
+            .dti-cl-item .pic img { width: 80px; height: 80px; object-fit: contain; }
+            #dti-cl-app.big .dti-cl-item .pic img { width: 120px; height: 120px; image-rendering: auto; }
+            .dti-cl-item .qty { position: absolute; right: -4px; bottom: -4px; padding: 1px 6px; border-radius: 99px; background: var(--accent); color: var(--accent-fg, #fff); font-size: 10.5px; font-weight: 800; }
+            .dti-cl-item .nm { width: 100%; text-align: center; font-size: 11.5px; font-weight: 700; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+            .dti-cl-item .sub { display: flex; gap: 5px; align-items: center; justify-content: center; flex-wrap: wrap; font-size: 10.5px; }
+            .dti-cl-item .sub em { font-style: normal; padding: 0 6px; border-radius: 5px; font-weight: 800; font-size: 9.5px; background: var(--surface-2); color: var(--text-muted); }
+            .dti-cl-item .sub em.nc { background: color-mix(in srgb, var(--nc) 18%, transparent); color: var(--nc); }
+            .dti-cl-item .cap { font-weight: 800; color: var(--accent-text, var(--accent)); }
+            .dti-cl-item .tags { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+            .dti-cl-item .tags i { font-style: normal; padding: 1px 7px; border-radius: 99px; font-size: 9.5px; font-weight: 800; background: var(--accent-glow); color: var(--accent-text, var(--accent)); }
+            .dti-cl-item .tags i.warn { background: color-mix(in srgb, var(--nc) 18%, transparent); color: var(--nc); }
+            .dti-cl-item .tags i.mute, .dti-cl-item .tags i.gone { background: var(--surface-2); color: var(--text-muted); }
+            .dti-cl-more { padding: 18px; text-align: center; font-size: 12px; color: var(--text-muted); }
+            .dti-cl-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 50px 20px; text-align: center; font-size: 13px; color: var(--text-muted); }
+            .dti-cl-empty > b { font-size: 16px; color: var(--text); }
+            .dti-cl-empty ol { max-width: 560px; margin: 4px 0 8px; padding-left: 20px; text-align: left; line-height: 1.6; }
+            .dti-cl-empty ol b { color: var(--text); }
+            .dti-cl-opts { position: absolute; z-index: 30; width: 330px; max-width: calc(100% - 16px); display: flex; flex-direction: column; gap: 4px; padding: 8px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,.25)); }
+            .dti-cl-opts label { display: flex; gap: 10px; align-items: flex-start; padding: 8px; border-radius: 10px; cursor: pointer; }
+            .dti-cl-opts label:hover { background: var(--surface-2); }
+            .dti-cl-opts input { margin-top: 3px; accent-color: var(--accent); }
+            .dti-cl-opts span { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+            .dti-cl-opts small { font-size: 11.5px; color: var(--text-muted); line-height: 1.45; }
+        `);
+        s.id = 'dti-closet-app-css';
+    }
     function _openTradeFinder(focus) {
         const modal = _buildPageModal('Trade Finder', '/items?q=dti-enhance#finder', '', { icon: TF_ICO, cls: 'dti-pm-tf' });
         const content = modal.querySelector('#dti-pm-content');
@@ -9616,6 +10990,11 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         const nExtra = () => items.filter(x => x.extra).length;
         const isSeek = id => DTISeek.has(id);
         const seekW = id => (isSeek(id) ? [3, 2, 1][DTISeek.tierOf(DTISeek.get(id))] : 0);   // (Must have 3, Want 2, Maybe 1)   // (Seeking: first on the cards, ringed, and worth more in Best match)
+        // (your wishlists' priorities — High 3, Medium 2, Low 1 — the same: whichever says more, Seeking's tier or its list's)
+        await mineLoad();   // (every list read — the ones you keep, Not for trade, are left out of what you have to give)
+        const tfPrio = new Map(), PR = listPrio(), RANK = { high: 0, med: 1, low: 2 };   // (the picked account's wishlists)
+        (me?.lists || []).filter(l => !l.owned && RANK[PR[l.id]] !== undefined).forEach(l => l.items.forEach(([iid]) => { if (!(tfPrio.get(+iid) <= RANK[PR[l.id]])) tfPrio.set(+iid, RANK[PR[l.id]]); }));
+        const prioOf = id => tfPrio.get(+id) ?? null, wantW = id => Math.max(seekW(id), [3, 2, 1][prioOf(id)] || 0);
         // What each item is worth ([min, max] caps, or null) — for the cards, their order and each trader's total
         const itemRng = new Map();
         const loadVals = its => Promise.all(its.filter(it => !itemRng.has(String(it.id))).map(it => ncCapRange(it.name).then(v => itemRng.set(String(it.id), v || null))));
@@ -9909,8 +11288,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         };
         const actTag = t => `<span class="dti-tf-act ${dtiActCls(t.active || '-')}">${noteEsc(dtiActText(t.active) || 'Last active a while ago')}</span>`;
         // Your own items (owned lists) → your list names: what a trader wants is matched against these
-        const mineOwned = new Map();
-        (me?.lists || []).filter(l => l.owned).forEach(l => l.items.forEach(([iid]) => { const a = mineOwned.get(iid) || []; if (!a.includes(l.name)) a.push(l.name); mineOwned.set(iid, a); }));
+        const mineOwned = new Map(), mineQty = new Map();   // (and how many: your closet's copies don't count as yours to trade — My Closet)
+        (me?.lists || []).filter(l => l.owned).forEach(l => l.items.forEach(([iid, q]) => { const a = mineOwned.get(iid) || []; if (!a.includes(l.name)) a.push(l.name); mineOwned.set(iid, a); mineQty.set(iid, (mineQty.get(iid) || 0) + (q || 1)); }));
         // an open Trade Finder redraws after the daily check
         gmWatch('dti_tf_ping', app, async () => {
             if (!content.querySelector('.dti-tf-head')) return;
@@ -9934,7 +11313,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 t.id = userIdOf(t.closet);
                 t.nf = NF.isFriend(t.id); t.age = actAge(t.active);
                 t.seekN = t.items.filter(x => isSeek(x.id)).length;
-                t.score = (t.items.length + t.items.reduce((w, x) => w + seekW(x.id), 0)) * actWeight(t.age);   // (an item you're seeking counts three times)
+                t.score = (t.items.length + t.items.reduce((w, x) => w + wantW(x.id), 0)) * actWeight(t.age);   // (an item you're seeking — or on a High wishlist — counts several times)
+                t.pr = [0, 1, 2].map(p => t.items.filter(x => prioOf(x.id) === p).length);   // (how many of your High / Medium / Low wishlists' items)
                 t.newIds = freshBy.get(t.owner) || new Set();
                 t.val = 0;
                 const f = t.nf && NF.get(t.id);   // (a Neofriend: remember when they were last on DTI)
@@ -9952,7 +11332,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             const newN = list.filter(t => t.newIds.size && !tfHidden.has(t.id) && !dtiAvoid.has(t.id)).length;
             if (!newN) ui.newOnly = false;
             [...ui.items].forEach(id => { if (!wl.some(it => String(it.id) === id && (it.n || it.extra))) ui.items.delete(id); });
-            const wlCmp = (a, b) => !!b.extra - !!a.extra || seekW(b.id) - seekW(a.id) || WLS[ui.wlSort](a, b) || a.name.localeCompare(b.name);   // (look-ups, then Seeking)
+            const wlCmp = (a, b) => !!b.extra - !!a.extra || wantW(b.id) - wantW(a.id) || WLS[ui.wlSort](a, b) || a.name.localeCompare(b.name);   // (look-ups, then Seeking)
             const seekTN = list.filter(t => t.seekN && !tfHidden.has(t.id) && !dtiAvoid.has(t.id)).length;
             if (!seekTN) ui.seekOnly = false;
             wl.sort(wlCmp);
@@ -9975,7 +11355,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                         </div>
                         <div class="dti-tf-wl" role="group" aria-label="Your wishlist">${wl.map(it => { const id = String(it.id); return `<button type="button" class="dti-tf-chip${ui.items.has(id) ? ' on' : ''}${it.extra ? ' extra' : ''}${isSeek(id) ? ' seek' : ''}" data-id="${noteEsc(id)}"${it.n || it.extra ? '' : ' data-none="1"'} title="${noteEsc(it.name)}" aria-pressed="${ui.items.has(id)}">
                             <span class="dti-tf-cpic">${it.img ? `<img src="${noteEsc(it.img)}" alt="" loading="lazy">` : ''}${it.fresh ? `<em class="dti-tf-cnew" title="${it.fresh} newly offering it since the check before">${it.fresh} new</em>` : ''}</span>
-                            <span class="dti-tf-ctxt"><b>${noteEsc(it.name)}</b><small>${it.extra ? 'Looked up \u00b7 ' : ''}${it.n ? `${it.n} offering` : 'Nobody\u2019s offering it'}${rngText(it.id) ? ` \u00b7 <span class="dti-tf-cval">${rngText(it.id)}</span>` : ''}</small></span>
+                            <span class="dti-tf-ctxt"><b>${noteEsc(it.name)}</b><small>${it.extra ? 'Looked up \u00b7 ' : ''}${it.n ? `${it.n} offering` : 'Nobody\u2019s offering it'}${rngText(it.id) ? ` \u00b7 <span class="dti-tf-cval">${rngText(it.id)}</span>` : ''}${closetQtyOf(id) ? ` \u00b7 <span class="dti-tf-ccl" title="You have it in your Neopets closet (My Closet)">in your closet${closetQtyOf(id) > 1 ? ' \u00d7' + closetQtyOf(id) : ''}</span>` : ''}</small></span>
                             <i class="dti-tf-check">\u2713</i>${it.extra ? `<span class="dti-tf-rm" data-rm="${noteEsc(id)}" role="button" title="Remove this lookup" aria-label="Remove this lookup">\u00d7</span>` : `<span class="dti-tf-rm skip" data-skip="${noteEsc(id)}" role="button" title="Leave this item out of Trade Finder" aria-label="Leave this item out">\u00d7</span>`}</button>`; }).join('')}</div>
                         <button type="button" class="dti-tf-wlmore" hidden></button>
                     </div>
@@ -10006,7 +11386,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                     const its = [...t.items].sort((a, b) => (sel.length ? ui.items.has(String(b.id)) - ui.items.has(String(a.id)) : 0)   // (your picks first,
                         || wlCmp(wlBy.get(String(a.id)) || a, wlBy.get(String(b.id)) || b));                                                  //  then the cards' order)
                     return `<div class="dti-tf-row" data-i="${i}">
-                        <div class="dti-tf-who">${t.closet ? `<a class="dti-tf-name" href="${noteEsc(t.closet)}" target="_blank" title="Their items (new tab)">${noteEsc(t.owner)}</a>` : `<b>${noteEsc(t.owner)}</b>`}<small>${(n => n ? `has <strong>${n}</strong> of your wishlist` : `has ${t.items.length === 1 ? 'the item' : 'the items'} you looked up`)(t.items.filter(x => !x.extra).length)}${sel.length > 1 ? ` \u00b7 <strong>${t.picks}</strong> of your ${sel.length} picks` : ''}</small>${t.newIds.size ? `<span class="dti-tf-newtag" title="Newly offering ${t.newIds.size} of your items since the check before">New \u00b7 ${t.newIds.size}</span>` : ''}${t.seekN ? `<span class="dti-tf-seektag" title="Has ${t.seekN} of the items on your Seeking list">${SEEK_ICO}${t.seekN} you\u2019re seeking</span>` : ''}${actTag(t)}${t.closet ? `<span class="dti-nm-slot" data-closet="${noteEsc(t.closet)}"></span>` : ''}</div>
+                        <div class="dti-tf-who">${t.closet ? `<a class="dti-tf-name" href="${noteEsc(t.closet)}" target="_blank" title="Their items (new tab)">${noteEsc(t.owner)}</a>` : `<b>${noteEsc(t.owner)}</b>`}<small>${(n => n ? `has <strong>${n}</strong> of your wishlist` : `has ${t.items.length === 1 ? 'the item' : 'the items'} you looked up`)(t.items.filter(x => !x.extra).length)}${sel.length > 1 ? ` \u00b7 <strong>${t.picks}</strong> of your ${sel.length} picks` : ''}</small>${t.newIds.size ? `<span class="dti-tf-newtag" title="Newly offering ${t.newIds.size} of your items since the check before">New \u00b7 ${t.newIds.size}</span>` : ''}${t.seekN ? `<span class="dti-tf-seektag" title="Has ${t.seekN} of the items on your Seeking list">${SEEK_ICO}${t.seekN} you\u2019re seeking</span>` : ''}${t.pr.map((n, p) => n ? `<span class="dti-tf-priotag p${p}" title="Has ${n} of the items on your ${['High', 'Medium', 'Low'][p]} priority wishlists">${n} ${['high', 'medium', 'low'][p]}</span>` : '').join('')}${actTag(t)}${t.closet ? `<span class="dti-nm-slot" data-closet="${noteEsc(t.closet)}"></span>` : ''}</div>
                         <div class="dti-tf-items">${its.map((x, j) => `<a href="/items/${x.id}" target="_blank" class="${ui.items.has(String(x.id)) ? 'hit' : ''}${t.newIds.has(String(x.id)) ? ' isnew' : ''}${isSeek(x.id) ? ' seek' : ''}${j >= per ? ' x' : ''}" title="${isSeek(x.id) ? 'Seeking \u2014 ' : ''}${noteEsc(x.name)}${x.lists?.length ? ' \u2014 in their ' + noteEsc(x.lists.map(l => l.name).join(', ')) : ''}">${x.img ? `<img src="${noteEsc(x.img)}" alt="" loading="lazy">` : ''}</a>`).join('')}${its.length > per ? `<button type="button" class="dti-tf-allits" title="See all ${its.length}">+${its.length - per}</button>` : ''}
                             <div class="dti-tf-meta"><span class="dti-tf-val" hidden></span>${(() => {   // which of their lists these come from
                                 const ls = [];
@@ -10062,9 +11442,11 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                         wbox.innerHTML = '<span class="dti-tf-wmsg">Reading their wishlist\u2026</span>';
                         try {
                             const w = await tfTheirWants(t.closet);
-                            const mine = [...w.want.entries()].filter(([iid]) => mineOwned.has(iid));
+                            const mine = [...w.want.entries()].filter(([iid]) => mineOwned.has(iid) && closetTradeable(iid, mineQty.get(iid)) > 0);
+                            const keptN = [...w.want.keys()].filter(iid => mineOwned.has(iid) && !(closetTradeable(iid, mineQty.get(iid)) > 0)).length;   // (in your closet: left out)
                             wbox.dataset.done = '1';
                             wbtn.textContent = mine.length ? `Wants ${mine.length} of yours` : 'Wants none of yours';
+                            if (keptN) wbtn.title = `${keptN} more of yours ${keptN === 1 ? 'is' : 'are'} on their wishlist, but in your closet (My Closet) — left out`;
                             if (!w.want.size) { wbox.innerHTML = '<span class="dti-tf-wmsg">Their wishlist is empty, or they keep it private.</span>'; return; }
                             if (!mine.length) { wbox.innerHTML = `<span class="dti-tf-wmsg">Nothing of yours is on their wishlist (${w.want.size} item${w.want.size === 1 ? '' : 's'}).</span>`; return; }
                             wbox.innerHTML = `<span class="dti-tf-wlbl">They want <b>${mine.length}</b> of your items:</span><div class="dti-tf-witems">${mine.map(([iid, theirs]) => {
@@ -10416,6 +11798,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 }
                 if (!st.snap) { paintStats(); return; }
                 st.me = acctScopeMe(await nfMine());
+                await mineLoad();   // (the lists you keep, Not for trade: left out of what you have to give)
                 if (token !== st.token) return;
                 paintStats(); paintTabCounts(); renderPanel();
             };
@@ -10445,10 +11828,15 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             };
             const theirOwn = where(s, true), theirWant = where(s, false), myOwn = where(me, true), myWant = nfIds(me, false);
             const seek = new Set(DTISeek.list().map(e => +e.id));   // (your Seeking list counts as wanting it — and goes first)
-            const have = [...theirOwn].filter(([id]) => myWant.has(id) || seek.has(id)).map(([id, e]) => ({ id, qty: e.qty, meta: (seek.has(id) ? 'Seeking \u00b7 ' : '') + e.lists.join(', '), seek: seek.has(id) }));
-            const give = [...theirWant].filter(([id]) => myOwn.has(id)).map(([id]) => ({ id, qty: myOwn.get(id).qty, meta: 'Yours: ' + myOwn.get(id).lists.join(', ') }));
+            // (your wishlists' priorities, as you marked them on My Items: High first, after Seeking)
+            const PR = listPrio(), RANK = { high: 0, med: 1, low: 2 }, prio = new Map();
+            me.lists.filter(l => !l.owned && RANK[PR[l.id]] !== undefined).forEach(l => l.items.forEach(([id]) => { if (!(prio.get(id) <= RANK[PR[l.id]])) prio.set(id, RANK[PR[l.id]]); }));
+            const have = [...theirOwn].filter(([id]) => myWant.has(id) || seek.has(id)).map(([id, e]) => ({ id, qty: e.qty, seek: seek.has(id), prio: prio.get(id) ?? 3,
+                meta: (seek.has(id) ? 'Seeking \u00b7 ' : '') + (prio.has(id) ? ['High', 'Medium', 'Low'][prio.get(id)] + ' priority \u00b7 ' : '') + e.lists.join(', ') }));
+            // (what they want that you have to give — your closet's copies aren't: My Closet)
+            const give = [...theirWant].filter(([id]) => myOwn.has(id) && closetTradeable(id, myOwn.get(id).qty) > 0).map(([id]) => ({ id, qty: closetTradeable(id, myOwn.get(id).qty), meta: 'Yours: ' + myOwn.get(id).lists.join(', ') }));
             const byName = map => (a, b) => (map[a.id]?.[0] || '').localeCompare(map[b.id]?.[0] || '');
-            have.sort((a, b) => (b.seek ? 1 : 0) - (a.seek ? 1 : 0) || byName(s.items)(a, b)); give.sort(byName(me.items));
+            have.sort((a, b) => (b.seek ? 1 : 0) - (a.seek ? 1 : 0) || a.prio - b.prio || byName(s.items)(a, b)); give.sort(byName(me.items));
             return { have, give };
         }
         function paintTabCounts() {
@@ -10499,8 +11887,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                     panel.innerHTML = `<div class="dti-nf-msg"><b>No matches right now</b>Nothing ${name} has is on your wishlist, and nothing they want is in your items. Their lists are checked again as you visit.</div>`;
                     return;
                 }
-                const seekN = mt.have.filter(x => x.seek).length;
-                panel.innerHTML = section(`${name} has — you want`, seekN ? `${seekN} you\u2019re seeking` : '', NF_ICO.get, mt.have.length) + section(`You have — ${name} wants`, '', NF_ICO.give, mt.give.length)
+                const seekN = mt.have.filter(x => x.seek).length, hiN = mt.have.filter(x => x.prio === 0).length;
+                panel.innerHTML = section(`${name} has — you want`, [seekN ? `${seekN} you\u2019re seeking` : '', hiN ? `${hiN} high priority` : ''].filter(Boolean).join(' \u00b7 '), NF_ICO.get, mt.have.length) + section(`You have — ${name} wants`, '', NF_ICO.give, mt.give.length)
                     + `<p class="dti-nf-foot">From the lists ${name} shares (public and trading) and your own items, checked ${noteAgo(st.me.at)}.</p>`;
                 const [g1, g2] = panel.querySelectorAll('.dti-nf-grid');
                 mt.have.length ? fillGrid(g1, mt.have, s.items) : g1.outerHTML = '<div class="dti-nf-msg small">Nothing yet.</div>';
@@ -10887,6 +12275,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-tf-clear:hover { background: var(--surface-2); color: var(--text); }
             .dti-tf-wl { display: grid; grid-template-columns: repeat(auto-fill, minmax(184px, 1fr)); gap: 6px; }
             .dti-tf-wlwrap:not(.open) .dti-tf-wl { max-height: 108px; overflow: hidden; }   /* two rows */
+            .dti-tf-ccl { font-weight: 700; color: var(--success); }
             .dti-tf-chip {
                 position: relative; display: flex; align-items: center; gap: 8px; height: 51px; padding: 5px 22px 5px 5px; cursor: pointer; text-align: left;
                 border-radius: 11px; border: 1.5px solid var(--border); background: var(--surface); color: var(--text); font-family: inherit;
@@ -11065,6 +12454,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-tf-chip.seek { border-color: color-mix(in srgb, #f97316 60%, var(--border)); }
             .dti-tf-chip.seek .dti-tf-cpic::after { content: '\u25ce'; position: absolute; top: -3px; right: -3px; width: 15px; height: 15px; display: grid; place-items: center; border-radius: 50%; background: #f97316; color: #fff; font-size: 10px; line-height: 1; }
             .dti-tf-seektag { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; margin-top: 3px; padding: 0 7px; border-radius: 99px; font-size: 10px; font-weight: 800; line-height: 17px; background: #f97316; color: #fff; }
+            .dti-tf-priotag { display: inline-flex; align-self: flex-start; margin-top: 3px; padding: 0 7px; border-radius: 99px; font-size: 10px; font-weight: 800; line-height: 17px; color: #fff; }
+            .dti-tf-priotag.p0 { background: #e11d48; } .dti-tf-priotag.p1 { background: #d97706; } .dti-tf-priotag.p2 { background: #64748b; }
             .dti-tf-seektag svg, .dti-tf-seekchip svg { width: 11px; height: 11px; }
             .dti-tf-seekchip { display: inline-flex; align-items: center; gap: 5px; }
             .dti-tf-newtag { align-self: flex-start; margin-top: 3px; padding: 0 7px; border-radius: 99px; font-size: 10px; font-weight: 800; line-height: 17px; background: var(--success); color: #fff; }
@@ -11724,7 +13115,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             else if (ui.view === 'leaving') out = out.filter(isLeaving);
             else if (ui.view === 'sale') out = out.filter(onSale);
             else if (ui.view === 'wish') out = out.filter(isWished);
-            if (ui.hideOwned && _mineMap) out = out.filter(e => !mineOf(e.r.item_id)?.own);
+            if (ui.hideOwned) out = out.filter(e => !(_mineMap && mineOf(e.r.item_id)?.own) && !closetQtyOf(e.r.item_id));   // (in your lists, or your closet — My Closet)
             const hidePerm = ui.hidePerm && ui.view !== 'wish';   // (your wishlist view shows permanent items too)
             permHidden = hidePerm ? out.filter(e => e.perm).length : 0;
             if (hidePerm) out = out.filter(e => !e.perm);
@@ -12013,7 +13404,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             rows.sort((a, b) => b.always - a.always || b.isLE - a.isLE || (a.rate ?? 999) - (b.rate ?? 999) || a.name.localeCompare(b.name));
             host.innerHTML = `<div class="dti-ip-section">${title}</div>
                 <div class="dti-mg-psum">${facts.filter(Boolean).join('<span>·</span>')}</div>
-                <div class="dti-mg-pool">${rows.map(x => { const lb = leApart && x.isLE && !x.always; return `<a class="dti-mg-prow${x.isLE ? ' le' : ''}" href="${x.iid ? `/items/0#pool-${x.iid}` : `/items?q=${encodeURIComponent(x.name)}`}" data-turbo="false" target="_blank" rel="noopener"
+                <div class="dti-mg-pool">${rows.map(x => { const lb = leApart && x.isLE && !x.always; return `<a class="dti-mg-prow${x.isLE ? ' le' : ''}" href="${x.iid ? noteEsc(poolHref(x)) : `/items?q=${encodeURIComponent(x.name)}`}" data-turbo="false" target="_blank" rel="noopener"
                     data-pi="${x.iid || ''}" data-pin="${noteEsc(x.name || '')}" data-pii="${noteEsc(x.image || '')}" title="${noteEsc(x.name)}${lb ? ` \u2014 ${Math.round(x.rate)}% of the LE bonus drops` : ''}">
                     <img src="${noteEsc(x.image || '')}" alt="" loading="lazy">
                     <span class="dti-mg-pmain"><span class="dti-mg-pname">${noteEsc(x.name)}${x.always ? '<i class="bonus">Always</i>' : x.isLE ? '<i class="le">LE</i>' : ''}</span>
@@ -12526,6 +13917,10 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 border-color: color-mix(in srgb, #f97316 35%, var(--border));
             }
             .dti-lp-seek svg { width: 16px; height: 16px; color: #ea580c; }
+            .dti-lp-cl { display: flex; align-items: center; gap: 8px; margin: 0 10px 6px; padding: 7px 10px; border-radius: 10px; font-size: 11.5px; line-height: 1.4; color: var(--text);
+                background: color-mix(in srgb, var(--success) 10%, var(--surface)); border: 1px solid color-mix(in srgb, var(--success) 30%, var(--border)); }
+            .dti-lp-cl svg { flex: none; width: 15px; height: 15px; color: var(--success); }
+            .dti-lp-cl a { font-weight: 700; color: var(--accent-text, var(--accent)) !important; }
             .dti-lp-seek > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
             .dti-lp-seek b { font-size: 12.5px; font-weight: 800; }
             .dti-lp-seek small { font-size: 10.5px; font-weight: 600; color: var(--text-muted); white-space: normal; }
@@ -12590,10 +13985,10 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             label > input + .item-container .dti-copy-btn { left: 4px; bottom: 4px; width: 20px; height: 20px; border-radius: 50%; }
             label > input + .item-container .dti-copy-btn svg { width: 11px; height: 11px; }
             #wardrobe-2020-root:not(.dti-tile-mode) label > input + .item-container .dti-copy-btn { left: auto; top: auto; bottom: 5px; right: 55px; border-radius: 6px; }   /* list view: a row is too short for a third button on the left — beside the pencil */
-            /* Click the name (an item's page, an item info popup) to copy it — "Copied ✓" for a moment, over the page (nothing moves) */
-            :is(body.items-show h2.item-name, .dti-ip-name) { cursor: copy !important; position: relative; transition: color .12s; }
-            :is(body.items-show h2.item-name, .dti-ip-name):hover { color: var(--accent-text, var(--accent)) !important; }
-            :is(body.items-show h2.item-name, .dti-ip-name).dti-copied::after {
+            /* Click the name (an item's page, an item info popup, the shopping list) to copy it — "Copied ✓" for a moment, over the page (nothing moves) */
+            :is(body.items-show h2.item-name, .dti-ip-name, body.items-sources td.name-cell a.item-name) { cursor: copy !important; position: relative; transition: color .12s; }
+            :is(body.items-show h2.item-name, .dti-ip-name, body.items-sources td.name-cell a.item-name):hover { color: var(--accent-text, var(--accent)) !important; }
+            :is(body.items-show h2.item-name, .dti-ip-name, body.items-sources td.name-cell a.item-name).dti-copied::after {
                 content: 'Copied \u2713'; position: absolute; left: 0; bottom: calc(100% + 4px); z-index: 5; white-space: nowrap;
                 padding: 2px 8px; border-radius: 7px; box-shadow: var(--shadow-sm); pointer-events: none;
                 background: var(--accent); color: var(--accent-fg, #fff); font-size: 11px; font-weight: 700; letter-spacing: 0; line-height: 1.5;
@@ -12686,6 +14081,9 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-mine i { font-style: normal; color: #db2777; font-size: 9.5px; }
             .dti-mine .dti-sk { display: inline-flex; color: #ea580c; }
             .dti-mine .dti-sk svg { width: 10px; height: 10px; }
+            .dti-mine .dti-cl { display: inline-flex; color: var(--success); }
+            .dti-mine .dti-cl svg { width: 10px; height: 10px; }
+            .dti-mine.closet:not(.own):not(.want):not(.seek) { background: color-mix(in srgb, var(--success) 14%, var(--surface)); border-color: color-mix(in srgb, var(--success) 45%, transparent); }
             .dti-mine.seek:not(.own):not(.want) { background: color-mix(in srgb, #f97316 14%, var(--surface)); border-color: color-mix(in srgb, #f97316 45%, transparent); }
             .dti-mine.want:not(.own) { background: color-mix(in srgb, #ec4899 14%, var(--surface)); border-color: color-mix(in srgb, #ec4899 40%, transparent); }
             html[data-mode="dark"] .dti-mine i { color: #f472b6; }
@@ -12787,6 +14185,18 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-ne-pin.on { background: var(--accent-glow); border-color: var(--accent); color: var(--accent-text, var(--accent)); }
             .dti-ne-del:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
             .dti-ne-pin:disabled, .dti-ne-del:disabled { opacity: .35; cursor: default; }
+            .dti-ne-mailrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+            .dti-ne:has(.dti-ne-text:placeholder-shown) .dti-ne-mailrow { display: none; }   /* (nothing written: nothing to copy) */
+            .dti-ne-copy, .dti-ne-send {
+                display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 3px 10px; flex: 1 1 auto;
+                border-radius: 8px; border: 1px solid var(--border); background: transparent; cursor: pointer;
+                color: var(--text-muted); font-family: inherit; font-size: 11.5px; font-weight: 700; line-height: 1.25; text-align: center;
+                transition: border-color .12s, color .12s, background .12s, filter .12s;
+            }
+            .dti-ne-copy svg, .dti-ne-send svg { width: 12px; height: 12px; flex-shrink: 0; }
+            .dti-ne-copy:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-ne-send { border-color: var(--accent); background: var(--accent); color: var(--accent-fg, #fff); }
+            .dti-ne-send:hover { filter: brightness(1.08); }
             .dti-ne-open { flex-shrink: 0; font-size: 11.5px; font-weight: 700; color: var(--accent-text, var(--accent)); text-decoration: none; padding: 0 2px; }
             .dti-ne-open:hover { text-decoration: underline; }
             .dti-toast.has-action { pointer-events: auto; padding-right: 7px; }
@@ -13393,6 +14803,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             /* a style token: its name opens it; a Token tag under it */
             .dti-tr-tok { cursor: pointer; }
             .dti-tr-toktag { display: inline-flex; align-items: center; gap: 3px; flex: none; font-weight: 700; color: var(--accent-text, var(--accent)); }
+            .dti-tr-cltag { color: var(--nc) !important; font-weight: 700; }
+            .dti-tr-cltag + .dti-tr-ival::before { content: '· '; font-weight: 400; }
             .dti-tr-toktag svg { width: 10px; height: 10px; flex: none; }
             .dti-tr-toktag + .dti-tr-ival::before { content: '· '; font-weight: 400; }
             .dti-tr-quick { display: flex; gap: 6px; }
@@ -13460,20 +14872,38 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
 
     // ── What you own and want, from your lists saved in this browser (Neofriends' copy of your Items page:
     // refreshed whenever My Items opens, else fetched when older than 6 hours) ── item id → { own: copies, want: copies }
-    let _mineMap = null, _mineP = null;
+    // (prio: 0 high, 1 medium, 2 low — the best of the wishlists it's on, as you marked them; lists you keep: closetTradeable.keep)
+    let _mineMap = null, _mineP = null, _mineLast = null;
     function _mineFrom(me) {
         if (!me?.lists) return null;
-        const m = new Map();
+        _mineLast = me;
+        const m = new Map(), pr = listPrio(), keep = new Map(), RANK = { high: 0, med: 1, low: 2 };
         me.lists.forEach(l => l.items.forEach(([id, q]) => {
             const e = m.get(+id) || { own: 0, want: 0 };
             if (l.owned) e.own += q || 1; else e.want += q || 1;
+            const p = l.owned ? undefined : RANK[pr[l.id]];
+            if (p !== undefined && !(e.prio <= p)) e.prio = p;
+            if (l.owned && pr[l.id] === 'keep') keep.set(+id, (keep.get(+id) || 0) + (q || 1));
             m.set(+id, e);
         }));
+        closetTradeable.keep = keep;
+        if (!_mineFrom.watch && typeof GM_addValueChangeListener === 'function') { _mineFrom.watch = true; GM_addValueChangeListener('dti_list_prio', () => { if (_mineLast) _mineFrom(_mineLast); }); }
         return _mineMap = m;
     }
     function mineLoad(force) {
         if (_mineP && !force) return _mineP;
-        return _mineP = nfMine(force).then(_mineFrom).catch(() => null);
+        const p = _mineP = nfMine(force).then(_mineFrom).catch(() => null);
+        p.then(m => { if (!m && _mineP === p) _mineP = null; });   // (couldn't read them: asked again the next time, not kept)
+        return p;
+    }
+    // How much someone wants the items on one of their wishlists, read from its name ("HIGH PRIORITY", "Dream wishes", "Maybe…"):
+    // 0 high, 1 medium, 2 low — null when the name doesn't say. (Your own: the priority you gave the list on My Items.)
+    function theirListPrio(name) {
+        const n = String(name || '');
+        if (/\b(low|maybe|someday|eventually|if possible)\b/i.test(n)) return 2;
+        if (/\b(med(ium)?|mid)\b/i.test(n)) return 1;
+        if (/\b(high|top|dreamy?|dreams|must|urgent|asap|priority|most wanted)\b|\u2605|\u2b50/i.test(n)) return 0;
+        return null;
     }
     const mineOf = id => _mineMap?.get(+id) || null;
     // A list save changed how many of an item you have: keep the marks right without a refetch
@@ -13483,7 +14913,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             dtiToast(`You have ${e?.name || 'it'} now \u2014 it\u2019s on your Seeking list`, { duration: 8000, action: { label: 'Take it off', run: () => DTISeek.remove(id) } });
         }
         if (!_mineMap) return;
-        _mineMap.set(+id, { own, want });
+        _mineMap.set(+id, { ..._mineMap.get(+id), own, want });   // (its priority kept)
         document.querySelectorAll(`[data-dti-item="${+id}"]`).forEach(paintMineMark);
     }
     // Item tiles everywhere: a small mark in the top-left corner — ✓ (how many you own) and/or ♥ (on your wishlist)
@@ -13491,13 +14921,15 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         const id = tile.dataset.dtiItem;
         let mark = tile.querySelector(':scope > .dti-mine');
         const e = (id && mineOf(id)) || {}, sk = !!id && DTISeek.idSet().has(String(id));
-        if (!e.own && !e.want && !sk) { mark?.remove(); return; }
+        const cl = id && closetOpts().marks ? closetQtyOf(id) : 0;   // (in your Neopets closet — My Closet)
+        if (!e.own && !e.want && !sk && !cl) { mark?.remove(); return; }
         if (!mark) { mark = document.createElement('span'); mark.className = 'dti-mine'; tile.appendChild(mark); }
         mark.classList.toggle('own', !!e.own);
         mark.classList.toggle('want', !!e.want);
         mark.classList.toggle('seek', sk);
-        mark.title = [e.own ? `You own ${e.own}` : '', e.want ? 'On your wishlist' : '', sk ? 'Seeking now' : ''].filter(Boolean).join(' · ');
-        mark.innerHTML = (sk ? `<b class="dti-sk">${SEEK_ICO}</b>` : '') + (e.own ? `\u2713${e.own > 1 ? e.own : ''}` : '') + (e.want ? '<i>\u2665</i>' : '');
+        mark.classList.toggle('closet', !!cl);
+        mark.title = [e.own ? `You own ${e.own}` : '', cl ? `In your closet${cl > 1 ? ' ×' + cl : ''}` : '', e.want ? 'On your wishlist' : '', sk ? 'Seeking now' : ''].filter(Boolean).join(' · ');
+        mark.innerHTML = (sk ? `<b class="dti-sk">${SEEK_ICO}</b>` : '') + (cl ? `<b class="dti-cl">${CLOSET_ICO}</b>` : '') + (e.own ? `\u2713${e.own > 1 ? e.own : ''}` : '') + (e.want ? '<i>\u2665</i>' : '');
     }
 
     // ── The NC Mall right now (DTI Remix's feed): shared by Home's NC Mall card and the wishlist checks ──
@@ -13702,7 +15134,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
 
     // ── Backup & restore: everything DTI Enhance keeps in this browser (Tampermonkey storage — notes, tokens,
     // Neofriends, theme, settings — plus Neofriends' saved lists and the token release dates) in one file ──
-    const BACKUP_SKIP = /^(dti_user_id|dti_user_slug|dti_user_name|dti_tok_capture|dti_nf_ping|dti_nf_autocheck_lock|dti_tf_ping|dti_tf_auto_lock|dti_cap_ping|dti_backup_nag_at|dti_seek_link_lock|dti_sk_auto_lock|dti_nm_draft)$/;   // who's logged in, and passing signals
+    const BACKUP_SKIP = /^(dti_user_id|dti_user_slug|dti_user_name|dti_tok_capture|dti_nf_ping|dti_nf_autocheck_lock|dti_tf_ping|dti_tf_auto_lock|dti_cap_ping|dti_backup_nag_at|dti_seek_link_lock|dti_sk_auto_lock|dti_nm_draft|dti_closet_load|dti_closet_loading)$/;   // who's logged in, and passing signals (a closet load under way too)
     async function dtiBackupData() {
         const gm = {};
         (typeof GM_listValues === 'function' ? GM_listValues() : []).forEach(k => { if (!BACKUP_SKIP.test(k)) gm[k] = GM_getValue(k); });
@@ -14021,7 +15453,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 const extra = _poolDisplay.length - shown.length;
                 poolHtml = `<div class="dti-ip-pool-wrap"><div class="dti-ip-section dti-ip-pool-toggle" role="button" tabindex="0" title="See everything inside, bigger (click again to go back)">${_inside}<i class="dti-ip-pool-arrow">\u203a</i><span class="dti-ip-dye-n">${_poolDisplay.length} item${_poolDisplay.length === 1 ? '' : 's'}${_bonusCount > 0 ? ` \u00b7 +${_bonusCount} possible bonus` : ''}</span></div>
                     <div class="dti-ip-pool-grid">
-                        ${_poolDisplay.map((x, xi) => `<a class="dti-ip-pool-item${x.isLE ? ' le' : ''}${xi >= shown.length ? ' dti-ip-pool-extra' : ''}" title="${noteEsc(x.name || '')}" href="/items/0#pool-${x.iid}" data-turbo="false" data-pin="${(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" data-pii="${(x.image||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">
+                        ${_poolDisplay.map((x, xi) => `<a class="dti-ip-pool-item${x.isLE ? ' le' : ''}${xi >= shown.length ? ' dti-ip-pool-extra' : ''}" title="${noteEsc(x.name || '')}" href="${noteEsc(poolHref(x))}" data-turbo="false" data-pin="${(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" data-pii="${(x.image||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">
                             ${x.image ? `<img src="${noteEsc(x.image)}" alt="" loading="lazy">` : ''}
                             ${x.isLE ? '<span class="dti-ip-pool-le">LE</span>' : ''}
                             <span class="dti-ip-pool-name">${noteEsc(x.name || '')}</span>
@@ -14043,7 +15475,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                 ${collectibleInfo(desc) ? `<div class="dti-ip-collect">${noteEsc(collectibleText(collectibleInfo(desc)))}</div>` : ''}
                 <hr class="dti-ip-divider">
                 ${firstSeen ? `<div class="dti-ip-row"><span class="dti-ip-label">First seen</span><span class="dti-ip-val">${firstSeen}</span></div>` : ''}
-                ${isNc && !isCapsuleItem ? `<div class="dti-ip-row dti-ip-cap-row"><span class="dti-ip-label">Cap Value</span><span class="dti-ip-val">${noteEsc(capsLabel(capVal) || '? caps')}</span></div>` : ''}
+                ${closetQtyOf(id) ? `<div class="dti-ip-row"><span class="dti-ip-label">Your closet</span><span class="dti-ip-val" title="In your Neopets closet (My Closet)">${closetQtyOf(id) > 1 ? '\u00d7' + closetQtyOf(id) : 'In it'}</span></div>` : ''}${isNc && !isCapsuleItem ? `<div class="dti-ip-row dti-ip-cap-row"><span class="dti-ip-label">Cap Value</span><span class="dti-ip-val">${noteEsc(capsLabel(capVal) || '? caps')}</span></div>` : ''}
                 ${mallHtml}
                 ${stickerPackHtml(name, { focus: true })}
                 ${poolHtml}
@@ -14129,7 +15561,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
     animation: dti-pop-in .18s ease-out;
 }
 .dti-pm-box { max-width: 940px; }
-.dti-tm-box { max-width: 720px; }
+.dti-tm-box { max-width: 1080px; }   /* (wider: a Match column on the right — user asked) */
 
 /* Header */
 .dti-pm-header, .dti-tm-header {
@@ -14417,6 +15849,64 @@ html[data-style="solid"] .dti-tm-header .dti-tm-capval { background: var(--solid
 }
 .dti-tm-lists a:hover { background: var(--accent); color: var(--accent-fg, #fff) !important; }
 .dti-tm-lists li:not(:has(a)) { color: var(--text-muted); font-size: 12px; }
+/* The match: how many sides, the bar over the list, each trader's detail */
+.dti-tm-bar { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; flex-shrink: 0; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--surface-2); font-size: 12px; color: var(--text-muted); }
+.dti-tm-bar[hidden] { display: none; }
+.dti-tm-sum { flex: 1; min-width: 220px; line-height: 1.45; }
+.dti-tm-sum b { color: var(--text); }
+.dti-tm-tip { color: var(--accent-text, var(--accent)); cursor: help; }
+.dti-tm-all { height: 26px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--accent); background: var(--surface); color: var(--accent-text, var(--accent)); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.dti-tm-all:hover:not(:disabled) { background: var(--accent); color: var(--accent-fg, #fff); }
+.dti-tm-all:disabled { opacity: .55; cursor: default; }
+.dti-tm-sortl { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; }
+.dti-tm-sort { height: 28px; margin: 0; padding: 0 6px !important; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; line-height: 1.2 !important; }
+.dti-tm-body th.dti-tm-mh, .dti-tm-body td.dti-tm-match { width: 40%; }
+.dti-tm-body thead th:nth-child(2) { width: 215px; }   /* (the owner: their name, its buttons and Neomail name on two lines — not squeezed by the lists) */
+.dti-tm-body thead th:first-child { width: 86px; }
+.dti-tm-body td.dti-tm-match { padding-top: 8px; padding-bottom: 8px; }
+.dti-tm-mbtn { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; width: calc(100% + 12px); margin: 0 -6px; padding: 4px 6px; border: none; border-radius: 9px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.dti-tm-mbtn:hover, .dti-tm-mbtn[aria-expanded="true"] { background: var(--accent-glow); }
+.dti-tm-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.dti-tm-chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 8px; border-radius: 99px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.dti-tm-chip.has { background: color-mix(in srgb, var(--success) 14%, var(--surface)); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
+.dti-tm-chip.wants { background: var(--accent-glow); color: var(--accent-text, var(--accent)); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.dti-tm-chip.p0, .dti-tm-it i.p0 { background: #e11d48; border-color: #e11d48; color: #fff; }
+.dti-tm-chip.p1, .dti-tm-it i.p1 { background: #d97706; border-color: #d97706; color: #fff; }
+.dti-tm-chip.p2, .dti-tm-it i.p2 { background: #64748b; border-color: #64748b; color: #fff; }
+.dti-tm-chip.none { color: var(--text-muted); font-weight: 600; }
+.dti-tm-thumbs { display: flex; gap: 4px; }
+.dti-tm-thumbs img { width: 30px; height: 30px; object-fit: contain; border-radius: 7px; background: #fff; box-shadow: 0 0 0 1px var(--border); }
+.dti-tm-thumbs img.p0 { box-shadow: 0 0 0 2px #e11d48; }
+.dti-tm-thumbs img.p1 { box-shadow: 0 0 0 2px #d97706; }
+.dti-tm-thumbs img.p2 { box-shadow: 0 0 0 2px #64748b; }
+.dti-tm-mmsg { font-size: 12px; color: var(--text-muted); }
+.dti-tm-mmsg.loading { opacity: .7; }
+.dti-tm-retry { margin-left: 4px; padding: 0; border: none; background: none; color: var(--accent-text, var(--accent)); font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.dti-tm-body tbody tr.dti-tm-detail > td, .dti-tm-body tbody tr.dti-tm-detail:hover > td { padding: 4px 16px 16px; background: color-mix(in srgb, var(--accent) 3%, var(--surface)); }
+.dti-tm-body tbody tr:has(+ .dti-tm-detail) > td { border-bottom-color: transparent; }
+.dti-tm-dwrap { display: flex; flex-direction: column; gap: 12px; }
+.dti-tm-dcols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.dti-tm-dh { margin-bottom: 6px; font-size: 10px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; color: var(--text-muted); }
+.dti-tm-dh b { color: var(--text); }
+.dti-tm-its { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; max-height: 262px; overflow-y: auto; scrollbar-width: thin; }
+.dti-tm-it { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 4px 6px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text) !important; text-decoration: none !important; font-size: 10.5px; line-height: 1.25; text-align: center; }
+.dti-tm-it:hover { border-color: var(--accent); }
+.dti-tm-it img { width: 46px; height: 46px; object-fit: contain; }
+.dti-tm-it span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dti-tm-it i { position: absolute; top: 3px; left: 3px; padding: 0 5px; border-radius: 99px; font-style: normal; font-size: 9px; font-weight: 800; line-height: 1.6; text-transform: capitalize; }
+.dti-tm-cap { font-style: normal; font-size: 10px; font-weight: 700; color: var(--accent-text, var(--accent)); }
+.dti-tm-lbl { position: absolute; top: 3px; right: 3px; padding: 0 5px; border-radius: 99px; font-size: 9px; font-weight: 800; line-height: 1.6; background: var(--surface-3); color: var(--text-muted); }
+.dti-tm-cap:empty { display: none; }
+.dti-tm-sugg { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding: 10px 12px; border-radius: 11px; border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--surface); }
+.dti-tm-sl { font-size: 10px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; color: var(--accent-text, var(--accent)); }
+.dti-tm-st { flex: 1; min-width: 220px; font-size: 12.5px; line-height: 1.45; }
+.dti-tm-sacts { display: flex; gap: 6px; }
+.dti-tm-report { height: 30px; padding: 0 12px; border: none; border-radius: 9px; background: var(--accent); color: var(--accent-fg, #fff); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.dti-tm-report:hover { filter: brightness(1.08); }
+@media (max-width: 760px) {
+    .dti-tm-dcols { grid-template-columns: 1fr; }
+    .dti-tm-body thead th:nth-child(3), .dti-tm-body tbody tr:not(.dti-tm-detail) > td:nth-child(3) { display: none; }   /* (narrow: their lists' names give way to the match) */
+}
 
 /* ── Item info popup ──────────────────────────────────────────────────── */
 #dti-item-info-popup {
@@ -14523,6 +16013,16 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; width: 100%;
     text-align: center; font-size: 10px; font-weight: 700; line-height: 1.3; color: #374151;
 }
+/* (the capsule view's numbers: its cap value, then offering and seeking on DTI — a bar of the two and their ratio; on the white tile) */
+.dti-ip-pool-stats { display: none; }
+.dti-ip-poolfocus .dti-ip-pool-stats { display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 100%; margin-top: auto; }
+.dti-ip-pool-stats .cap { align-self: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding: 1px 7px; border-radius: 99px; background: var(--accent-glow); color: var(--accent-text, var(--accent)); font-size: 9.5px; font-weight: 800; line-height: 1.4; white-space: nowrap; }
+.dti-ip-pool-stats .tr { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; column-gap: 2px; font-size: 9.5px; line-height: 1.3; color: #6b7280; }
+.dti-ip-pool-stats .tr b { font-weight: 800; color: #374151; }
+.dti-ip-pool-stats .tr em { font-style: normal; margin-right: 4px; }
+.dti-ip-pool-stats .tr small { flex-basis: 100%; text-align: center; font-size: 9px; font-weight: 800; color: #374151; }
+.dti-ip-pool-stats .tr .bar { flex-basis: 100%; height: 4px; margin-bottom: 2px; border-radius: 99px; background: linear-gradient(90deg, var(--accent) var(--o), color-mix(in srgb, var(--accent) 22%, #e5e7eb) var(--o)); }
+.dti-ip-pool-stats .tr.none { font-style: italic; }
 .dti-ip-pool-item {
     position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 1; overflow: hidden;
     padding: 3px; border-radius: 9px; background: #fff; border: 1px solid var(--border); transition: border-color .12s, transform .12s;
@@ -14657,6 +16157,21 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['3.5', [
+            'My Closet: a new page for your Neopets closet \u2014 load it from Neopets, see what\u2019s new, keep a DTI list in step with it',
+            'My Closet: its items are left out of your trades, marked across DTI and count as yours in shopping lists and Seeking (each a switch)',
+            'Customs editor: a Closet button shows just your closet\u2019s items',
+            'Trades popup: wider, with a Match column \u2014 what each trader has that you want, what they want of yours, a suggested trade',
+            'My Items: mark wishlists High / Medium / Low and owned lists Not for trade (\u2691) \u2014 the trade tools show it and put those first',
+            'Someone\u2019s items: Compare shows priorities on both sides; picked items go into a trade report or onto your wishlist',
+            'Notes on someone: Copy, and Copy & Neomail (subject \u201cNC Trade\u201d)',
+            'My Tokens: new tokens show up soon after release \u2014 named, newest first, with their pictures; Available now includes Prismatics',
+            'Capsules: their items open DTI\u2019s own pages, with cap values and how many offer and seek them',
+            'Mini DTI and shopping lists: click an item\u2019s name to copy it',
+            'Neoboards: the DTI lists window\u2019s Neomail button is always there',
+            'My Items: clearer Tokens / Closet pills, wider side panels, Importing first',
+            'More: My Closet first, bigger icons; the loading bar at the top is in your theme\u2019s color',
+        ]],
         ['3.4', [
             'Mini DTI: it opens below Neopets\u2019 top bar, nearer the edge; the tab hides while it\u2019s open \u2014 minimize brings it back',
             'Mini DTI: move it anywhere by its top bar, size it from its edges and bottom corners \u2014 it stays that way; a double-click on the bar puts it back by the edge',
@@ -15515,8 +17030,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const isFinderPage = dtiAppHere() && location.hash.startsWith('#finder');
         const isSeekPage = dtiAppHere() && location.hash.startsWith('#seeking');
         const isPpPage = dtiAppHere() && location.hash.startsWith('#petpets');
+        const isClosetPage = dtiAppHere() && location.hash.startsWith('#closet');
         // Home and the pages built on the empty item search skip Turbo's cache (a saved copy of them can't be used again): Back builds them anew
-        const hashApp = isNotesPage || isTokensPage || isNfPage || isMallPage || isFinderPage || isSeekPage || isPpPage;
+        const hashApp = isNotesPage || isTokensPage || isNfPage || isMallPage || isFinderPage || isSeekPage || isPpPage || isClosetPage;
         if (!body.classList.contains('outfits-new') && !hashApp) document.head.querySelector('meta[data-dti-nocache]')?.remove();
         else if (hashApp && !document.head.querySelector('meta[data-dti-nocache]')) {
             const m = document.createElement('meta');
@@ -15527,18 +17043,18 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // going from one to another only changes the hash
         if (!window.__dtiHashApps) {
             window.__dtiHashApps = true;
-            const appOf = h => h.startsWith('#tokens=') ? 'ts:' + h : h.startsWith('#tokens') ? 'tokens' : h.startsWith('#notes') ? 'notes' : h.startsWith('#neofriends') ? 'neofriends' : h.startsWith('#mall') ? 'mall' : h.startsWith('#finder') ? 'finder' : h.startsWith('#seeking') ? 'seeking' : h.startsWith('#petpets') ? 'petpets' : '';
+            const appOf = h => h.startsWith('#tokens=') ? 'ts:' + h : h.startsWith('#tokens') ? 'tokens' : h.startsWith('#notes') ? 'notes' : h.startsWith('#neofriends') ? 'neofriends' : h.startsWith('#mall') ? 'mall' : h.startsWith('#finder') ? 'finder' : h.startsWith('#seeking') ? 'seeking' : h.startsWith('#petpets') ? 'petpets' : h.startsWith('#closet') ? 'closet' : '';
             const tkOn = () => { const a = document.querySelector('#dti-tokens-app:not(.in-modal)'); return a ? (a.classList.contains('share') ? 'ts:' + a.dataset.hash : 'tokens') : document.getElementById('dti-tk-shareload') ? 'loading' : ''; };
             const appOn = () => tkOn() ? tkOn() : document.querySelector('#dti-notes-app:not(.in-modal)') ? 'notes'
                     : document.querySelector('#dti-nf-app:not(.in-modal)') ? 'neofriends' : document.querySelector('#dti-mall-app:not(.in-modal)') ? 'mall'
-                    : document.querySelector('#dti-tf-app:not(.in-modal)') ? 'finder' : document.querySelector('#dti-seek-app:not(.in-modal)') ? 'seeking' : document.querySelector('#dti-pp-app:not(.in-modal)') ? 'petpets' : '';
+                    : document.querySelector('#dti-tf-app:not(.in-modal)') ? 'finder' : document.querySelector('#dti-seek-app:not(.in-modal)') ? 'seeking' : document.querySelector('#dti-pp-app:not(.in-modal)') ? 'petpets' : document.querySelector('#dti-cl-app:not(.in-modal)') ? 'closet' : '';
             const hashSwap = () => {
                 if (!dtiAppHere()) return;
                 const want = appOf(location.hash), have = appOn();
                 if (want === have) return;
                 if (!want) return location.reload();   // (back to DTI's plain Terms page)
                 // the other page, in place — a reload would show DTI's own Terms page for a moment
-                document.querySelectorAll(['tokens', 'notes', 'nf', 'mall', 'tf', 'seek', 'pp'].map(k => `#dti-${k}-app:not(.in-modal)`).join(',') + ', #dti-tk-shareload').forEach(el => el.remove());
+                document.querySelectorAll(['tokens', 'notes', 'nf', 'mall', 'tf', 'seek', 'pp', 'cl'].map(k => `#dti-${k}-app:not(.in-modal)`).join(',') + ', #dti-tk-shareload').forEach(el => el.remove());
                 document.getElementById('dti-page-modal')?.remove();
                 runPageInit();
             };
@@ -15564,6 +17080,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             else if (isFinderPage)                                     initTradeFinderPage();
             else if (isSeekPage)                                       initSeekingPage();
             else if (isPpPage)                                         initPetpetPage();
+            else if (isClosetPage)                                     initClosetAppPage();
             else if (body.classList.contains('outfits-new'))           initHomePage();
             else if (body.classList.contains('closet_hangers-index'))  initClosetPage();
             else if (body.classList.contains('outfits-index'))         initOutfitsPage();
@@ -15586,6 +17103,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // Notes: pencils on item tiles everywhere, and the notes strip on item pages
         if (!isNotesPage && !isTokensPage) dtiSafe('note buttons', watchNoteTiles);
         mineLoad().then(() => dtiSafe('own / want marks', () => document.querySelectorAll('[data-dti-item]').forEach(paintMineMark)));   // ✓ / ♥ marks on item tiles
+        if (!window.__dtiClosetMarks) {   // (My Closet loaded again, its settings, the account in the nav: the closet marks as they are now — once a tab)
+            window.__dtiClosetMarks = true;
+            ['dti_my_closet', 'dti_closet_opts', 'dti_acct_active'].forEach(k => GM_addValueChangeListener(k, () => {
+                closetIdx.cache = null;
+                dtiSafe('closet marks', () => document.querySelectorAll('[data-dti-item]').forEach(paintMineMark));
+            }));
+        }
         dtiSafe('badges', niBadgesApply);
         dtiSafe('badges', nmBadgesApply);
         dtiSafe('Neofriends check', nfAutoCheck);
@@ -15751,8 +17275,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             html:is([data-mode="dark"]:is([data-accent="mono"], [data-accent="yellow"], [data-accent="olive"]), [data-mode="light"][data-accent="yellow"]) #dti-compare-btn:hover,
             html:is([data-mode="dark"]:is([data-accent="mono"], [data-accent="yellow"], [data-accent="olive"]), [data-mode="light"][data-accent="yellow"]) .dti-lay-seg button.on,
             html:is([data-mode="dark"]:is([data-accent="mono"], [data-accent="yellow"], [data-accent="olive"]), [data-mode="light"][data-accent="yellow"]) .dti-cpk-use,
+            html:is([data-mode="dark"]:is([data-accent="mono"], [data-accent="yellow"], [data-accent="olive"]), [data-mode="light"][data-accent="yellow"]) .dti-tm-report,
+            html:is([data-mode="dark"]:is([data-accent="mono"], [data-accent="yellow"], [data-accent="olive"]), [data-mode="light"][data-accent="yellow"]) .dti-list-link:not(.cl),
             html:is([data-mode="dark"]:is([data-accent="mono"], [data-accent="yellow"], [data-accent="olive"]), [data-mode="light"][data-accent="yellow"]) #wardrobe-2020-root #dti-cs .dti-cs-mode button.on,
             html:is([data-mode="dark"]:is([data-accent="mono"], [data-accent="yellow"], [data-accent="olive"]), [data-mode="light"][data-accent="yellow"]) #wardrobe-2020-root #dti-kind button.on,
+            html:is([data-mode="dark"]:is([data-accent="mono"], [data-accent="yellow"], [data-accent="olive"]), [data-mode="light"][data-accent="yellow"]) #wardrobe-2020-root #dti-ed-cl.on,
             html:is([data-mode="dark"]:is([data-accent="mono"], [data-accent="yellow"], [data-accent="olive"]), [data-mode="light"][data-accent="yellow"]) .dti-you-want-badge.have,
             html:is([data-mode="dark"]:is([data-accent="mono"], [data-accent="yellow"], [data-accent="olive"]), [data-mode="light"][data-accent="yellow"]) .dti-qap-add-btn,
             html:is([data-mode="dark"]:is([data-accent="mono"], [data-accent="yellow"], [data-accent="olive"]), [data-mode="light"][data-accent="yellow"]) .dti-vt-btn.active,
@@ -17418,6 +18945,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 scroll-behavior: smooth; -webkit-font-smoothing: antialiased;
             }
             body { background: var(--bg); color: var(--text); min-height: 100vh; }
+            /* DTI's loading bar along the top as you click around (Turbo's — blue): your theme's accent (user asked) */
+            .turbo-progress-bar { background: linear-gradient(90deg, var(--accent-dim, var(--accent)), var(--accent)) !important; box-shadow: 0 0 8px var(--accent-glow, transparent); }
             a { color: var(--accent-text, var(--accent)); text-decoration: none; transition: color .13s; }
             a:hover { color: var(--accent-dim); text-decoration: underline; }
             h1,h2,h3,h4,h5,h6 { line-height: 1.3; font-weight: 700; color: var(--text); }
@@ -18250,7 +19779,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; display: grid !important; place-items: center;
                 background: var(--accent-glow); color: var(--accent-text, var(--accent));
             }
-            .dti-more-ico svg { width: 14px; height: 14px; }
+            .dti-more-ico svg { width: 17px; height: 17px; }   /* (user asked: a little bigger) */
             .dti-more-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
             .dti-more-txt b { font-size: 13.5px; font-weight: 700; color: var(--text); }
             .dti-nav-link.active .dti-more-txt b { color: var(--accent-text, var(--accent)); }
@@ -18657,14 +20186,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             { href: '/items?q=dti-enhance#notes', label: 'Notes', notes: true },   // a main feature, so it's up here (Settings moved to More)
         ];
         const MORE_LINKS = [
+            { href: '/items?q=dti-enhance#closet', label: 'My Closet', desc: 'Your Neopets closet', notes: true, popup: true, icon: CLOSET_ICO.replace('<svg ', '<svg width="12" height="12" ') },   // (user asked: at the top)
+            ...(seekOn() ? [{ href: '/items?q=dti-enhance#seeking', label: 'Seeking', desc: 'The items you want now', notes: true, popup: true, icon: SEEK_ICO.replace('<svg ', '<svg width="12" height="12" ') }] : []),
+            { href: '/items?q=dti-enhance#finder', label: 'Trade Finder', desc: 'Who has your wishlist items', notes: true, popup: true, icon: TF_ICO.replace('<svg ', '<svg width="12" height="12" ') },
+            { href: '/items?q=dti-enhance#neofriends', label: 'Neofriends', desc: 'People you trade with', notes: true, popup: true,
+              icon: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M5.5 9.4c.65.95 1.5 1.4 2.5 1.4s1.85-.45 2.5-1.4"/><circle cx="6" cy="6.5" r=".6" fill="currentColor" stroke="none"/><circle cx="10" cy="6.5" r=".6" fill="currentColor" stroke="none"/></svg>' },
             { href: '/items', label: 'Browse Items', desc: 'Search every item on DTI', popup: true, icon: NAV_ICON_SEARCH },
             { href: '/items?q=dti-enhance#mall', label: 'NC Mall Guide', desc: 'New, leaving and on sale', notes: true, popup: true, icon: MALL_ICO.replace('<svg ', '<svg width="12" height="12" aria-hidden="true" ') },
             { href: '/rainbow-pool', label: 'Pet Colors', desc: 'Every color of every pet', popup: true, icon: NAV_ICON_PALETTE },
             { href: '/items?q=dti-enhance#petpets', label: 'Petpet Matcher', desc: 'Petpets to go with a pet', notes: true, popup: true, icon: PP_ICO.replace('<svg ', '<svg width="12" height="12" ') },   // (user asked: below Pet Colors)
-            { href: '/items?q=dti-enhance#neofriends', label: 'Neofriends', desc: 'People you trade with', notes: true, popup: true,
-              icon: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M5.5 9.4c.65.95 1.5 1.4 2.5 1.4s1.85-.45 2.5-1.4"/><circle cx="6" cy="6.5" r=".6" fill="currentColor" stroke="none"/><circle cx="10" cy="6.5" r=".6" fill="currentColor" stroke="none"/></svg>' },
-            { href: '/items?q=dti-enhance#finder', label: 'Trade Finder', desc: 'Who has your wishlist items', notes: true, popup: true, icon: TF_ICO.replace('<svg ', '<svg width="12" height="12" ') },
-            ...(seekOn() ? [{ href: '/items?q=dti-enhance#seeking', label: 'Seeking', desc: 'The items you want now', notes: true, popup: true, icon: SEEK_ICO.replace('<svg ', '<svg width="12" height="12" ') }] : []),
             { href: '/users/edit', label: 'Settings', desc: 'Account and password', popup: true,
               icon: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.6v1.8M8 12.6v1.8M1.6 8h1.8M12.6 8h1.8M3.5 3.5l1.3 1.3M11.2 11.2l1.3 1.3M3.5 12.5l1.3-1.3M11.2 4.8l1.3-1.3"/></svg>' },
         ];
@@ -18677,6 +20207,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (href === '/items?q=dti-enhance#finder') return dtiAppHere() && location.hash.startsWith('#finder');
             if (href === '/items?q=dti-enhance#petpets') return dtiAppHere() && location.hash.startsWith('#petpets');
             if (href === '/items?q=dti-enhance#seeking') return dtiAppHere() && location.hash.startsWith('#seeking');
+            if (href === '/items?q=dti-enhance#closet') return dtiAppHere() && location.hash.startsWith('#closet');
             if (dtiAppHere()) return false;   // (the apps live at /items?q=dti-enhance — that isn't Browse Items)
             if (href.includes('/closet') && p.includes('/closet')) { const me = href.match(/\/user\/(\d+)/)?.[1]; return !me || p.match(/^\/user\/(\d+)/)?.[1] === me; }   // (your own only)
             if (p === href) return true;
@@ -18805,6 +20336,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             else if (ph === '/items?q=dti-enhance#finder') _openTradeFinder();
             else if (ph === '/items?q=dti-enhance#seeking') _openSeekingModal();
             else if (ph === '/items?q=dti-enhance#petpets') _openPetpetModal();
+            else if (ph === '/items?q=dti-enhance#closet') _openClosetModal();
             else if (ph === '/users/edit') _openSettingsModal();
             else _openRainbowPoolModal(ph, pl);
         });
@@ -19331,6 +20863,17 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         });
         if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('dti_ed_wearbar_on', (k, o, v) => wbTg.classList.toggle('active', v !== false));   // (its × in the editor)
         featList.appendChild(wbTg);
+        // My Closet's two switches (the same as on its page): its items left out of what you have to trade; marked across DTI
+        [['notrade', 'My Closet: leave it out of your trades', 'Compare on someone\u2019s items, Trade Finder\u2019s \u201cWhat do they want from me?\u201d, Neofriends and the Neoboards don\u2019t count your closet\u2019s copies as yours to give'],
+            ['marks', 'My Closet marks', 'A small closet mark on items in your Neopets closet \u2014 search, item pages, the editor, other people\u2019s lists, the Mini DTI']].forEach(([k, b, sm]) => {
+            const tg = document.createElement('button');
+            tg.type = 'button'; tg.id = 'dti-closet-' + k + '-toggle';
+            tg.className = 'dti-toggle-row' + (closetOpts()[k] ? ' active' : '');
+            tg.innerHTML = `<span class="dti-toggle-txt"><b>${b}</b><small>${sm}</small></span><span class="dti-ts"></span>`;
+            tg.addEventListener('click', () => GM_setValue('dti_closet_opts', { ...closetOpts(), [k]: !closetOpts()[k] }));
+            if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('dti_closet_opts', () => tg.classList.toggle('active', !!closetOpts()[k]));
+            featList.appendChild(tg);
+        });
         featBody.appendChild(featList);
         panel.appendChild(makeSection('Features', '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="1.5" y="3" width="13" height="4" rx="2"/><circle cx="11.5" cy="5" r="1.1" fill="currentColor"/><rect x="1.5" y="9" width="13" height="4" rx="2"/><circle cx="4.5" cy="11" r="1.1" fill="currentColor"/></svg>', featBody, 'dti_sec_features', false));
         // Backup: one file with everything kept in this browser — save it now and then, restore it here or anywhere
@@ -20974,7 +22517,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         const extra = _poolDisplay.length - shown.length;
                         poolHtml = `<div class="dti-ip-pool-wrap"><div class="dti-ip-section dti-ip-pool-toggle" role="button" tabindex="0" title="See everything inside, bigger (click again to go back)">${_inside}<i class="dti-ip-pool-arrow">\u203a</i><span class="dti-ip-dye-n">${_poolDisplay.length} item${_poolDisplay.length === 1 ? '' : 's'}${_bonusCount > 0 ? ` \u00b7 +${_bonusCount} possible bonus` : ''}</span></div>
                             <div class="dti-ip-pool-grid">
-                                ${_poolDisplay.map((x, xi) => `<a class="dti-ip-pool-item${x.isLE ? ' le' : ''}${xi >= shown.length ? ' dti-ip-pool-extra' : ''}" title="${noteEsc(x.name || '')}" href="/items/0#pool-${x.iid}" data-turbo="false" data-pin="${(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" data-pii="${(x.image||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">
+                                ${_poolDisplay.map((x, xi) => `<a class="dti-ip-pool-item${x.isLE ? ' le' : ''}${xi >= shown.length ? ' dti-ip-pool-extra' : ''}" title="${noteEsc(x.name || '')}" href="${noteEsc(poolHref(x))}" data-turbo="false" data-pin="${(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" data-pii="${(x.image||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">
                                     ${x.image ? `<img src="${noteEsc(x.image)}" alt="" loading="lazy">` : ''}
                                     ${x.isLE ? '<span class="dti-ip-pool-le">LE</span>' : ''}
                                     <span class="dti-ip-pool-name">${noteEsc(x.name || '')}</span>
@@ -20996,7 +22539,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         ${collectibleInfo(desc || mall?.description) ? `<div class="dti-ip-collect">${noteEsc(collectibleText(collectibleInfo(desc || mall?.description)))}</div>` : ''}
                         <hr class="dti-ip-divider">
                         ${firstSeen ? `<div class="dti-ip-row"><span class="dti-ip-label">First seen</span><span class="dti-ip-val">${firstSeen}</span></div>` : ''}
-                        ${isNc && !isCapsuleItem ? `<div class="dti-ip-row dti-ip-cap-row"><span class="dti-ip-label">Cap Value</span><span class="dti-ip-val">${noteEsc(capsLabel(capVal) || '? caps')}</span></div>` : ''}
+                        ${closetQtyOf(id) ? `<div class="dti-ip-row"><span class="dti-ip-label">Your closet</span><span class="dti-ip-val" title="In your Neopets closet (My Closet)">${closetQtyOf(id) > 1 ? '\u00d7' + closetQtyOf(id) : 'In it'}</span></div>` : ''}${isNc && !isCapsuleItem ? `<div class="dti-ip-row dti-ip-cap-row"><span class="dti-ip-label">Cap Value</span><span class="dti-ip-val">${noteEsc(capsLabel(capVal) || '? caps')}</span></div>` : ''}
                         ${mallHtml}
                         ${stickerPackHtml(name, { focus: true })}
                         ${poolHtml}
@@ -21443,7 +22986,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
 
             body.closet_hangers-index #footer { display: none !important; }
             #dti-closet-wrap {
-                display: grid; grid-template-columns: var(--dtl,250px) var(--dthl,3px) 1fr var(--dthr,3px) var(--dtr,220px);
+                display: grid; grid-template-columns: var(--dtl,270px) var(--dthl,3px) 1fr var(--dthr,3px) var(--dtr,250px);
                 grid-template-rows: auto 1fr;
                 height: calc(100vh - 60px); overflow: hidden;
             }
@@ -21653,7 +23196,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             #dti-closet-left.dti-lists-grid .dti-list-empty { grid-column: 1 / -1; }
             #dti-closet-left.dti-lists-grid .dti-list-card {
-                display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "thumb thumb" "name name" "meta tag";
+                display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "thumb thumb thumb" "name name name" "meta links tag";
                 align-content: start; gap: 6px 4px; padding: 7px; margin: 0; min-width: 0; border-left-width: 1px;
             }
             #dti-closet-left.dti-lists-grid .dti-list-card.active { border-left-width: 1px; }
@@ -21819,8 +23362,24 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             #dti-closet-center-header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-bottom: 12px; }
             .dti-tkpub-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 13px; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
             .dti-tkpub-card > svg { flex: none; width: 26px; height: 26px; color: var(--accent-text, var(--accent)); }
-            .dti-list-tok { display: inline-grid; place-items: center; width: 15px; height: 15px; margin-right: 4px; vertical-align: -2px; color: var(--accent-text, var(--accent)); }
-            .dti-list-tok svg { width: 13px; height: 13px; }
+            /* A list linked to My Tokens / My Closet (user asked: more obvious): a filled pill — in the row under the name, on the pictures in the grid */
+            .dti-list-links { display: inline-flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+            .dti-list-link { display: inline-flex; align-items: center; gap: 4px; height: 19px; padding: 0 8px 0 6px; border-radius: 99px; white-space: nowrap;
+                font-size: 10.5px; font-weight: 800; line-height: 1; letter-spacing: .1px; background: var(--accent); color: var(--accent-fg, #fff); box-shadow: 0 1px 4px rgba(0,0,0,.16); }
+            .dti-list-link svg { width: 12px; height: 12px; flex-shrink: 0; }
+            .dti-list-link.cl { background: var(--success); color: #fff; }
+            .dti-list-link.pr { padding: 0 8px; color: #fff; }
+            .dti-list-link.high, .dti-prio-dot.high { background: #e11d48; }
+            .dti-list-link.med, .dti-prio-dot.med { background: #d97706; }
+            .dti-list-link.low, .dti-prio-dot.low { background: #64748b; }
+            .dti-list-link.keep, .dti-prio-dot.keep { background: #475569; }
+            .dti-prio-dot { flex-shrink: 0; width: 10px; height: 10px; border-radius: 50%; }
+            .dti-prio-dot.none { background: transparent; box-shadow: inset 0 0 0 1.5px var(--border); }
+            /* (the grid: in the bottom row's empty middle — user asked — each a small filled chip, its name on hover) */
+            #dti-closet-left.dti-lists-grid .dti-list-links { grid-area: links; align-self: center; justify-self: end; flex-wrap: nowrap; gap: 3px; }
+            #dti-closet-left.dti-lists-grid .dti-list-link { width: 20px; height: 20px; padding: 0; justify-content: center; gap: 0; font-size: 0; }
+            #dti-closet-left.dti-lists-grid .dti-list-link svg { width: 12px; height: 12px; }
+            #dti-closet-left.dti-lists-grid .dti-list-link.pr::before { content: '⚑'; font-size: 11px; line-height: 1; }
             .dti-tkpub-line { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
             .dti-tkpub-line svg { width: 13px; height: 13px; flex: none; color: var(--accent-text, var(--accent)); }
             .dti-tkpub-line a { font-weight: 700; color: var(--accent-text, var(--accent)); }
@@ -22347,6 +23906,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-neo-src-open:hover .dti-neo-src-ext { opacity: 1; color: var(--accent-text, var(--accent)); }
             .dti-neo-src-open:hover .dti-neo-src-name { color: var(--accent-text, var(--accent)); }
             .dti-neo-src-acts { display: flex; gap: 5px; padding: 0 9px 9px; }
+            .dti-neo-src-tip { display: flex; flex-direction: column; gap: 5px; margin: 2px 0 6px; padding: 9px 11px; border-radius: 10px; border: 1px dashed color-mix(in srgb, var(--success) 55%, var(--border)); background: color-mix(in srgb, var(--success) 7%, transparent); font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+            .dti-neo-src-tip b { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); }
+            .dti-neo-src-tip b svg { width: 13px; height: 13px; color: var(--success); }
+            .dti-neo-src-tips { font-size: 11.5px; font-weight: 600; color: var(--success); }
+            .dti-neo-src-tips b { display: inline; font-size: inherit; color: inherit; }
+            .dti-neo-src-tipb { display: flex; gap: 6px; flex-wrap: wrap; }
+            .dti-neo-src-tipb button { height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+            .dti-neo-src-tipb button:hover { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
             .dti-neo-src-import {
                 flex: 1; min-width: 0; padding: 6px 8px; border: none; border-radius: 7px; cursor: pointer;
                 background: var(--accent); color: var(--accent-fg, #fff); font-size: 11.5px; font-weight: 700; font-family: inherit;
@@ -22613,6 +24180,22 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 border-radius: 99px; line-height: 1.4; letter-spacing: .4px; pointer-events: none; white-space: nowrap;
             }
             .dti-you-want-badge.have { background: var(--accent); color: var(--accent-fg, #fff); }
+            .dti-you-want-badge.p0, .dti-you-want-badge.have.top { background: #e11d48; color: #fff; }
+            .dti-you-want-badge.p1 { background: #b45309; }
+            #dti-cmp-card { display: flex; flex-direction: column; gap: 4px; margin-top: -2px; padding: 9px 11px; border-radius: 10px; font-size: 12px; line-height: 1.4; color: var(--text);
+                background: color-mix(in srgb, var(--success) 8%, var(--surface)); border: 1px solid color-mix(in srgb, var(--success) 35%, var(--border)); }
+            #dti-cmp-card b { font-weight: 800; }
+            .dti-tw-list { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+            .dti-tw-row { display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface);
+                color: var(--text); font: inherit; font-size: 11.5px; text-align: left; cursor: pointer; }
+            .dti-tw-row:hover { border-color: var(--accent); }
+            .dti-tw-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .dti-tw-row small { flex-shrink: 0; font-size: 10px; color: var(--text-muted); }
+            .dti-tw-more { font-size: 11px; font-weight: 700; color: var(--accent-text, var(--accent)) !important; }
+            #dti-cmp-card i.hi { font-style: normal; font-size: 10px; font-weight: 800; padding: 0 6px; border-radius: 99px; background: #e11d48; color: #fff; white-space: nowrap; }
+            #dti-cmp-card i.lbl { font-style: normal; font-size: 10px; font-weight: 800; padding: 0 6px; border-radius: 99px; background: var(--surface-3); color: var(--text-muted); white-space: nowrap; cursor: help; }
+            #dti-cmp-card button { margin-top: 4px; height: 30px; border: none; border-radius: 8px; background: var(--accent); color: var(--accent-fg, #fff); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+            #dti-cmp-card button:hover { filter: brightness(1.08); }
             .dti-grid-group-header.dti-jump-flash { border-radius: 10px; animation: dti-jump-flash 2.2s ease-out; }
             @keyframes dti-jump-flash { 0%, 45% { background: var(--accent-glow); } 100% { background: transparent; } }
 
@@ -23218,6 +24801,47 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             tag.innerHTML = `<span class="dti-vis-ico">${o.ico}</span><span class="dti-vis-txt">${o.label}</span>`;
         }
         const listOfCard = card => (card.dataset.section === 'owned' ? sections.owned : sections.wanted)[+card.dataset.listIdx];
+        // (a list's pills: its priority — or Not for trade — on your own; linked to My Closet / My Tokens)
+        const listPillsHtml = lst => {
+            const pr = isOwnPage && lst.listId ? listPrio()[lst.listId] : '', pills = [], LBL = { high: 'High', med: 'Medium', low: 'Low', keep: 'Not for trade' };
+            if (pr && LBL[pr] && (lst.isOwned ? pr === 'keep' : pr !== 'keep')) pills.push(`<span class="dti-list-link pr ${pr}" title="${pr === 'keep' ? 'Not for trade: left out of what you have to give, as your closet is' : `${LBL[pr]} priority \u2014 Trades and Trade Finder show it`}">${LBL[pr]}</span>`);
+            if (isOwnPage && closetLinkedTo(lst.listId)) pills.push(`<span class="dti-list-link cl" title="Linked to My Closet: kept in step with your Neopets closet">${CLOSET_ICO}Closet</span>`);
+            if (lst.tokLinked) pills.push(`<span class="dti-list-link" title="${isOwnPage ? 'Linked to My Tokens: your tokens are shared from this list (a hidden code in its description)' : 'Their tokens are shared from this list'}">${TOK_ICO}Tokens</span>`);
+            return pills.length ? `<span class="dti-list-links">${pills.join('')}</span>` : '';
+        };
+        if (isOwnPage) left.addEventListener('click', e => {   // (⚑: a wishlist's priority; an owned list for trade or not)
+            const b = e.target.closest('.dti-list-prio-btn');
+            if (!b) return;
+            e.preventDefault(); e.stopPropagation();
+            const card = b.closest('.dti-list-card'), lst = card && listOfCard(card);
+            if (!lst?.listId) return;
+            document.querySelector('.dti-acct-menu')?.remove();
+            const cur = listPrio()[lst.listId] || '';
+            const opts = lst.isOwned ? [['', 'For trade', 'The usual'], ['keep', 'Not for trade', 'Left out of what you have to give \u2014 as your closet is']]
+                : [['high', 'High', ''], ['med', 'Medium', ''], ['low', 'Low', ''], ['', 'No priority', '']];
+            const menu = document.createElement('div');
+            menu.className = 'dti-acct-menu dti-prio-menu';
+            menu.innerHTML = `<div class="dti-acct-mhd">${lst.isOwned ? 'Trading this list' : 'How much you want these'}</div>${opts.map(([v, t, sm]) => `<button type="button" data-p="${v}" class="${v === cur ? 'on' : ''}"><i class="dti-prio-dot ${v || 'none'}"></i><span>${t}${sm ? `<small>${sm}</small>` : ''}</span></button>`).join('')}`;
+            document.body.appendChild(menu);
+            const r = b.getBoundingClientRect();
+            menu.style.left = Math.max(8, Math.min(r.left - 8, innerWidth - menu.offsetWidth - 8)) + 'px';
+            menu.style.top = Math.min(r.bottom + 6, innerHeight - menu.offsetHeight - 8) + 'px';
+            const close = () => { menu.remove(); document.removeEventListener('mousedown', out, true); };
+            const out = ev => { if (!menu.contains(ev.target)) close(); };
+            document.addEventListener('mousedown', out, true);
+            menu.addEventListener('click', ev => {
+                const o = ev.target.closest('[data-p]');
+                if (!o) return;
+                close();
+                if (o.dataset.p === cur) return;
+                const all = { ...listPrio() };
+                if (o.dataset.p) all[lst.listId] = o.dataset.p; else delete all[lst.listId];
+                GM_setValue('dti_list_prio', all);
+                card.querySelector('.dti-list-links')?.remove();
+                const html = listPillsHtml(lst);
+                if (html) card.querySelector('.dti-list-bottom > :first-child')?.insertAdjacentHTML('afterend', html);
+            });
+        });
         // A list's account dot: choose whose list it is (one that leaves the account on show → My Items opens again)
         if (isOwnPage) left.addEventListener('click', e => {
             const dot = e.target.closest('.dti-list-acct');
@@ -23325,9 +24949,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 card.innerHTML = `
                     <span class="dti-list-check" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.3 5 8.7l4.6-5"/></svg></span>
                     <div class="dti-list-drag-handle" title="Drag to reorder"><svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor"><circle cx="2" cy="2" r="1.2"/><circle cx="6" cy="2" r="1.2"/><circle cx="2" cy="6" r="1.2"/><circle cx="6" cy="6" r="1.2"/><circle cx="2" cy="10" r="1.2"/><circle cx="6" cy="10" r="1.2"/></svg></div>
-                    <span class="dti-list-name">${isOwnPage && acctMany() ? (() => { const a = acctGet(acctOfList(lst)); return `<button type="button" class="dti-list-acct" style="--ac:${noteEsc(a.color)}" title="${noteEsc(acctName(a))}\u2019s list \u2014 click to change"></button>`; })() : ''}${lst.tokLinked ? `<span class="dti-list-tok" title="${isOwnPage ? 'Your tokens are shared from this list (a hidden code in its description)' : 'Their tokens are shared from this list'}">${TOK_ICO}</span>` : ''}${noteEsc(lst.listName)}</span>
+                    <span class="dti-list-name">${isOwnPage && acctMany() ? (() => { const a = acctGet(acctOfList(lst)); return `<button type="button" class="dti-list-acct" style="--ac:${noteEsc(a.color)}" title="${noteEsc(acctName(a))}\u2019s list \u2014 click to change"></button>`; })() : ''}${noteEsc(lst.listName)}</span>
                     <div class="dti-list-bottom">
                         ${thumbBlock}
+                        ${listPillsHtml(lst)}
                         <span class="dti-list-meta">${lst.count} item${lst.count !== 1 ? 's' : ''}</span>
                         ${visTag || ''}
                     </div>
@@ -23336,6 +24961,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                             <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="1" x2="6" y2="9"/><polyline points="3,6 6,9 9,6"/></svg>
                         </button>
                         ${isOwnPage ? `<button class="dti-list-action-btn dti-list-qa-btn" title="Quick add item to this list">⊕</button>` : ''}
+                        ${isOwnPage && lst.listId && !lst.isUnlisted ? `<button class="dti-list-action-btn dti-list-prio-btn" title="${lst.isOwned ? 'For trade, or Not for trade (kept out of your trades, as your closet is)' : 'Priority \u2014 High, Medium or Low (Trades and Trade Finder show it)'}">\u2691</button>` : ''}
                         <button class="dti-list-action-btn dti-list-icon-btn" title="Set custom list icon">🖼</button>
                         ${isOwnPage && lst.editHref ? `<button class="dti-list-action-btn dti-list-edit-btn" title="Edit list name, type, visibility &amp; description">✎</button>` : ''}
                         ${isOwnPage && lst.deleteListUrl ? `<button class="dti-list-action-btn danger dti-delete-list-btn" data-url="${lst.deleteListUrl}" data-name="${lst.listName.replace(/"/g,'&quot;')}" title="Delete list">✕</button>` : ''}
@@ -23544,7 +25170,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 </select>
                 <button class="dti-bulk-move-btn" id="dti-bulk-move" disabled>Move</button>
                 <button class="dti-bulk-delete-btn" id="dti-bulk-delete" disabled>Delete</button>`
-                : `<button class="dti-select-toggle-btn" id="dti-bulk-copy" type="button" disabled title="Copy the names of the items you picked, one a line — for a trade message">Copy names</button>`}
+                : `<button class="dti-select-toggle-btn" id="dti-bulk-copy" type="button" disabled title="Copy the names of the items you picked, one a line — for a trade message">Copy names</button>
+                <button class="dti-select-toggle-btn" id="dti-bulk-trade" type="button" disabled title="A trade report with them: their items you picked, and any of yours they want that you picked">Trade report</button>
+                <select id="dti-bulk-wish" disabled title="Put the items you picked on one of your wishlists"><option value="">Add to my list…</option></select>`}
             </div>
             <div id="dti-closet-placeholder">
                 <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" opacity=".28">
@@ -23562,6 +25190,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const right = document.createElement('div'); right.id = 'dti-closet-right';
         // Sidebar section headers: icon chip + label (+ a chevron that turns when the section opens)
         const PANEL_ICO = {
+            closet: CLOSET_ICO,
             mail:   '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="3.3" width="12.4" height="9.4" rx="1.6"/><path d="m2.3 4.2 5.7 4.6 5.7-4.6"/></svg>',
             star:    '<svg viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"><path d="M8 1.9 9.55 6.17 14.1 6.3 10.5 9.08 11.78 13.45 8 10.9 4.22 13.45 5.5 9.08 1.9 6.3 6.45 6.17z"/></svg>',
             eye:    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>',
@@ -23594,7 +25223,28 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     <span class="dti-panel-label">${panelHead('note', 'Notes on ' + theirDisplayName)}</span>
                     <div id="dti-user-note-host"></div>
                 </div>` : ''}
+                <div class="dti-panel-section" id="dti-their-trades" hidden>
+                    <span class="dti-panel-label">${panelHead('note', 'Trades with ' + theirDisplayName)}</span>
+                    <div class="dti-tw-list"></div>
+                </div>
             `;
+            // Your trade reports with them (only when there are some): the open ones first, each in a few words — a click opens it
+            const twSec = right.querySelector('#dti-their-trades');
+            if (twSec) {
+                injectNotesCSS();
+                const twName = decodeURIComponent(String(usernameSlug || '').replace(/^\d+-/, '')).toLowerCase(), RANK = { pending: 0, planned: 1, done: 2, off: 3 };
+                const paintTw = () => {
+                    const all = DTINotes.all().filter(n => n.type === 'trade' && n.trade?.partner && (n.trade.partner.id ? n.trade.partner.id === userId
+                        : [twName, theirDisplayName.toLowerCase()].includes(String(n.trade.partner.name).toLowerCase())))
+                        .sort((a, b) => (RANK[a.trade.status] ?? 1) - (RANK[b.trade.status] ?? 1) || b.updated - a.updated);
+                    twSec.hidden = !all.length;
+                    twSec.querySelector('.dti-tw-list').innerHTML = all.slice(0, 4).map(n => `<button type="button" class="dti-tw-row" data-key="${noteEsc(n.key)}" title="Open this trade report">${tradeChip(n.trade.status)}<span>${noteEsc(tradeSummary(n.trade))}</span><small>${noteAgo(n.updated)}</small></button>`).join('')
+                        + (all.length > 4 ? `<a class="dti-tw-more" href="/items?q=dti-enhance#notes" target="_blank">+${all.length - 4} more in Notes \u2197</a>` : '');
+                };
+                paintTw();
+                const off = DTINotes.onChange(() => { if (!twSec.isConnected) return off(); paintTw(); });
+                twSec.addEventListener('click', e => { const b = e.target.closest('.dti-tw-row'); if (b) _openNotesModal(b.dataset.key); });
+            }
             const avBtn = right.querySelector('#dti-avoid-btn');
             if (avBtn) {   // Avoid this person: flagged wherever their name shows (a banner here)
                 const avName = decodeURIComponent(String(usernameSlug || '').replace(/^\d+-/, '')) || theirDisplayName;   // (the page title can come in another language)
@@ -23635,12 +25285,73 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (/^\d+$/.test(userId)) {
                 right.querySelector('#dti-user-note-host')?.appendChild(createNoteEditor({
                     key: 'user:' + userId, ref: { id: userId, name: theirDisplayName, slug: usernameSlug },
-                    rows: 3, compact: true, maxHeight: 260,
+                    rows: 3, compact: true, maxHeight: 260, neomail: theirNp,   // (Copy · Copy, delete & Neomail them)
                     placeholder: 'Private notes — trades, what they want…',
                 }).el);
             }
         } else {
         right.innerHTML = `
+            <div class="dti-panel-section">
+                <button class="dti-panel-label dti-collapsible-toggle" id="dti-importing-toggle" aria-expanded="false" type="button">
+                    ${panelHead('import', 'Importing', true)}
+                </button>
+                <div id="dti-importing-wrap" hidden>
+                    ${galleryLinks.length ? `<div class="dti-subsection" id="dti-gallery-links-wrap">
+                        <span class="dti-sublabel">DTI Import</span>
+                        <div id="dti-gallery-links"></div>
+                    </div>` : ''}
+                    <div class="dti-subsection">
+                        <span class="dti-sublabel">From Neopets</span>
+                        <div id="dti-neo-import-panel"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="dti-panel-section" id="dti-tokens-section">
+                <button class="dti-panel-label dti-collapsible-toggle" id="dti-tokens-toggle" aria-expanded="false" type="button">
+                    ${panelHead('token', 'My Tokens', true)}
+                </button>
+                <div id="dti-tokens-wrap"${GM_getValue('dti_tks_fold', false) ? ' class="fold"' : ''} hidden>
+                    <div class="dti-tks-stats"></div>
+                    ${PFOLD_BTN}
+                    <div class="dti-pfold-body">
+                        <div class="dti-tks-strip"></div>
+                        <div class="dti-pbtns">
+                            <button id="dti-tokens-popup" class="main" type="button" title="Manage your tokens in a popup">${POPUP_ICO}Manage</button>
+                            <a class="sq" href="/items?q=dti-enhance#tokens" title="Open the My Tokens page" aria-label="The My Tokens page">${NF_ICO.ext}</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="dti-panel-section" id="dti-seek-section">
+                <button class="dti-panel-label dti-collapsible-toggle" id="dti-seek-toggle" aria-expanded="false" type="button">
+                    ${panelHead('seek', 'Seeking', true)}
+                </button>
+                <div id="dti-seek-wrap" hidden>
+                    <div class="dti-sks-list"></div>
+                    <div class="dti-sks-foot">
+                        <span class="dti-sks-sum"></span>
+                        <div class="dti-pbtns seek">
+                            <button id="dti-seek-popup" class="main" type="button" title="Your Seeking list in a popup \u2014 order, notes, who\u2019s offering">${POPUP_ICO}Open list</button>
+                            <a class="sq" href="/items?q=dti-enhance#seeking" title="The Seeking page" aria-label="The Seeking page">${NF_ICO.ext}</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            ${isOwnPage ? `
+            <div class="dti-panel-section">
+                <button class="dti-panel-label dti-collapsible-toggle" id="dti-settings-toggle" aria-expanded="false" type="button">
+                    ${panelHead('eye', 'List Visibility', true)}
+                </button>
+                <div id="dti-settings-wrap" hidden>
+                    <div class="dti-subsection">
+                        <div id="dti-vis-target" class="empty">Select a list to choose who can see it</div>
+                        <div id="dti-vis-opts" role="group" aria-label="Visibility of the selected lists">
+                            ${['0', '1', '2'].map(v => `<button type="button" data-v="${v}" title="${VIS[v].desc}" disabled>${VIS[v].ico}<span>${VIS[v].label}</span></button>`).join('')}
+                        </div>
+                        <button id="dti-vis-manage" type="button"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.5 4h6M11.5 4h2M2.5 8h2M7.5 8h6M2.5 12h7M12.5 12h1"/><circle cx="10" cy="4" r="1.5"/><circle cx="6" cy="8" r="1.5"/><circle cx="11" cy="12" r="1.5"/></svg>Manage all lists</button>
+                    </div>
+                </div>
+            </div>` : ''}
             <div class="dti-panel-section" id="dti-neomail-section">
                 <button class="dti-panel-label dti-collapsible-toggle" id="dti-neomail-toggle" aria-expanded="false" type="button">
                     ${panelHead('mail', 'Neomail', true)}
@@ -23666,21 +25377,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     </div>
                 </div>
             </div>
-            <div class="dti-panel-section" id="dti-seek-section">
-                <button class="dti-panel-label dti-collapsible-toggle" id="dti-seek-toggle" aria-expanded="false" type="button">
-                    ${panelHead('seek', 'Seeking', true)}
-                </button>
-                <div id="dti-seek-wrap" hidden>
-                    <div class="dti-sks-list"></div>
-                    <div class="dti-sks-foot">
-                        <span class="dti-sks-sum"></span>
-                        <div class="dti-pbtns seek">
-                            <button id="dti-seek-popup" class="main" type="button" title="Your Seeking list in a popup \u2014 order, notes, who\u2019s offering">${POPUP_ICO}Open list</button>
-                            <a class="sq" href="/items?q=dti-enhance#seeking" title="The Seeking page" aria-label="The Seeking page">${NF_ICO.ext}</a>
-                        </div>
-                    </div>
-                </div>
-            </div>
             <div class="dti-panel-section" id="dti-nf-section">
                 <button class="dti-panel-label dti-collapsible-toggle" id="dti-nf-toggle" aria-expanded="false" type="button">
                     ${panelHead('smile', 'Neofriends<b class="dti-nfs-badge" hidden></b>', true)}
@@ -23694,22 +25390,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                             <a class="sq" href="/items?q=dti-enhance#neofriends" title="Open the Neofriends page" aria-label="The Neofriends page">${NF_ICO.ext}</a>
                         </div>
                         <button type="button" id="dti-nf-finder" class="dti-pbtn-wide" title="Who's offering the items on your wishlist">${NF_ICO.search}Find traders</button>
-                    </div>
-                </div>
-            </div>
-            <div class="dti-panel-section" id="dti-tokens-section">
-                <button class="dti-panel-label dti-collapsible-toggle" id="dti-tokens-toggle" aria-expanded="false" type="button">
-                    ${panelHead('token', 'My Tokens', true)}
-                </button>
-                <div id="dti-tokens-wrap"${GM_getValue('dti_tks_fold', false) ? ' class="fold"' : ''} hidden>
-                    <div class="dti-tks-stats"></div>
-                    ${PFOLD_BTN}
-                    <div class="dti-pfold-body">
-                        <div class="dti-tks-strip"></div>
-                        <div class="dti-pbtns">
-                            <button id="dti-tokens-popup" class="main" type="button" title="Manage your tokens in a popup">${POPUP_ICO}Manage</button>
-                            <a class="sq" href="/items?q=dti-enhance#tokens" title="Open the My Tokens page" aria-label="The My Tokens page">${NF_ICO.ext}</a>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -23738,36 +25418,6 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     <button id="dti-copy-url-btn" type="button">Copy</button>
                 </div>
             </div>` : ''}
-            ${isOwnPage ? `
-            <div class="dti-panel-section">
-                <button class="dti-panel-label dti-collapsible-toggle" id="dti-settings-toggle" aria-expanded="false" type="button">
-                    ${panelHead('eye', 'List Visibility', true)}
-                </button>
-                <div id="dti-settings-wrap" hidden>
-                    <div class="dti-subsection">
-                        <div id="dti-vis-target" class="empty">Select a list to choose who can see it</div>
-                        <div id="dti-vis-opts" role="group" aria-label="Visibility of the selected lists">
-                            ${['0', '1', '2'].map(v => `<button type="button" data-v="${v}" title="${VIS[v].desc}" disabled>${VIS[v].ico}<span>${VIS[v].label}</span></button>`).join('')}
-                        </div>
-                        <button id="dti-vis-manage" type="button"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.5 4h6M11.5 4h2M2.5 8h2M7.5 8h6M2.5 12h7M12.5 12h1"/><circle cx="10" cy="4" r="1.5"/><circle cx="6" cy="8" r="1.5"/><circle cx="11" cy="12" r="1.5"/></svg>Manage all lists</button>
-                    </div>
-                </div>
-            </div>` : ''}
-            <div class="dti-panel-section">
-                <button class="dti-panel-label dti-collapsible-toggle" id="dti-importing-toggle" aria-expanded="false" type="button">
-                    ${panelHead('import', 'Importing', true)}
-                </button>
-                <div id="dti-importing-wrap" hidden>
-                    ${galleryLinks.length ? `<div class="dti-subsection" id="dti-gallery-links-wrap">
-                        <span class="dti-sublabel">DTI Import</span>
-                        <div id="dti-gallery-links"></div>
-                    </div>` : ''}
-                    <div class="dti-subsection">
-                        <span class="dti-sublabel">From Neopets</span>
-                        <div id="dti-neo-import-panel"></div>
-                    </div>
-                </div>
-            </div>
         `;
         } // end else (isOwnPage)
         // Insert resize handles and right sidebar in correct grid column order
@@ -23780,8 +25430,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         wrap.appendChild(right);
 
         // Load persisted sidebar widths
-        const _leftW  = GM_getValue('dti_left_w',  250);
-        const _rightW = GM_getValue('dti_right_w', 220);
+        const _leftW  = GM_getValue('dti_left_w',  270);
+        // (an old default, as a reset left it: the new one — user asked for the sides a little wider, the right one no wider than the left)
+        if ([220, 260, 270].includes(GM_getValue('dti_right_w', 0))) GM_setValue('dti_right_w', 250);
+        if (GM_getValue('dti_left_w', 0) === 250) GM_setValue('dti_left_w', 270);
+        const _rightW = GM_getValue('dti_right_w', 250);
         wrap.style.setProperty('--dtl', _leftW  + 'px');
         wrap.style.setProperty('--dtr', _rightW + 'px');
 
@@ -23795,7 +25448,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             wrap.classList.toggle(`dti-${side}-off`, off);
             handle.classList.toggle('off', off);
             wrap.style.setProperty(side === 'left' ? '--dthl' : '--dthr', off ? '26px' : '3px');
-            wrap.style.setProperty(side === 'left' ? '--dtl' : '--dtr', off ? '0px' : GM_getValue(side === 'left' ? 'dti_left_w' : 'dti_right_w', side === 'left' ? 250 : 220) + 'px');
+            wrap.style.setProperty(side === 'left' ? '--dtl' : '--dtr', off ? '0px' : GM_getValue(side === 'left' ? 'dti_left_w' : 'dti_right_w', side === 'left' ? 270 : 250) + 'px');
             tog.innerHTML = SIDE_CHEV((side === 'left') !== off);   // (points the way it will move)
             tog.title = `${off ? 'Show' : 'Hide'} ${side === 'left' ? 'the lists' : 'the side panels'}`;
             tog.setAttribute('aria-label', tog.title);
@@ -23815,7 +25468,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         });
 
         // Wire resize drag
-        const _defaults = { left: 250, right: 220 };
+        const _defaults = { left: 270, right: 250 };
         [['left', handleL, 1], ['right', handleR, -1]].forEach(([side, handle, dir]) => {
             // Double-click to reset
             handle.addEventListener('dblclick', e => {
@@ -23832,7 +25485,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 document.body.style.cursor = 'col-resize';
                 document.body.style.userSelect = 'none';
                 const startX = e.clientX;
-                const startW = parseInt(wrap.style.getPropertyValue(side === 'left' ? '--dtl' : '--dtr')) || (side === 'left' ? 250 : 220);
+                const startW = parseInt(wrap.style.getPropertyValue(side === 'left' ? '--dtl' : '--dtr')) || (side === 'left' ? 270 : 250);
                 const prop = side === 'left' ? '--dtl' : '--dtr';
                 const gmKey = side === 'left' ? 'dti_left_w' : 'dti_right_w';
                 const onMove = e => {
@@ -23912,6 +25565,21 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // a filter on the grid like the others (their lists, search and sort all keep working; the lists on the left stay as they
         // are), from your own lists as saved in this browser (what the ✓ / ♥ marks on the cards show)
         let compareOn = false;
+        // (Compare's summary under the button: how many each way, the high-priority ones, and a trade report started from all of it)
+        let cmpSum = null;
+        function paintCmpCard() {
+            let card = right.querySelector('#dti-cmp-card');
+            if (!cmpSum) { card?.remove(); return; }
+            if (!card) {
+                card = document.createElement('div');
+                card.id = 'dti-cmp-card';
+                right.querySelector('#dti-compare-btn')?.after(card);
+                card.addEventListener('click', e => { if (e.target.closest('[data-cmp-trade]')) startTrade(activeItemsAll().filter(i => i.cmp)); });
+            }
+            const s = cmpSum, hi = n => n ? ` <i class="hi">${n} high</i>` : '';
+            card.innerHTML = `<div><b>${s.want}</b> of theirs you want${hi(s.wantHi)}${s.wantLbl ? ` <i class="lbl" title="They marked ${s.wantLbl === 1 ? 'it' : 'them'} \u00d7999 or the like \u2014 often \u201ckeeping\u201d or \u201cask\u201d: see their list">${s.wantLbl} marked \u00d7999</i>` : ''}</div><div><b>${s.have}</b> of yours they want${s.haveHi ? ` <i class="hi" title="On a wishlist of theirs whose name says it\u2019s their top one">${s.haveHi} on their top list</i>` : ''}</div>`
+                + (s.want || s.have ? `<button type="button" data-cmp-trade title="A trade report with ${noteEsc(theirDisplayName)}: their items you want, yours they want \u2014 take out what you won\u2019t trade">Start a trade report</button>` : '');
+        }
         if (!isOwnPage) {
             const CMP_LABEL = '⇄ Compare with Your Items';
             right.addEventListener('click', async e => {
@@ -23921,6 +25589,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     compareOn = false;
                     btn.classList.remove('active');
                     btn.textContent = CMP_LABEL; btn.title = '';
+                    cmpSum = null; paintCmpCard();
                     renderGrid();
                     return;
                 }
@@ -23928,20 +25597,42 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 const mine = await mineLoad();
                 btn.disabled = false;
                 if (!mine) { btn.textContent = CMP_LABEL; return showToast('Couldn’t load your items — log in to DTI, or try again in a moment.', '#f87171'); }
-                const seek = DTISeek.idSet(), want = new Set(), have = new Set();
+                const seek = DTISeek.idSet(), want = new Set(), have = new Set(), kept = new Set(), wantHi = new Set(), haveHi = new Set(), wantLbl = new Set();
+                const tier = new Map(seekOn() ? DTISeek.list('all').map(e => [String(e.id), DTISeek.tierOf(e)]) : []);
                 [...sections.owned, ...sections.wanted].forEach(lst => lst.items.forEach(i => {
                     const id = String(i.itemId || i.href.match(/\/items\/(\d+)/)?.[1] || ''), m = id ? mineOf(id) : null;
-                    i.cmp = !id ? '' : lst.isOwned ? (m?.want > 0 || seek.has(id) ? 'want' : '') : (m?.own > 0 ? 'have' : '');
-                    if (i.cmp === 'want') want.add(id); else if (i.cmp === 'have') have.add(id);
+                    // (what they want that you have — your closet's copies don't count, nor lists you keep: My Closet's "Leave my closet out")
+                    const can = closetTradeable(id, m?.own) > 0;
+                    if (id && !lst.isOwned && m?.own > 0 && !can) kept.add(id);
+                    i.cmp = !id ? '' : lst.isOwned ? (m?.want > 0 || seek.has(id) ? 'want' : '') : (can ? 'have' : '');
+                    // (how much: yours — your wishlist's priority or Seeking's tier, whichever says more; theirs — read from their list's name)
+                    const mp = Math.min(m?.prio ?? 9, tier.get(id) ?? 9);
+                    i.cmpP = i.cmp === 'want' && mp < 3 ? mp : i.cmp === 'have' ? theirListPrio(lst.listName) : null;
+                    i.cmpL = i.cmp === 'want' && i.qty >= 20 ? i.qty : 0;   // (×999, ×99 on theirs: a label — often "keeping" — not a count)
+                    if (i.cmp === 'want') { want.add(id); if (i.cmpP === 0) wantHi.add(id); if (i.cmpL) wantLbl.add(id); } else if (i.cmp === 'have') { have.add(id); if (i.cmpP === 0) haveHi.add(id); }
                 }));
                 compareOn = true;
                 btn.classList.add('active');
                 btn.textContent = `✓ ${want.size} you want · ${have.size} you have`;
-                btn.title = `Showing only their items on your wishlist or Seeking list (${want.size}), and what they want that you own (${have.size}) — click to show everything again`;
+                cmpSum = { want: want.size, have: have.size, wantHi: wantHi.size, haveHi: haveHi.size, wantLbl: wantLbl.size };
+                paintCmpCard();
+                btn.title = `Showing only their items on your wishlist or Seeking list (${want.size}), and what they want that you own (${have.size}) — click to show everything again` + (kept.size ? ` (${kept.size} more they want ${kept.size === 1 ? 'is' : 'are'} in your closet or a list you keep \u2014 left out)` : '');
                 renderGrid();
             });
         }
 
+        // (every item on their page; a trade report with them from some: from their own lists, what you'd get — from their wishlists, yours
+        // you'd give (each once))
+        function activeItemsAll() { return [...sections.owned, ...sections.wanted].flatMap(l => l.items.map(i => (i._own = !!l.isOwned, i))); }
+        function startTrade(items) {
+            const one = i => ({ id: String(i.itemId || i.href.match(/\/items\/(\d+)/)?.[1] || ''), name: i.name, img: i.imgSrc || '', qty: 1 });
+            const uniq = arr => { const seen = new Set(); return arr.filter(x => x.id && !seen.has(x.id) && seen.add(x.id)); };
+            activeItemsAll();
+            const get = uniq(items.filter(i => i._own).map(one)), give = uniq(items.filter(i => !i._own).map(one));
+            const key = newNoteKey('trade');
+            DTINotes.save(key, { trade: { partner: { name: theirDisplayName, id: /^\d+$/.test(userId) ? userId : '', slug: usernameSlug }, give, get, status: 'planned', date: noteToday() } });
+            _openNotesModal(key);
+        }
         // Insert where the original closet was, so footer stays below
         srcEl.before(wrap);
 
@@ -24021,11 +25712,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const selQty = new Map();
         let gridCols = GM_getValue(GRID_COLS_KEY, 0) || 8;
         let tileSize = Math.min(100, Math.max(55, GM_getValue('dti_tile_size', 100) || 100));
-        // How many tiles fit in a row at this size (a tile can shrink to 70% before it's too cramped) — at full size 8,
-        // as before; smaller tiles fit more, up to 16. A narrow window shows fewer than you picked, without changing it.
+        // How many tiles fit in a row at this size (a tile can shrink to 66% before it's too cramped — the side panels a little wider
+        // still fit as many as before) — at full size 8, as before; smaller tiles fit more, up to 16. A narrow window shows fewer than
+        // you picked, without changing it.
         function maxGridCols() {
             const w = document.getElementById('dti-item-grid')?.clientWidth || document.getElementById('dti-closet-center')?.clientWidth - 32 || 0;
-            const fit = w > 200 ? Math.floor((w + 10) / (150 * tileSize / 100 * 0.7 + 10)) : 8;
+            const fit = w > 200 ? Math.floor((w + 10) / (150 * tileSize / 100 * 0.66 + 10)) : 8;
             return Math.max(2, Math.min(16, tileSize >= 100 ? Math.min(8, fit) : fit));
         }
         function applyGridCols(n, keep) {
@@ -24273,6 +25965,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (moveSelEl) moveSelEl.disabled = n === 0;
             const copyBtn = document.getElementById('dti-bulk-copy');
             if (copyBtn) copyBtn.disabled = n === 0;
+            ['dti-bulk-trade', 'dti-bulk-wish'].forEach(k => { const b = document.getElementById(k); if (b) b.disabled = n === 0; });
             document.querySelectorAll('#dti-item-grid .dti-group-sel').forEach(b => {   // (each list: Select / Deselect)
                 let sib = b.closest('.dti-grid-group-header')?.nextElementSibling;
                 if (sib?.classList.contains('dti-grid-group-desc')) sib = sib.nextElementSibling;
@@ -24299,6 +25992,35 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const lines = selectedEntries().map(({ item, n }) => item.name + (n > 1 ? ` (×${n})` : ''));
             if (lines.length) dtiCopyText(lines.join('\n'), () => showToast(`Copied ${lines.length} name${lines.length !== 1 ? 's' : ''}`, '#4ade80'));
         });
+        // (someone else's page — user asked to make it all work for their trade lists: what you picked as a trade report with them — their
+        // items you'd get; from their wishlists, yours you'd give)
+        document.getElementById('dti-bulk-trade')?.addEventListener('click', () => {
+            const picked = selectedEntries().map(e => e.item);
+            if (picked.length) startTrade(picked);
+        });
+        // (…or onto one of your wishlists, the ones not on it already — DTI's own step, six at a time)
+        const wishSel = document.getElementById('dti-bulk-wish');
+        if (wishSel) {
+            nfMine().then(me => {
+                const ls = (me?.lists || []).filter(l => !l.owned && l.id);
+                wishSel.insertAdjacentHTML('beforeend', ls.map(l => `<option value="${noteEsc(l.id)}">\u2661 ${noteEsc(l.name)}</option>`).join('')
+                    + (ls.length ? '' : '<option value="" disabled>No wishlists of yours yet</option>'));
+            }).catch(() => {});
+            wishSel.addEventListener('change', async () => {
+                const listId = wishSel.value, name = wishSel.selectedOptions[0]?.textContent.replace(/^\u2661\s*/, '') || '';
+                wishSel.value = '';
+                if (!listId) return;
+                await mineLoad();
+                const seen = new Set(), ops = selectedEntries().map(e => e.item).map(i => ({ id: String(i.itemId || i.href.match(/\/items\/(\d+)/)?.[1] || ''), name: i.name }))
+                    .filter(o => o.id && !seen.has(o.id) && seen.add(o.id) && !(mineOf(o.id)?.want > 0)).map(o => ({ ...o, list: listId, to: 1, from: 0 }));
+                if (!ops.length) return dtiToast('They\u2019re all on your wishlists already');
+                wishSel.disabled = true;
+                const r = await dtiListOps(ops);
+                wishSel.disabled = false;
+                dtiToast(r.failed.length ? `${r.done.length} added to \u201c${name}\u201d \u2014 ${r.failed.length} couldn\u2019t be (try again)` : `${r.done.length} added to \u201c${name}\u201d`, { variant: r.failed.length ? 'error' : 'success' });
+                if (r.done.length) document.querySelectorAll('#dti-item-grid .dti-item-card[data-dti-item]').forEach(paintMineMark);
+            });
+        }
 
         // Select cards by a rule (or all of them): mode add / remove / invert
         function selectCards(cards, pred, mode = 'add') {
@@ -24671,11 +26393,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             card.classList.toggle('dti-selected', selectModeActive && selectedKeys.has(itemKey(item)));
             syncSelQty(card, item);
-            const cmp = compareOn && item.cmp || '';
-            if ((card.dataset.cmp || '') !== cmp) {   // (Compare: what it is to you)
+            const cmp = compareOn && item.cmp ? item.cmp + (item.cmpP ?? '') + (item.cmpL ? 'l' : '') : '';
+            if ((card.dataset.cmp || '') !== cmp) {   // (Compare: what it is to you — and how much it's wanted)
                 card.dataset.cmp = cmp;
                 card.querySelector('.dti-you-want-badge')?.remove();
-                if (cmp) card.insertAdjacentHTML('beforeend', cmp === 'want' ? '<span class="dti-you-want-badge">YOU WANT</span>' : '<span class="dti-you-want-badge have">YOU HAVE</span>');
+                const p = item.cmpP, PW = ['HIGH', 'MED', 'LOW'];
+                if (cmp) card.insertAdjacentHTML('beforeend', item.cmp === 'want'
+                    ? `<span class="dti-you-want-badge${p != null ? ' p' + p : ''}" title="${p != null ? ['High', 'Medium', 'Low'][p] + ' priority for you' : 'On your wishlist'}${item.cmpL ? ` \u2014 they marked it \u00d7${item.cmpL}: often \u201ckeeping\u201d or \u201cask\u201d` : ''}">YOU WANT${p != null ? ' \u00b7 ' + PW[p] : ''}${item.cmpL ? ' \u00b7 \u00d7' + item.cmpL : ''}</span>`
+                    : `<span class="dti-you-want-badge have${p === 0 ? ' top' : ''}"${p === 0 ? ' title="On a wishlist of theirs whose name says it\u2019s their top one"' : ''}>YOU HAVE${p === 0 ? ' \u00b7 THEIR TOP' : ''}</span>`);
             }
             return card;
         }
@@ -25386,6 +27111,26 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         showImportModal(data, `Import from ${src.label}${who ? ` (${who})` : ''}`, src.key, dest.length ? dest : sections.owned, e.currentTarget));
                     row.querySelector('.dti-neo-src-clear')?.addEventListener('click', () => { GM_setValue(st.key, null); renderNeoSources(); });
                     neoPanel.appendChild(row);
+                    // (the Closet: My Closet is made for it — user asked that importing from it say so)
+                    if (src.key === 'closet' && st === stores[0] || src.key === 'closet' && !st) {
+                        const tip = document.createElement('div');
+                        tip.className = 'dti-neo-src-tip';
+                        // (what's loaded — how many, when, what's changed since, the list kept in step with it — for the account shown)
+                        const ca = acctView !== 'all' ? acctView : 'main', c = closetAll()[ca], L = (GM_getValue('dti_closet_link', {}) || {})[ca];
+                        const before = c?.prev ? new Set((c.prev.items || []).map(x => x[0])) : null, newN = before ? (c.items || []).filter(x => !before.has(x.name)).length : 0;
+                        const status = c ? `<span class="dti-neo-src-tips"><b>${(c.items || []).length.toLocaleString()}</b> items, loaded ${noteAgo(c.at)}${newN ? ` \u00b7 ${newN} new` : ''}${L ? ` \u00b7 kept in step with \u201c${noteEsc(L.name)}\u201d` : ''}</span>` : '';
+                        tip.innerHTML = `<b>${CLOSET_ICO}My Closet</b>${status}<span>The items you keep, kept apart: your whole closet loaded, a DTI list kept in step with it, left out of what you trade and marked across DTI (each a switch). Importing here only adds them to a list.</span><span class="dti-neo-src-tipb"><button type="button" data-cl="open">Open My Closet</button><button type="button" data-cl="load">${c ? 'Load it again' : 'Load into My Closet'}</button></span>`;
+                        tip.addEventListener('click', e => {
+                            const b = e.target.closest('[data-cl]');
+                            if (!b) return;
+                            if (b.dataset.cl === 'open') return _openClosetModal();
+                            GM_setValue('dti_closet_load', { at: Date.now(), acct: acctActive() !== 'all' ? acctActive() : 'main' });
+                            GM_setValue('dti_closet_loading', null);
+                            window.open('https://www.neopets.com/closet.phtml', '_blank', 'noopener');
+                            dtiToast('Your closet opens on Neopets \u2014 go through its pages there; My Closet has it once every page has been seen', { duration: 7000 });
+                        });
+                        neoPanel.appendChild(tip);
+                    }
                     });
                 });
                 const how = document.createElement('div');
@@ -25398,6 +27143,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             gmWatch('dti_cap_ping', neoPanel, (k, o, v, remote) => {   // (a capture in another tab)
                 if (remote && !document.getElementById('dti-import-progress')) renderNeoSources();
             });
+            ['dti_my_closet', 'dti_closet_link'].forEach(k => gmWatch(k, neoPanel, () => { if (!document.getElementById('dti-import-progress')) renderNeoSources(); }));   // (My Closet loaded or linked: its box here)
         }
 
         // "12/14 pages" (long: "12 of 14 pages") — pages captured in each view (SDB NP/NC side, category, search), added up
@@ -28087,8 +29833,15 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 </header>`;
             // For pool items, fetch item-source by iid (gives us real item_id + parents).
             // For regular 404 pages, use the existing _dtiSrcFetch by item_id.
+            // (A capsule's item DTI has — the same name — opens DTI's own page instead, as anywhere else: by the name its tile left,
+            // else the one itemdb gives. This page is only for what DTI doesn't have.)
+            const _toDti = dtiId => { if (dtiId && location.hash === '#pool-' + _poolIid) { location.replace('/items/' + dtiId); return true; } return false; };
+            let _pinName = '';
+            if (_poolIid) try { _pinName = JSON.parse(localStorage.getItem('dti_pi_' + _poolIid) || 'null')?.name || ''; } catch (_) {}
             const _srcP = _poolIid
-                ? fetch('https://dtr-itemdb.dti-remix.workers.dev/item-source?iid=' + _poolIid).then(r => r.ok ? r.json() : null).catch(() => null)
+                ? (_pinName ? dtiItemIdByName(_pinName) : Promise.resolve('')).then(dtiId => _toDti(dtiId) ? new Promise(() => {})
+                    : fetch('https://dtr-itemdb.dti-remix.workers.dev/item-source?iid=' + _poolIid).then(r => r.ok ? r.json() : null).catch(() => null)
+                        .then(src => !_pinName && src?.name ? dtiItemIdByName(src.name).then(d => _toDti(d) ? new Promise(() => {}) : src) : src))
                 : _dtiSrcFetch(id);
 
             _srcP.then(src => {
@@ -28249,7 +30002,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         </div>
                         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;">
                             ${_displayItems.map(x => { return `
-                                <a href="/items/0#pool-${String(x.iid || "").replace(/[^\w.-]/g, "")}"
+                                <a href="${noteEsc(poolHref(x))}"
                                    data-turbo="false"
                                    data-pin="${(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"
                                    data-pii="${(x.image||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"
@@ -28272,6 +30025,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         <p style="font-size:12px;color:var(--text-muted);line-height:1.55;margin:0;flex:1;">This is a collectible NC item that cannot be worn on pets directly. It may contain wearable items or be a prize from an NC event.</p>
                         <a href="https://www.itemdb.com.br/item/${slugParam}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;color:var(--accent-text, var(--accent));background:var(--accent-glow);border:1.5px solid var(--accent);border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;text-decoration:none;flex-shrink:0;">View on ItemDB ↗</a>
                     </div>`}`;
+                if (hasPool) poolStatsFill(content, 'a.dti-pool-tile[data-pin]');   // (its items: cap values, offering and seeking)
                 // NC cap value — only for non-capsule NC items
                 if (!isCapsule) {
                     const capJson = json?.nc_trade_value?.value_text;
@@ -29583,11 +31337,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             });
         });
         let wishKeys = null, adding = false, note = '';
+        // (yours: in one of your lists, or in your Neopets closet — My Closet)
+        const haveIt = id => (mineOf(id)?.own || 0) > 0 || closetQtyOf(id) > 0;
         const paintRows = () => items.forEach(it => {
-            const e = mineOf(it.id);
-            it.tr.classList.toggle('dti-sl-have', !!e?.own);
+            const e = mineOf(it.id), cl = closetQtyOf(it.id);
+            it.tr.classList.toggle('dti-sl-have', haveIt(it.id));
             it.meta.querySelector('.dti-sl-mine')?.remove();
-            if (e?.own || e?.want) it.meta.insertAdjacentHTML('afterbegin', `<span class="dti-sl-mine ${e.own ? 'own' : 'want'}">${e.own ? `\u2713 You have ${e.own > 1 ? e.own : 'it'}` : '\u2665 On your wishlist'}</span>`);
+            if (e?.own || cl || e?.want) it.meta.insertAdjacentHTML('afterbegin', `<span class="dti-sl-mine ${e?.own || cl ? 'own' : 'want'}">${e?.own ? `\u2713 You have ${e.own > 1 ? e.own : 'it'}` : cl ? `\u2713 In your closet${cl > 1 ? ' \u00d7' + cl : ''}` : '\u2665 On your wishlist'}</span>`);
         });
         const range = list => {
             const t = { min: 0, max: 0, valued: 0, unknown: 0 };
@@ -29599,8 +31355,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 sum.innerHTML = '<div class="dti-sl-stats"><span>Open My Items once (logged in) and this list shows what you already have.</span></div>';
                 return;
             }
-            const have = items.filter(it => mineOf(it.id)?.own), wanted = items.filter(it => !mineOf(it.id)?.own && mineOf(it.id)?.want);
-            const missing = items.filter(it => !mineOf(it.id)?.own), toAdd = missing.filter(it => !mineOf(it.id)?.want), toSeek = missing.filter(it => !DTISeek.has(it.id));
+            const have = items.filter(it => haveIt(it.id)), wanted = items.filter(it => !haveIt(it.id) && mineOf(it.id)?.want);
+            const missing = items.filter(it => !haveIt(it.id)), toAdd = missing.filter(it => !mineOf(it.id)?.want), toSeek = missing.filter(it => !DTISeek.has(it.id));
             const mt = range(missing), ot = range(items);
             toks.forEach(tk => [mt, ot].forEach(t => { if (tk.cap) { t.min += tk.cap[0]; t.max += tk.cap[1]; t.valued++; } else t.unknown++; }));   // (style tokens too)
             const sel = sum.querySelector('select')?.value;
@@ -29624,7 +31380,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             };
             sum.querySelector('.dti-sl-add').onclick = async () => {
                 const key = sum.querySelector('select').value;
-                const todo = items.filter(it => !mineOf(it.id)?.own && !mineOf(it.id)?.want);
+                const todo = items.filter(it => !haveIt(it.id) && !mineOf(it.id)?.want);
                 adding = true; note = ''; paintSum();
                 let done = 0, failed = 0;
                 for (const it of todo) {
@@ -30925,7 +32681,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (!so) return;
                 const src = tokImg(/^mall_bg_circle/i.test(t.img || '') && t.art ? t.art : t.img), ess = !!t.essence || ESS_RE.test(t.name);
                 const [base, pz] = tokTypeSplit(t.type || t.name);
-                bcRows.push({ sid: String(sid), sp: String(so[0]), spName: cat.spName(so[0]) || '', name: t.name, ess, src, big: tokBigSrc(src), colors: t.colors || [],
+                bcRows.push({ sid: String(sid), sp: String(so[0]), spName: cat.spName(so[0]) || '', name: t.name, ess, src, big: t.art || tokBigSrc(src), colors: t.colors || [],
                     series: t.series || '', pz, base: ess ? t.series || '' : base, group: ess ? t.series || 'Essence' : t.type || t.series || 'New' });
             });
             return bcRows;
@@ -31679,6 +33435,18 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         let edZones = Picks.none(), edColors = Picks.none(), csAll = !!GM_getValue('dti_cs_all', false);
         let csClearAll = () => {}, kindPaintSoon = () => {}, sortPaint = () => {}, setPicks = () => {};
         const filtersOn = () => Picks.on(edZones) || Picks.on(edColors);
+        // Your closet (user asked: making a custom, pick from your own closet's items only): the items My Closet loaded from Neopets —
+        // every one of them this pet can wear, no search needed (DTI asked once for their zones on it); what's typed, NC / NP, zones and
+        // colors narrow it. The account picked in the nav (All accounts: every one's).
+        let edCloset = false, clPaint = () => {};
+        const edClItems = () => {   // → Map(id → { id, name, img, nc }) of the closet's items DTI knows
+            const scope = acctActive(), m = new Map();
+            Object.entries(closetAll()).forEach(([a, c]) => {
+                if (scope === 'all' || a === scope) (c?.items || []).forEach(it => { if (it.id && !m.has(String(it.id))) m.set(String(it.id), { id: String(it.id), name: it.name || '', img: it.img || '', nc: !!it.nc }); });
+            });
+            return m;
+        };
+        const clSet = on => { edCloset = !!on; clPaint(); csSync(); };
         // Open zones (user asked: only items for the zones still open on the pet) — '~' in the zone picks: the zones what's worn is in,
         // or keeps others out of, left out; read from DTI's own data again as the outfit changes
         const openOn = () => edZones.inc.includes('~');
@@ -31716,6 +33484,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     <div id="dti-kind" role="group" aria-label="NC or NP items" title="Search results: NC or NP items only (DTI's own filter — full pages)">
                         <button type="button" data-k="" class="on">All</button><button type="button" data-k="NC">NC</button><button type="button" data-k="NP">NP</button>
                     </div>
+                    <button type="button" id="dti-ed-cl" aria-pressed="false" hidden>${CLOSET_ICO}<span>Closet</span></button>
                     <span id="dti-zcf-zone-slot"></span>
                     <span id="dti-zcf-color-slot"></span>
                     <button type="button" id="dti-sort" class="dti-cpk dti-cpk-ed" aria-haspopup="dialog" aria-expanded="false" aria-label="Sort the search"></button>
@@ -32007,12 +33776,28 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 kindPaintSoon();
                 // (the list of every page follows at once, from what's here — DTI's own search for it comes a moment later, and matches)
                 csKindHold = Date.now() + 2500;
+                if (CS.base.startsWith('CL|')) return setTimeout(csPaintSoon, 250);   // (your closet: NC / NP picked out of it here, once DTI has it)
                 const pick = csOn() && CS.base && CS.pages && CS.fetched >= CS.pages && csKindPick(CS.base, b.dataset.k.toLowerCase());
                 if (pick) {
                     Object.assign(CS, { items: pick.items, pages: pick.pages, allPages: pick.allPages, fetched: pick.pages, failed: 0, next: 0, page: 1, checked: pick.items.filter(r => r.pr !== undefined).length });
                     csPaintSoon();
                 }
             });
+            // Your closet: shown once My Closet has one; on, the search shows your closet's items (✕ or a second click: every item again)
+            const clBtn = bar.querySelector('#dti-ed-cl');
+            clPaint = () => {
+                const n = edClItems().size, any = Object.values(closetAll()).some(c => (c?.items || []).length);
+                clBtn.hidden = !any && !edCloset;
+                clBtn.classList.toggle('on', edCloset); clBtn.setAttribute('aria-pressed', String(edCloset));
+                clBtn.title = edCloset ? 'Showing your closet\u2019s items \u2014 click for every item again'
+                    : `Only your closet\u2019s items \u2014 the ${n.toLocaleString()} My Closet loaded from Neopets, the ones this pet can wear`;
+            };
+            clBtn.addEventListener('click', () => {
+                if (!edCloset && !edClItems().size) return dtiToast('My Closet hasn\u2019t matched your closet\u2019s items with DTI yet \u2014 open it once', { action: { label: 'Open My Closet', run: () => _openClosetModal() } });
+                clSet(!edCloset);
+            });
+            clPaint();
+            ['dti_my_closet', 'dti_acct_active'].forEach(k => gmWatch(k, clBtn, () => { clPaint(); if (edCloset) csSync(); }));
             const colorPick = makeColorPicker(p => { edColors = p; csSync(); applyFilters(); }, { cls: 'dti-cpk-ed' });
             document.getElementById('dti-zcf-color-slot')?.replaceWith(colorPick.el);
             // Sort (user asked: newest, and the like): DTI's pages are A–Z — any other order shows every page of the search, in it
@@ -32534,8 +34319,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // (its zones; its colors — by the picture's colors, the name only when the picture can't be read; not read yet: not yet)
         // (every item in some zones: DTI found them by zone — only the zones left out are looked at here)
         // (open zones: what's worn stays — the zone it took is no longer open, but it's what you just put on)
-        let csWornNow = null;
-        const csMatch = r => (csWornNow?.has(r.id) || Picks.pass(/^(Z|ALL)\|/.test(CS.base) ? { inc: [], exc: zoneExc(), all: false } : edZoneRule(), z => r.zones.includes(z))
+        let csWornNow = null, csClF = null;
+        // (your closet: what's typed — every word in the name — DTI's NC / NP and zone filters, here)
+        const clFilter = () => {
+            const q = csBr.query() || {}, words = (q.value || '').toLowerCase().split(/\s+/).filter(Boolean), k = q.filterToItemKind, z = q.filterToZoneLabel;
+            return words.length || k || z ? r => (!k || (k === 'NC' ? r.nc : !r.nc)) && (!z || r.zones.includes(z)) && words.every(w => r.name.toLowerCase().includes(w)) : null;
+        };
+        const csMatch = r => (!csClF || csClF(r)) && (csWornNow?.has(r.id) || Picks.pass(/^(Z|ALL)\|/.test(CS.base) ? { inc: [], exc: zoneExc(), all: false } : edZoneRule(), z => r.zones.includes(z))
             && (!openOn() || openZoneFits(r.rz, wornZ.occ))) && (!Picks.on(edColors) || r.pr !== undefined
             && (r.pr ? ItemColors.pass(r.pr, edColors) : Picks.pass(edColors, k => (COLOR_KEYWORDS[k] || []).some(kw => r.name.toLowerCase().includes(kw)))));
         const csOn = () => !!csPanel?.isConnected;
@@ -32577,6 +34367,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // What every page shows: DTI's search — or, with nothing typed and zones shown, every item in those zones (user asked: no
         // words needed), each zone asked of DTI on its own; never every item there is. → { base, zone } or null
         function csTarget() {
+            if (edCloset) {   // (your closet: the same list whatever's typed — that narrows it here; a new one when the pet or the closet changes)
+                const st = csBr.get()?.state;
+                if (!st?.speciesId) return null;
+                const ids = [...edClItems().keys()];
+                return { base: `CL|${st.speciesId}|${st.colorId}|${st.altStyleId ?? ''}|${ids.length}:${ids.reduce((h, k) => (h * 31 + +k) % 1e9, 7)}`, zone: true };
+            }
             const p = csBr.search()[0], u = p ? new URLSearchParams(p) : null;
             if (u) { u.delete('page'); u.delete('per_page'); }
             const every = edZones.inc.includes('*') || openOn(), zr = edZoneRule();   // (open zones, nothing typed: every item — those that fit what's open)
@@ -32685,6 +34481,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (CS.tilesOf !== base) { CS.tiles.clear(); CS.tilesOf = base; }   // (the same search again — Back to search: its tiles kept)
             csPaintSoon();
             await ItemColors.ready();
+            if (base.startsWith('CL|')) return gen === CS.gen && csCloset(gen, base, fresh);
             let had = !fresh && (CS.memo.get(base) || csKindOf(base));   // (a search seen a moment ago — NC / NP / All flipped back — or NC / NP of an All that's here whole: no asking again)
             if (!had && !fresh) {   // (or within the last 12 hours, kept in this browser)
                 const disk = await DTICache.get('cs:' + base);
@@ -32735,6 +34532,38 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 while (CS.memo.size > 4) CS.memo.delete(CS.memo.keys().next().value);
             }
             await csFetchRest(gen, base, queue);
+        }
+        // (your closet: each item's zones on this pet asked of DTI, 150 at a time — one with none doesn't fit it; A\u2013Z, kept for the visit)
+        async function csCloset(gen, base, fresh) {
+            const had = !fresh && CS.memo.get(base);
+            if (had) {
+                Object.assign(CS, { items: had.items, pages: had.pages, allPages: had.pages, fetched: had.pages, clOut: had.out });
+                csPump(gen);
+                return csPaintSoon();
+            }
+            const m = edClItems(), ids = [...m.keys()].sort((a, b) => m.get(a).name.localeCompare(m.get(b).name));
+            Object.assign(CS, { pages: Math.max(1, Math.ceil(ids.length / 150)), clOut: 0 });
+            CS.allPages = CS.pages;
+            if (!ids.length) CS.fetched = CS.pages;   // (none DTI knows — this account's closet: nothing to ask)
+            csPaintSoon();
+            for (let i = 0; i < ids.length; i += 150) {
+                const r = await csBr.zones(ids.slice(i, i + 150));
+                if (gen !== CS.gen) return;
+                CS.fetched++;
+                if (!r?.items) { CS.failed++; csPaintSoon(); continue; }
+                const got = new Map(r.items.map(x => [String(x.id), x]));
+                ids.slice(i, i + 150).forEach((id, j) => {
+                    const x = got.get(id), c = m.get(id);
+                    if (!x?.zones?.length) { CS.clOut++; return; }   // (nothing of it on this pet)
+                    CS.items.push({ id, name: x.name || c.name, img: x.img || c.img, nc: c.nc, pb: false, rar: null, zones: x.zones, ord: i + j, pr: undefined, rz: x.restricts || [] });
+                });
+                csPump(gen);
+                csPaintSoon();
+            }
+            if (!CS.failed) {
+                CS.memo.set(base, { items: CS.items, pages: CS.pages, allPages: CS.pages, out: CS.clOut });
+                while (CS.memo.size > 4) CS.memo.delete(CS.memo.keys().next().value);
+            }
         }
         // (the pages still to ask for: four at a time — for a search looked at by pages, only as far as is needed; then kept, whole)
         async function csFetchRest(gen, base, queue) {
@@ -32818,6 +34647,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (pg) { CS.page += +pg.dataset.d; csPaint(); p.scrollTop = 0; p.scrollIntoView({ block: 'start' }); return; }
                 if (e.target.closest('.dti-cs-clear')) {   // (zones or colors picked: those cleared — else back to DTI's pages, A–Z)
                     if (filtersOn()) return csClearAll();
+                    if (edCloset) return clSet(false);
                     csAll = false; GM_setValue('dti_cs_all', false);
                     if (CS.sort !== 'name') { CS.sort = 'name'; GM_setValue('dti_cs_sort', 'name'); sortPaint(); }
                     return csSync();
@@ -32877,7 +34707,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const csRank = r => r.pr === undefined ? [100, 0] : r.rk || (r.rk = ItemColors.rank(r.pr));   // (the Color order: not read yet, last)
         function csPaint() {
             if (!csOn()) return;
-            const zoneRule = edZoneRule(), colorsOn = Picks.on(edColors), zonesOn = Picks.on(zoneRule), filtered = colorsOn || zonesOn;
+            const cl = CS.base.startsWith('CL|');
+            csClF = cl ? clFilter() : null;
+            const zoneRule = edZoneRule(), colorsOn = Picks.on(edColors), zonesOn = Picks.on(zoneRule), filtered = colorsOn || zonesOn || !!csClF;
             csWornNow = openOn() ? new Set((csBr.get()?.state?.wornItemIds || []).map(String)) : null;
             const p = csPanel, reading = colorsOn || CS.sort === 'color';
             // (looked at by pages: waiting till more is needed isn't loading — and how many there are is known from the first and last pages)
@@ -32901,10 +34733,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const matches = (filtered ? CS.items.filter(csMatch) : [...CS.items]).sort(CS.sort === 'color' && !settle ? (a, b) => { const x = csRank(a), y = csRank(b); return x[0] - y[0] || x[1] - y[1] || byName(a, b); }
                 : ORDER[CS.sort] || (zoneAll || settle ? byName : (a, b) => a.ord - b.ord));
             const expect = CS.fetched < CS.pages || !CS.pages ? Math.max(all, CS.pages * 50) : all;
-            const what = [colorsOn ? Picks.text(edColors, itemColorName, 'color') : '', zonesOn || openOn() ? zoneWords(zoneRule) : ''].filter(Boolean).join(' · ');
-            p.querySelector('.dti-cs-sw').innerHTML = colorsOn ? pickChips(edColors, 3) : zonesOn ? ZONE_ICO : LIST_ICO;
+            const clq = cl ? csBr.query() || {} : {}, clWords = cl ? [(clq.value || '').trim() ? `\u201c${clq.value.trim()}\u201d` : '', clq.filterToItemKind ? `${clq.filterToItemKind} items` : '', clq.filterToZoneLabel || ''] : [];
+            const what = [...clWords, colorsOn ? Picks.text(edColors, itemColorName, 'color') : '', zonesOn || openOn() ? zoneWords(zoneRule) : ''].filter(Boolean).join(' · ');
+            p.querySelector('.dti-cs-sw').innerHTML = colorsOn ? pickChips(edColors, 3) : cl ? CLOSET_ICO : zonesOn ? ZONE_ICO : LIST_ICO;
             const title = p.querySelector('.dti-cs-title');
-            title.textContent = everyAll ? (what ? `${what} — every item` : 'Every item') : filtered ? `${what} — ${zoneAll ? 'every item' : 'every page'}` : 'Every page';
+            title.textContent = cl ? (what ? `${what} — your closet` : 'Your closet') : everyAll ? (what ? `${what} — every item` : 'Every item') : filtered ? `${what} — ${zoneAll ? 'every item' : 'every page'}` : 'Every page';
             title.title = filtered ? what : '';
             const count = known && !filtered ? CS.total : matches.length;
             p.querySelector('.dti-cs-count').textContent = `${count.toLocaleString()} ${loading && !known ? 'so far' : filtered ? 'found' : `item${count === 1 ? '' : 's'}`}`;
@@ -32914,9 +34747,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             seg.querySelector('[data-m="pages"]').title = `${CS_PER_PAGE} a page`;
             seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === mode));
             const clr = p.querySelector('.dti-cs-clear');
-            clr.title = zoneAll ? 'Clear the zone and color filters — back to the outfit’s items' : !filtered ? 'Back to DTI’s own pages' : csAll ? 'Clear the zone and color filters' : 'Back to DTI’s own pages (no zone or color filter)';
+            clr.title = cl ? (filtersOn() ? 'Clear the zone and color filters' : 'Leave your closet — every item again') : zoneAll ? 'Clear the zone and color filters — back to the outfit’s items' : !filtered ? 'Back to DTI’s own pages' : csAll ? 'Clear the zone and color filters' : 'Back to DTI’s own pages (no zone or color filter)';
             clr.setAttribute('aria-label', clr.title);
-            p.querySelector('.dti-cs-sub').textContent = loading
+            p.querySelector('.dti-cs-sub').textContent = cl ? (loading ? `Looking through your closet\u2026${CS.pages > 1 ? ` ${CS.fetched} of ${CS.pages}` : ''}`
+                : `${filtered ? `${matches.length.toLocaleString()} of ${all.toLocaleString()}` : all.toLocaleString()} item${all === 1 ? '' : 's'} in your closet this pet can wear`
+                    + (CS.clOut ? ` · ${CS.clOut.toLocaleString()} more that don\u2019t fit it` : '')
+                    + (CS.sort !== 'name' ? ` · ${CS_SORTS.find(o => o[0] === CS.sort)?.[3] || ''}` : '')
+                    + (CS.failed ? ' · some didn\u2019t load (\u21bb to try again)' : ''))
+                : loading
                 ? (!CS.pages ? `Looking through ${zoneAll ? where : 'the search'}…` : CS.fetched < CS.pages || !reading ? `Looking through ${zoneAll ? where : 'the search'}… ${CS.fetched} of ${CS.pages} pages`
                     : `Reading colors… ${CS.checked.toLocaleString()} of ${expect.toLocaleString()} items${everyAll ? ' (once — they’re kept)' : ''}${settle ? ' · in color order once they’re read' : ''}`)
                 : `${filtered ? `${matches.length.toLocaleString()} of ${all.toLocaleString()}` : count.toLocaleString()} item${(filtered ? all : count) === 1 ? '' : 's'} ${everyAll ? 'this pet can wear' : `in ${where}`}`
@@ -32949,7 +34787,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             });
             const empty = p.querySelector('.dti-cs-empty');
             empty.hidden = (mode === 'pages' && known ? shown.length : matches.length) > 0;
-            empty.textContent = loading || (known && !shown.length) ? 'Looking…' : filtered ? `Nothing in ${where} matches these filters` : 'Nothing found';
+            empty.textContent = loading || (known && !shown.length) ? 'Looking…' : cl ? (all ? 'Nothing in your closet matches' : 'Nothing in your closet fits this pet') : filtered ? `Nothing in ${where} matches these filters` : 'Nothing found';
             csPaintWorn();
             csWake();   // (a page further on, another mode, a filter: pages waiting till needed look again)
         }
@@ -33095,12 +34933,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         }
         function srSnap() {   // (the every-page list's page only while it shows pages)
             const box = srBox(), csPages = csOn() && !!csPanel.querySelector('.dti-cs-pager:not([hidden])');
-            return { query: csBr.query(), zones: Picks.of(edZones), colors: Picks.of(edColors), cs: csOn(), base: csOn() ? CS.base : '',
+            return { query: csBr.query(), zones: Picks.of(edZones), colors: Picks.of(edColors), cs: csOn(), base: csOn() ? CS.base : '', closet: edCloset,
                 page: csOn() ? (csPages ? CS.page : 1) : +(dtiPagerSel()?.value) || 1, scroll: box ? Math.round(box.scrollTop) : 0 };
         }
         // (the search in a few words: what was typed, DTI's filters and ours — and its page)
         function srLabel(s) {
-            const q = s.query || {}, bits = [];
+            const q = s.query || {}, bits = s.closet ? ['your closet'] : [];
             if ((q.value || '').trim()) bits.push(`\u201c${q.value.trim()}\u201d`);
             if (q.filterToItemKind) bits.push(`${q.filterToItemKind} items`);
             if (q.filterToZoneLabel) bits.push(q.filterToZoneLabel);
@@ -33269,6 +35107,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             srWait = 'back'; srWaitAt = Date.now();   // (Back to search at once — greyed out till DTI's search has gone)
             const x = root.querySelector('button[aria-label="Clear search"]');
             if (x) x.click(); else csBr.setQuery(null);
+            edCloset = false; clPaint();
             csClearAll(); wbTick();
         }
         async function srResume() {
@@ -33276,6 +35115,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (!s) return;
             srParked = null; srWait = 'go'; srWaitAt = Date.now(); wbTick();   // (Custom items at once — greyed out till the search is back)
             setPicks(s.zones, s.colors);
+            if (s.closet) { edCloset = true; clPaint(); }
             if (s.query && !csBr.setQuery(s.query)) { srParked = s; srWait = ''; wbSoon(); return dtiToast('Couldn\u2019t bring the search back \u2014 try again', { variant: 'error' }); }
             // (DTI's own search takes a moment to start again: the every-page list stays meanwhile, as it does for an NC / NP switch —
             // taken away and put back, it came back at the top)
@@ -35210,6 +37050,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 background: transparent !important; color: var(--text-muted) !important; font-size: 11.5px !important; font-weight: 700 !important; line-height: 1.5 !important; cursor: pointer; }
             #wardrobe-2020-root #dti-kind button:hover:not(.on) { color: var(--text) !important; background: var(--surface) !important; }
             #wardrobe-2020-root #dti-kind button.on { background: var(--accent) !important; color: var(--accent-fg, #fff) !important; }
+            #wardrobe-2020-root #dti-ed-cl { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: auto !important; min-height: 0 !important; min-width: 0 !important; padding: 4px 10px !important;
+                border: 1px solid var(--border) !important; border-radius: 8px !important; background: var(--surface-2) !important; color: var(--text-muted) !important; font-size: 11.5px !important; font-weight: 700 !important; line-height: 1.5 !important; cursor: pointer; }
+            #wardrobe-2020-root #dti-ed-cl[hidden] { display: none !important; }
+            #wardrobe-2020-root #dti-ed-cl svg { width: 13px; height: 13px; flex-shrink: 0; }
+            #wardrobe-2020-root #dti-ed-cl:hover:not(.on) { color: var(--text) !important; border-color: var(--accent) !important; }
+            #wardrobe-2020-root #dti-ed-cl.on { background: var(--accent) !important; border-color: var(--accent) !important; color: var(--accent-fg, #fff) !important; }
             /* The search's suggestions, once you've clicked away (they'd stay over the items otherwise) */
             .react-autosuggest__container.dti-sug-off .react-autosuggest__suggestions-container { display: none !important; }
             /* ── A color across every page of a search ── */
@@ -35903,6 +37749,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const svg = (d, w = 1.7) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
         const GEM = '<svg viewBox="0 0 16 15" fill="none" aria-hidden="true"><path d="M8 1C8 1 9.8 1 9.8 2.6 9.8 3.8 8.8 4.2 8 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 4.5 2 10h12z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M2 12.5h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
         const ICO = {
+            closet: svg('<rect x="2.5" y="1.8" width="11" height="12.4" rx="1.6"/><path d="M8 1.8v12.4M6.3 7.3v1.6M9.7 7.3v1.6"/>'),
             home: svg('<path d="M2.4 7.3 8 2.6l5.6 4.7"/><path d="M3.8 6.2v7.2h8.4V6.2"/><path d="M6.6 13.4V9.7h2.8v3.7"/>'),
             items: svg('<circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14"/>', 1.8),
             seeking: svg('<circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.6"/><path d="M8 .9v2.2M8 12.9v2.2M.9 8h2.2M12.9 8h2.2"/>'),
@@ -35948,6 +37795,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             ['Home', D + '/', 'Your pets and the newest items'],
             ['My Items', slug() ? `${D}/user/${slug()}/closet` : D + '/your-items', 'Your item lists'],
             ['Customs', D + '/your-outfits', 'Your saved outfits'],
+            ['My Closet', D + '/items?q=dti-enhance#closet', 'Your Neopets closet'],
             ['Browse Items', D + '/items', 'Every item, with filters'],
             ['My Tokens', D + '/items?q=dti-enhance#tokens', 'Style tokens and essences'],
             ['Notes', D + '/items?q=dti-enhance#notes', 'Notes and trade reports'],
@@ -36100,8 +37948,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         // ✓ yours on DTI, ♥ on your wishlist — on the other. data-item is what opens it here ──
         function marksOf(it, skt) {
             const sk = !skt && seekOn() && (isDtiId(it.id) ? seekHas(it.id) : seekNames().has(String(it.name).toLowerCase()));
-            const m = mineOf(it);
-            const s = (sk ? `<i class="sk" title="On your Seeking list">${ICO.seeking}</i>` : '') + (m?.own ? `<i class="ow" title="You own ${m.own} (DTI)">✓</i>` : '') + (m?.want ? '<i class="wa" title="On your DTI wishlist">♥</i>' : '');
+            const m = mineOf(it), cl = closetOpts().marks ? (isDtiId(it.id) && closetQtyOf(it.id)) || closetNameQty(it.name) : 0;   // (in your closet: My Closet)
+            const s = (sk ? `<i class="sk" title="On your Seeking list">${ICO.seeking}</i>` : '') + (cl ? `<i class="cl" title="In your closet${cl > 1 ? ' ×' + cl : ''} (My Closet)">${ICO.closet}</i>` : '') + (m?.own ? `<i class="ow" title="You own ${m.own} (DTI)">✓</i>` : '') + (m?.want ? '<i class="wa" title="On your DTI wishlist">♥</i>' : '');
             return s ? `<span class="mk">${s}</span>` : '';
         }
         const itemAttr = it => esc(JSON.stringify({ id: String(it.id || ''), name: it.name, img: it.img || '', nc: !!it.nc, ...(it.tok ? { tok: 1 } : {}) }));
@@ -36340,6 +38188,14 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 box-shadow: 0 24px 64px rgb(0 0 0 / .3), 0 2px 10px rgb(0 0 0 / .12); color: var(--t);
                 font: 500 13px/1.45 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif; container: win / inline-size; animation: win-in .16s ease-out; }
             @keyframes win-in { from { opacity: 0; transform: translateX(14px) scale(.985); } }
+            .win { user-select: none; -webkit-user-select: none; }   /* (no words picked up by a drag — user asked, as on DTI) */
+            .win :is(input, textarea, select, [contenteditable="true"]) { user-select: text; -webkit-user-select: text; }
+            .win :is(.iname, .tkn b) { cursor: copy; position: relative; transition: color .12s; }
+            .win :is(.iname, .tkn b):hover { color: var(--at); }
+            .win :is(.iname, .tkn b).copied::after { content: 'Copied \u2713'; position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 5; white-space: nowrap; pointer-events: none;
+                padding: 2px 8px; border-radius: 7px; box-shadow: 0 2px 8px rgb(0 0 0 / .18); background: var(--a); color: var(--af);
+                font: 700 11px/1.5 'Poppins', system-ui, sans-serif; letter-spacing: 0; text-transform: none; text-shadow: none; animation: copied-in .16s ease-out; }
+            @keyframes copied-in { from { opacity: 0; transform: translateY(-35%); } }
             @media (prefers-reduced-motion: reduce) { .win, .tab, .tile, .sheet { animation: none !important; transition: none !important; } }
             .win button, .win input, .win textarea, .win select { font-family: inherit; color: inherit; }
             .win :focus-visible { outline: 2px solid var(--a); outline-offset: 1px; }
@@ -36514,7 +38370,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .mk { position: absolute; top: 5px; right: 5px; display: flex; gap: 3px; }
             .mk i { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; color: #fff; font-style: normal; font: 800 10px/1 system-ui, sans-serif; box-shadow: 0 0 0 1.5px var(--s); }
             .mk i svg { width: 12px; height: 12px; }
-            .mk .sk { background: #f97316; } .mk .ow { background: var(--ok); } .mk .wa { background: #db2777; }
+            .mk .sk { background: #f97316; } .mk .ow { background: var(--ok); } .mk .wa { background: #db2777; } .mk .cl { background: #0d9488; }
             .tile .skt { position: absolute; top: 50px; left: 12px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; border: 1px solid #fdba74;
                 background: #fff; color: #ea580c; opacity: 0; transition: opacity .12s; }
             .tile .skt svg { width: 13px; height: 13px; }
@@ -37093,7 +38949,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     : `<div class="hline">${ctx.src === 'sc' ? 'Bring the style tokens here into My Tokens.' : 'No items on this page yet.'}</div>`;
                 return { n: hits.length, sig: `items|${ctx.src}|${hits.map(x => x.name).sort().join(',')}`, tip: hits.length ? `${plural(hits.length, 'item')} you’re after` : '',
                     body: line + (show.length ? tiles(show.slice(0, 24).map(x => ({ id: '', ...x })), x => ({ qty: x.qty })) + (show.length > 24 ? `<div class="hint">+ ${show.length - 24} more on this page</div>` : '') : '')
-                        + `<div class="hacts">${tokSrc ? `<button type="button" class="btn sm" data-import>${ICO.down} Import tokens${cap ? ` · last ${esc(ago(cap.at))}` : ''}</button>` : ''}${capSrc ? `<button type="button" class="btn sm" data-capture>${ICO.list} Add these to your DTI lists</button>` : ''}</div>` };
+                        + `<div class="hacts">${tokSrc ? `<button type="button" class="btn sm" data-import>${ICO.down} Import tokens${cap ? ` · last ${esc(ago(cap.at))}` : ''}</button>` : ''}${ctx.src === 'closet' ? `<button type="button" class="btn sm pri" data-closetload title="Your whole closet into DTI's My Closet — the items you keep">${ICO.down} Load into My Closet${(() => { const c = closetAll()[acctOfNp(npWhoAmI())]; return c ? ` · last ${esc(ago(c.at))}` : ''; })()}</button>` : ''}${capSrc ? `<button type="button" class="btn sm" data-capture>${ICO.list} Add these to your DTI lists</button>` : ''}</div>` };
             }
             if (ctx.kind === 'user') {
                 const w = ctx.who.toLowerCase();
@@ -37186,7 +39042,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if (['items', 'mall', 'board', 'market'].includes(ctx.kind) || (ctx.kind === 'user' && (ctx.gallery || ctx.shop))) if (!mineIx && slug()) mineLoad().then(m => { if (m) again(); });
             if (ctx.kind === 'mall') mallLoad();
             if (ctx.kind === 'items') hereTotal();
-            if (ctx.kind === 'studio' && tokStudio() && Date.now() - tokStudio().at > TOK_STUDIO_AGE && !studioFail) studioRead();
+            if (ctx.kind === 'studio' && !studioFail) studioRead(false);
             if (ctx.kind === 'board' && !boardRows) boardRefresh();
         }
         function hereTotal() {   // (what the NC items here add up to)
@@ -37452,7 +39308,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         }
         function renderItem() {
             const it = ui.item, onDti = isDtiId(it.id), tkKey = tokNorm(it.name);
-            const isTok = !!it.tok || TOK_ESSENCE_RE.test(tkKey) || !!tkCat?.byKey.has(tkKey) || !!DTITokens.read(tkScope()).mine[tkKey] || !!tokStudioKeys()?.has(tkKey);
+            const isTok = !!it.tok || TOK_ESSENCE_RE.test(tkKey) || !!tkCat?.byKey.has(tkKey) || !!DTITokens.read(tkScope()).mine[tkKey] || !!tokKnownKeys()?.has(tkKey);
             if (isTok) tkLoadCat();
             const ti = isTok ? tkInfoOf(tkKey, { name: it.name, img: it.img || '' }) : null;
             const P = itemPage?.id === String(it.id) ? itemPage : null, data = P?.data || null;
@@ -37868,6 +39724,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         const tkWantFirst = () => (GM_getValue('dti_tok_ui', {}) || {}).wantFirst !== false;   // (My Tokens' switch — on to start)
         function renderTokens() {
             tkLoadCat();
+            if (ui.tk.seg === 'studio' && !studioFail) studioRead(false);   // (the rotation: kept up to date while it's looked at)
             const scope = tkScope(), mine = DTITokens.read(scope).mine, imported = tokImported(tkCat, scope), st = tokStudioKeys();
             const yourKeys = new Set([...Object.keys(mine), ...imported.keys()]);
             if (st) st.forEach((r, k) => { if (!tkCat?.byKey.has(k) && !imported.has(k)) imported.set(k, { name: r[0], img: r[1] ? r[1] + '.gif' : '' }); });
@@ -37880,7 +39737,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const list = (seg === 'own' ? own : seg === 'studio' ? studio : want).filter(hit);
             // a search also looks through every token (to mark one you just saw)
             const listed = new Set(list.map(i => i.key));
-            const more = q.length >= 2 && tkCat && seg !== 'studio' ? [...tkCat.byKey.keys()].filter(k => !listed.has(k) && k.includes(q)).slice(0, 40).map(k => byKey.get(k) || info(k)) : [];
+            const hide = q.length >= 2 && tkCat ? tokCoveredPh(tkCat, tokKnownKeys()) : null;   // (DTI’s unnamed styles the new names stand for, as in My Tokens)
+            const more = q.length >= 2 && tkCat && seg !== 'studio' ? [...new Set([...tkCat.byKey.keys(), ...(tokKnownKeys()?.keys() || [])])].filter(k => !listed.has(k) && !hide?.has(k) && k.includes(q)).slice(0, 40).map(k => byKey.get(k) || info(k)) : [];   // (new ones DTI hasn't named yet too)
             const grid = arr => `<div class="grid">${arr.map(i => tokTile(i, st, lists, true, olists) + (ui.tk.open === i.key ? tkPanel(i) : '')).join('')}</div>`;
             let main = '';
             const GS = seg === 'own' ? TokOwnLists : TokLists, gl = seg === 'own' ? olists : lists;   // (Wanted: your want lists; Owned: your owned lists)
@@ -37902,7 +39760,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 : '';
             const sd = tokStudio();
             const studioHead = seg !== 'studio' ? '' : st
-                ? `<div class="tknote"><span>The Styling Studio’s rotation · from <a href="${esc(TOK_STUDIO_URL)}" target="_blank" rel="noopener">itemdb</a>, ${studioBusy ? 'checking…' : 'checked ' + esc(ago(sd.at))}</span><button type="button" class="chip${tkWantFirst() ? ' on' : ''}" data-tkwf aria-pressed="${tkWantFirst()}" title="The ones you’ve marked wanted at the top — the same switch as My Tokens’ Available now">Wanted first</button><button type="button" class="btn sm" data-studioread${studioBusy ? ' disabled' : ''}>Check again</button></div>`
+                ? `<div class="tknote"><span>The Styling Studio’s rotation · from <a href="${esc(TOK_STUDIO_URL)}" target="_blank" rel="noopener">itemdb</a>, ${studioBusy ? 'checking…' : 'checked ' + esc(ago(Math.max(sd.at, sd.chk || 0)))}</span><button type="button" class="chip${tkWantFirst() ? ' on' : ''}" data-tkwf aria-pressed="${tkWantFirst()}" title="The ones you’ve marked wanted at the top — the same switch as My Tokens’ Available now">Wanted first</button><button type="button" class="btn sm" data-studioread${studioBusy ? ' disabled' : ''}>Check again</button></div>`
                 : emptyBox(ICO.tokens, 'The Styling Studio’s rotation', 'Which style tokens you can get on Neopets right now — read from itemdb (the same list as “Available now” in My Tokens).')
                     + `<div style="text-align:center">${studioBusy ? '<span class="msg">Reading it…</span>' : `<button type="button" class="btn pri" data-studioread>${studioFail ? 'Couldn’t reach itemdb — try again' : 'Read the rotation'}</button>`}</div>`;
             body.innerHTML = acctBar('’s tokens')
@@ -37929,10 +39787,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             }
             rerender();
         }
-        function studioRead() {
+        function studioRead(all = true) {   // all = read all of it now; else only if it's due (tokStudioEnsure)
             if (studioBusy) return;
+            const p = all ? tokStudioRefresh() : tokStudioEnsure();
+            if (!p) return;
             studioBusy = true; studioFail = false;
-            tokStudioRefresh().then(() => { studioFail = false; }).catch(() => { studioFail = true; })
+            p.then(() => { studioFail = false; }).catch(() => { studioFail = true; })
                 .finally(() => { studioBusy = false; paintBadge(); if (win && !win.hidden && !ui.item) rerender(); });
         }
 
@@ -38017,6 +39877,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             });
             win.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.menu, .pages')) showMenu(false); });
             body.addEventListener('click', onClick);
+            body.addEventListener('mouseover', e => { const h = e.target.closest?.('.iname, .tkn b'); if (h && !h.title) h.title = 'Click to copy the name'; });
             body.addEventListener('change', onChange);
             body.addEventListener('submit', onSubmit);
             body.addEventListener('keydown', e => {   // (rows that open something: Enter / Space too)
@@ -38126,10 +39987,20 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (isDtiId(id)) { body.querySelector('.stage')?.classList.add('busy'); loadItemPage(id, t.value); }
             }
         }
+        // An item's name in its view, a token's in its panel: a click copies it — "Copied ✓" for a moment (as on DTI's item page)
+        function copyName(h) {
+            const name = h.textContent.trim();
+            if (name) navigator.clipboard.writeText(name).then(() => {
+                h.classList.remove('copied'); void h.offsetWidth; h.classList.add('copied');
+                clearTimeout(h._dtiCopyT); h._dtiCopyT = setTimeout(() => h.classList.remove('copied'), 1400);
+            }).catch(() => {});
+        }
         function onClick(e) {
             const b = e.target.closest(ACT);
             if (ui.stFor && !e.target.closest('.stmenu, [data-st]')) { ui.stFor = ''; if (!b) return rerender(); }
             if (ui.tierFor && !e.target.closest('.stmenu, [data-sktier]')) { ui.tierFor = ''; if (!b) return rerender(); }
+            const nm = !b && e.target.closest('.iname, .tkn b');   // (a name to copy: the window's words can't be selected)
+            if (nm) return copyName(nm);
             if (!b || b.disabled) return;
             const d = b.dataset;
             // ── going places ──
@@ -38143,6 +40014,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             if ('recentclear' in d) { GM_setValue('dti_np_recent', []); return rerender(); }
             if ('ctxfold' in d) { const f = GM_getValue('dti_np_ctx_fold', {}) || {}; f[ctx.kind] = !f[ctx.kind]; GM_setValue('dti_np_ctx_fold', f); return rerender(); }
             if ('import' in d) { const at = Date.now(); GM_setValue('dti_tok_capture', { at, src: ctx.src }); openWin(false); runTokenCapture(ctx.src, at); return; }
+            if ('closetload' in d) {   // (My Closet's loading panel, here and now — in place of the import panel)
+                const req = { at: Date.now(), acct: acctOfNp(npWhoAmI()) };
+                GM_setValue('dti_closet_load', req); GM_setValue('dti_closet_loading', null);
+                document.getElementById('dti-capture-host')?.remove();
+                openWin(false); runClosetLoad(req); return;
+            }
             if ('capture' in d) {   // (the import panel, as when you come from DTI's My Items: your items here into your DTI lists)
                 const src = NEO_SOURCES.find(s => s.key === ctx.src);
                 if (src) { GM_setValue('dti_capture_flag', Date.now()); openWin(false); runNeoCapture(src); }
@@ -38908,12 +40785,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         doc.querySelectorAll('section.closet-hangers-group').forEach(sec => {
             const k = sec.dataset.owned === 'true' ? 'have' : 'want';
             sec.querySelectorAll('div.closet-list').forEach(l => {
-                const list = l.classList.contains('unlisted') ? 'Not in a list' : (l.querySelector(':scope > header h4, :scope > header h3')?.textContent || '').trim() || 'A list';
+                const list = l.classList.contains('unlisted') ? 'Not in a list' : (l.querySelector(':scope > header h4, :scope > header h3')?.textContent || '').trim() || 'A list', lid = l.dataset.id || '';
                 l.querySelectorAll('div.object[data-item-id]').forEach(o => {
                     const id = o.dataset.itemId, img = o.querySelector('img:not(.nc-icon)'), qty = parseInt(o.dataset.quantity, 10) || 1, had = seen[k].get(id);
-                    if (had) { had.qty += qty; if (!had.list.includes(list)) had.list += ', ' + list; return; }   // (in two lists: once, both named)
+                    if (had) { had.qty += qty; had.lids.push(lid); if (!had.list.includes(list)) had.list += ', ' + list; return; }   // (in two lists: once, both named)
                     const it = { id, name: (o.querySelector('.name')?.textContent || img?.alt || '').replace(/^Thumbnail for /, '').trim(), img: img?.getAttribute('src') || '',
-                        nc: !!o.querySelector('img.nc-icon'), qty, list };
+                        nc: !!o.querySelector('img.nc-icon'), qty, list, lids: [lid] };
                     seen[k].set(id, it); out[k].push(it);
                 });
             });
@@ -39006,21 +40883,23 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         let mineP = null;
         function mine() {   // (what you own and want — your own Items page, kept 6 hours; never opened My Items on DTI: not known)
             return mineP || (mineP = (async () => {
+                // (yours to give: in one of your owned lists that isn't marked Not for trade on My Items — read as it's asked, so a change counts at once)
+                const ownOf = c => { const pr = listPrio(); return new Set(c.own.filter((id, i) => !c.lids?.[i] || c.lids[i].some(l => pr[l] !== 'keep'))); };
                 const c = ls.get('dti_nb_mine');
-                if (c?.own && Date.now() - c.at < 3 * KEEP) return { own: new Set(c.own), want: new Set(c.want || []) };
+                if (c?.own && Date.now() - c.at < 3 * KEEP) return { own: ownOf(c), want: new Set(c.want || []) };
                 const slug = GM_getValue('dti_user_slug', '');
                 if (!slug) return null;
                 const p = nbParseCloset(await get(`${D}/user/${encodeURIComponent(slug)}/closet`));
                 if (!p) return null;
-                const own = p.have.map(x => x.id), want = p.want.map(x => x.id);
-                ls.set('dti_nb_mine', { at: Date.now(), own, want });
-                return { own: new Set(own), want: new Set(want) };
+                const own = p.have.map(x => x.id), lids = p.have.map(x => x.lids), want = p.want.map(x => x.id);
+                ls.set('dti_nb_mine', { at: Date.now(), own, lids, want });
+                return { own: ownOf({ own, lids }), want: new Set(want) };
             })());
         }
         const results = new Map(), queue = [], asked = new Set();   // slug → { seek, want, they } | 'busy' | 'fail'
         let busy = false;
         // (their items on your Seeking list; on your wishlist (not Seeking too); the things they want that you have)
-        const sumOf = (c, seek, me) => ({ c, seek: c.have.filter(x => seek.has(x.id)), want: me ? c.have.filter(x => me.want.has(x.id) && !seek.has(x.id)) : null, they: me ? c.want.filter(x => me.own.has(x.id)) : null });
+        const sumOf = (c, seek, me) => ({ c, seek: c.have.filter(x => seek.has(x.id)), want: me ? c.have.filter(x => me.want.has(x.id) && !seek.has(x.id)) : null, they: me ? c.want.filter(x => me.own.has(x.id) && !(closetOpts().notrade && closetQtyOf(x.id) > 0)) : null })   // (your closet's items aren't yours to give: My Closet);
         const cnt = (k, n, label) => `<span class="c ${k}${n ? '' : ' zero'}" data-k="${k}"><b>${n == null ? '?' : n}</b> ${label}</span>`;
         function paint(slug) {
             const r = results.get(slug), done = r && r !== 'busy' && r !== 'fail';
@@ -39124,6 +41003,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     --tf: ${v('--theme-font', "'Poppins', system-ui, sans-serif")}; --tfw: ${v('--theme-font-wt', '800')}; --track: ${v('--theme-hc-track', '.06em')}; --case: ${v('--theme-hc-case', 'uppercase')};
                     --seek: #ea580c; --want: #db2777; --they: #16a34a; --vbg: ${val.bg}; --vfg: ${val.fg}; --vbd: ${val.bd}; color: var(--text); }
                 * { box-sizing: border-box; }
+                .card { user-select: none; -webkit-user-select: none; }   /* (no words picked up by a drag — as on DTI) */
                 .card { width: min(392px, calc(100vw - 16px)); max-height: 74vh; display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--border);
                     border-radius: 16px; box-shadow: 0 20px 50px rgba(0,0,0,.28), 0 0 0 4px var(--glow); overflow: hidden; animation: in .16s ease-out; }
                 @keyframes in { from { opacity: 0; transform: translateY(6px) scale(.985); } }
@@ -39205,7 +41085,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 + `<a href="${noteEsc(home)}" target="_blank" rel="noopener" title="Their items on DTI" aria-label="Their items on DTI"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 9.5v3.5H3V4h3.5"/></svg></a>`
                 + `<button class="x" type="button" aria-label="Close">\u00d7</button></div>
                 <div class="body">${group('seek', r.seek, 'Seeking', 'they have', 'nothing from your Seeking list', '')}${group('want', r.want, 'Wanted', 'they have', 'nothing from your wishlist', NOT_KNOWN)}${group('they', r.they, 'They Want', 'you have', 'nothing you have', NOT_KNOWN)}</div>
-                <div class="ft"><button type="button" class="pick" role="switch" aria-checked="false" title="Pick the items a trade could take in \u2014 a Neomail to them then opens with their names in"><i class="sw" aria-hidden="true"></i>Select items</button><span class="said" role="status"></span><button type="button" class="offer" hidden disabled title="A Neomail to them with the picked items\u2019 names in: Seeking and Wanted, an empty line, then They Want \u2014 the rest is yours to write"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><rect x="1.8" y="3.2" width="12.4" height="9.6" rx="1.6"/><path d="m2.4 4.2 5.6 4.4 5.6-4.4"/></svg>Neomail</button></div></div>`;
+                <div class="ft"><button type="button" class="pick" role="switch" aria-checked="false" title="Pick the items a trade could take in \u2014 a Neomail to them then opens with their names in"><i class="sw" aria-hidden="true"></i>Select items</button><span class="said" role="status"></span><button type="button" class="offer" disabled title="Turn on Select items and pick what a trade could take in first"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><rect x="1.8" y="3.2" width="12.4" height="9.6" rx="1.6"/><path d="m2.4 4.2 5.6 4.4 5.6-4.4"/></svg>Neomail</button></div></div>`;
             document.body.appendChild(pop);
             const w = Math.min(392, innerWidth - 16), h = Math.min(innerHeight * .74, sh.querySelector('.card').offsetHeight || 400);
             if (at) {
@@ -39226,7 +41106,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const pickPaint = () => {
                 const on = card.classList.contains('picking'), n = picked(GET).length + picked(GIVE).length;
                 pickB.setAttribute('aria-checked', String(on));
-                mailB.hidden = !on; mailB.disabled = !n;
+                mailB.disabled = !n;   // (there all the time — faded, not clickable, till something's picked: user asked)
+                mailB.title = n ? 'A Neomail to them with the picked items\u2019 names in: Seeking and Wanted, an empty line, then They Want \u2014 the rest is yours to write'
+                    : on ? 'Pick what a trade could take in first' : 'Turn on Select items and pick what a trade could take in first';
                 sh.querySelectorAll('.t').forEach(t => {
                     if (on) { t.setAttribute('role', 'checkbox'); t.setAttribute('aria-checked', String(t.classList.contains('on'))); }
                     else { t.removeAttribute('role'); t.removeAttribute('aria-checked'); }
@@ -39905,8 +41787,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     ? (have.size > 1 ? '' : 'Go through the pages — each one is saved as you view it. Only NC items and wearables are kept.' + (pg && pg.per && pg.per !== '90' ? ' Tip: 90 per page means fewer pages.' : ''))
                     : 'Switch tabs or sections — new items are added automatically. Only NC items and wearables are kept.')
                 : total ? 'Items are ready to import from DTI › My Items › Importing.' : 'Captures NC items and wearables shown here. Nothing is changed on Neopets.';
-            $('.hint').textContent = hint;
-            $('.hint').hidden = !hint;
+            // (the Closet: My Closet is the place for the items you keep — it loads the whole closet from DTI's own button)
+            const clTip = src.key === 'closet' && !live ? ' Keeping your closet apart from your trades? DTI \u203a My Closet loads all of it \u2014 use its \u201cLoad from Neopets\u201d.' : '';
+            $('.hint').textContent = hint + clTip;
+            $('.hint').hidden = !(hint + clTip);
             $('.clear').hidden = !store || live;
             $('.pill-text').textContent = `DTI · ${total.toLocaleString()}${live && of > 1 ? ` · ${have.size}/${of} pages` : ''}${live ? ' ●' : ''}`;
         }
