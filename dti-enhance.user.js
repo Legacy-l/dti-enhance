@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      3.5
+// @version      3.5.1
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -3325,6 +3325,7 @@
         };
         const one = async a => {
             const name = a.dataset.pin || '';
+            if (/\bgift box$/i.test(name.trim())) { const st = a.querySelector('.dti-ip-pool-stats'); if (st) st.innerHTML = '<span class="cap">No trade</span>'; return; }   // (a GBC's boxes — Basic and limited edition: not tradeable, no cap value — user)
             lookupNcValue(name, val => { const el = a.querySelector('.dti-ip-pool-stats .cap'); if (el) el.textContent = capsLabel(val) || '? caps'; });
             const id = await dtiItemIdByName(name);
             if (!id) return paintTrades(a, null);
@@ -13379,7 +13380,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             const title = mi.trinket ? 'Comes with' : mi.kind === 'capsule' ? 'Inside this capsule' : 'What you can get';
             host.innerHTML = `<div class="dti-ip-section">${title}</div><div class="dti-mg-loading small"><span class="dti-mg-spin"></span>Looking inside…</div>`;
             let pool = null;
-            try { pool = r.iid ? await fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + r.iid).then(x => x.ok ? x.json() : null).then(poolClean) : null; } catch (_) {}
+            try { pool = r.iid ? await capsulePool(r.iid, r.name) : null; } catch (_) {}
             const its = pool?.items || [];
             if (!alive()) return;
             if (!its.length) { host.innerHTML = mi.kind === 'capsule' ? `<div class="dti-ip-section">${title}</div><div class="dti-mg-loading small">What’s inside isn’t known yet.</div>` : ''; return; }
@@ -13398,7 +13399,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             const tot = rows.filter(x => x.v).reduce((t, x) => [t[0] + x.v[0], t[1] + x.v[1]], [0, 0]);
             const le = rows.filter(x => x.isLE).length;
             const maxRate = Math.max(1, ...main.map(x => x.rate || 0)), leMax = Math.max(1, ...leRows.map(x => x.rate || 0));
-            const facts = mi.trinket
+            const facts = pool.gbc ? ['<b>2</b> gift boxes', noteEsc(pool.note)] : mi.trinket
                 ? [`<b>${rows.length}</b> item${rows.length === 1 ? '' : 's'}`, tot[1] ? `together ≈ <b>${capShort(tot)}</b>` : '']
                 : [`<b>${main.length}</b> possible prize${main.length === 1 ? '' : 's'}`, le ? `<b class="le">${leApart ? `+ ${le} LE bonus` : `${le} LE`}</b>` : '', avg ? `average prize ≈ <b>${_capN(avg)} caps</b>` : ''];
             rows.sort((a, b) => b.always - a.always || b.isLE - a.isLE || (a.rate ?? 999) - (b.rate ?? 999) || a.name.localeCompare(b.name));
@@ -13410,7 +13411,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
                     <span class="dti-mg-pmain"><span class="dti-mg-pname">${noteEsc(x.name)}${x.always ? '<i class="bonus">Always</i>' : x.isLE ? '<i class="le">LE</i>' : ''}</span>
                         ${x.rate != null && !x.always ? `<span class="dti-mg-pbar"><i style="width:${Math.max(3, x.rate / (lb ? leMax : maxRate) * 100).toFixed(1)}%"></i></span>` : ''}</span>
                     ${x.rate != null && !x.always ? `<span class="dti-mg-prate">${x.rate < 1 ? x.rate.toFixed(1) : Math.round(x.rate)}%${lb ? '<small>of LEs</small>' : ''}</span>` : '<span class="dti-mg-prate"></span>'}
-                    <span class="dti-mg-pval">${x.v ? noteEsc(capShort(x.v)) : '–'}</span></a>`; }).join('')}</div>
+                    <span class="dti-mg-pval">${x.gbc ? 'No trade' : x.v ? noteEsc(capShort(x.v)) : '–'}</span></a>`; }).join('')}</div>
                 ${random.some(x => x.rate != null) ? `<div class="dti-mg-pnote">Odds from itemdb${leApart ? ' (an LE\u2019s: out of the LE bonus drops)' : ''}, values from the NC value lists — a guide, not a promise.</div>` : ''}`;
             // a prize opens its own page (what the page needs to show it, kept for it — as the item popups' prizes do)
             host.querySelectorAll('a.dti-mg-prow[data-pi]:not([data-pi=""])').forEach(a => a.addEventListener('click', () => {
@@ -15021,6 +15022,35 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         const after = sum([...kept]), k = sum(main) >= 90 && after > 0 ? 100 / after : 1;
         return { ...pool, items: pool.items.filter(x => !drop.has(x)).map(x => k !== 1 && kept.has(x) ? { ...x, rate: x.rate * k } : x) };
     }
+    // A capsule's contents (the DTI Remix worker's copy of itemdb's), less the strays. A Gift Box Mystery Capsule's are its gift boxes
+    // (user asked: "just show gift boxes and the limited edition gift box … and not show all the junk items"): the limited edition box,
+    // named after the capsule, and the Basic Gift Box — not the NC Mall items it also gives (any at 150 NC or more; the worker's list
+    // of them stops at 100 and leaves the boxes out). The limited edition box's picture: itemdb's, asked once and kept.
+    async function capsulePool(iid, name) {
+        if (!iid) return null;
+        const pool = await fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + iid).then(r => r.ok ? r.json() : null).then(poolClean).catch(() => null);
+        if (!/\bgift box\b.*\bcapsule\b/i.test(name || '')) return pool;
+        const leName = String(name).replace(/\s*Mystery Capsule\s*$/i, '').trim();
+        const le = await Promise.race([gbcBoxInfo(leName).catch(() => null), new Promise(r => setTimeout(() => r(null), 5000))]);   // (slow the first time: shown without it, kept for next time)
+        return { found: true, gbc: true, note: 'Plus 1\u20132 random items from the NC Mall (150 NC or more)', items: [
+            { iid: le?.iid || 0, name: leName, image: le?.img || '', isLE: true, rate: null, gbc: 'le' },
+            { iid: 65354, name: 'Basic Gift Box', image: 'https://images.neopets.com/items/mall_giftbox_basic.gif', rate: 100, gbc: 'basic' },
+        ] };
+    }
+    function gbcBoxInfo(name) {   // → { iid, img } | null — from its itemdb page (its picture, its id); kept for good (not found: a day)
+        const K = 'dti_gbc_boxes_v1';
+        let all = {};
+        try { all = JSON.parse(localStorage.getItem(K) || '{}') || {}; } catch (_) {}
+        const c = all[name];
+        if (c && (c.img || Date.now() - (c.at || 0) < 864e5)) return Promise.resolve(c.img ? c : null);
+        const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        return tokStudioGet('https://itemdb.com.br/item/' + slug, true).then(t => {
+            const img = t.match(/"og:image","content":"(https:\/\/images\.neopets\.com\/items\/[^"]+)"/)?.[1], iid = +(t.match(/"internal_id":(\d+)/)?.[1] || 0);
+            const out = img ? { iid, img } : { at: Date.now() };
+            try { all[name] = out; localStorage.setItem(K, JSON.stringify(all)); } catch (_) {}
+            return out.img ? out : null;
+        });
+    }
     // A value, for showing: "4-6 caps" (an amount), the list's note as it is, or '' (nothing — "-" on a list is no value)
     function capsLabel(val) {
         const v = String(val ?? '').trim();
@@ -15383,7 +15413,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             _dtiSrcFetch(id)
         ]).then(([data, src]) => {
             const _poolP = src?.iid
-                ? fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + src.iid).then(r => r.ok ? r.json() : null).then(poolClean).catch(() => null)
+                ? capsulePool(src.iid, src.name || data?.name).catch(() => null)
                 : Promise.resolve(null);
             return _poolP.then(pool => [data, src, pool]);
         }).then(([data, src, pool]) => {
@@ -15446,7 +15476,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             const _inside = trinketKind(mall?.description || desc) ? 'Comes With' : 'Inside This Capsule';
             let poolHtml = '';
             if (isCapsuleItem && pool && pool.found && pool.items && pool.items.length) {
-                const _guaranteed = pool.items.filter(x => x.rate != null && x.rate >= 100);
+                const _guaranteed = pool.gbc ? pool.items : pool.items.filter(x => x.rate != null && x.rate >= 100);   // (a GBC: its two gift boxes)
                 const _poolDisplay = _guaranteed.length > 0 ? _guaranteed : pool.items;
                 const _bonusCount  = _guaranteed.length > 0 ? pool.items.length - _guaranteed.length : 0;
                 const shown = _poolDisplay.slice(0, _poolDisplay.length > 16 ? 15 : 16);
@@ -16157,6 +16187,10 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['3.5.1', [
+            'Capsules: a Gift Box Mystery Capsule shows just its gift boxes again, marked No trade',
+            'My Items: the \u2691 priority button\u2019s menu shows up again',
+        ]],
         ['3.5', [
             'My Closet: a new page for your Neopets closet \u2014 load it from Neopets, see what\u2019s new, keep a DTI list in step with it',
             'My Closet: its items are left out of your trades, marked across DTI and count as yours in shopping lists and Seeking (each a switch)',
@@ -22432,7 +22466,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     _dtiSrcFetch(id)
                 ]).then(([data, src]) => {
                     const _poolP = src?.iid
-                        ? fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + src.iid).then(r => r.ok ? r.json() : null).then(poolClean).catch(() => null)
+                        ? capsulePool(src.iid, src.name || data?.name).catch(() => null)
                         : Promise.resolve(null);
                     return _poolP.then(pool => [data, src, pool]);
                 }).then(([data, src, pool]) => {
@@ -22510,7 +22544,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     const _inside = trinketKind(mall?.description || desc) ? 'Comes With' : 'Inside This Capsule';
                     let poolHtml = '';
                     if (isCapsuleItem && pool && pool.found && pool.items && pool.items.length) {
-                        const _guaranteed = pool.items.filter(x => x.rate != null && x.rate >= 100);
+                        const _guaranteed = pool.gbc ? pool.items : pool.items.filter(x => x.rate != null && x.rate >= 100);   // (a GBC: its two gift boxes)
                         const _poolDisplay = _guaranteed.length > 0 ? _guaranteed : pool.items;
                         const _bonusCount  = _guaranteed.length > 0 ? pool.items.length - _guaranteed.length : 0;
                         const shown = _poolDisplay.slice(0, _poolDisplay.length > 16 ? 15 : 16);
@@ -24816,6 +24850,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             const card = b.closest('.dti-list-card'), lst = card && listOfCard(card);
             if (!lst?.listId) return;
             document.querySelector('.dti-acct-menu')?.remove();
+            injectAcctCSS();   // (its look is the account menu's — only loaded when there are side accounts otherwise: unstyled, at the page's foot)
             const cur = listPrio()[lst.listId] || '';
             const opts = lst.isOwned ? [['', 'For trade', 'The usual'], ['keep', 'Not for trade', 'Left out of what you have to give \u2014 as your closet is']]
                 : [['high', 'High', ''], ['med', 'Medium', ''], ['low', 'Low', ''], ['', 'No priority', '']];
@@ -29851,7 +29886,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 return Promise.all([
                     fetch(`/items/${realId}.json`, { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
                     mallFeed(false).catch(() => null),   // (the NC Mall list: its own picture, price and dates when the lookup has none)
-                    iid ? fetch('https://dtr-itemdb.dti-remix.workers.dev/capsule-pool?iid=' + iid).then(r => r.ok ? r.json() : null).then(poolClean).catch(() => null) : Promise.resolve(null)
+                    iid ? capsulePool(iid, src?.name || _pinName).catch(() => null) : Promise.resolve(null)
                 ]).then(([json, feed, pool]) => [src, json, pool, feed]);
             }).then(([src, json, pool, feed]) => {
                 const header = document.getElementById('dti-nf-header');
@@ -29987,7 +30022,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     </div>` : ''}
                     ${(hasPool || hasParents) ? (() => {
                         if (!hasPool) return ''; // hasParents-only: right column already shows FOUND INSIDE
-                        const _guaranteed = pool.items.filter(x => x.rate != null && x.rate >= 100);
+                        const _guaranteed = pool.gbc ? pool.items : pool.items.filter(x => x.rate != null && x.rate >= 100);   // (a GBC: its two gift boxes)
                         const _displayItems = _guaranteed.length > 0 ? _guaranteed : pool.items;
                         const _bonusCount = _guaranteed.length > 0 ? pool.items.length - _guaranteed.length : 0;
                         return `
@@ -29995,8 +30030,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
                             <div style="display:flex;align-items:center;gap:8px;">
                                 <span style="font-size:13px;font-weight:800;color:var(--text);">Inside This Capsule</span>
-                                <span style="font-size:10px;font-weight:700;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:1px 8px;">${pool.items.length} items</span>
-                                ${_bonusCount > 0 ? `<span style="font-size:10px;color:var(--text-muted);">+ ${_bonusCount} possible bonus items</span>` : ''}
+                                <span style="font-size:10px;font-weight:700;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:1px 8px;">${pool.gbc ? 'Gift boxes' : pool.items.length + ' items'}</span>
+                                ${pool.gbc ? `<span style="font-size:10px;color:var(--text-muted);">${noteEsc(pool.note)}</span>` : _bonusCount > 0 ? `<span style="font-size:10px;color:var(--text-muted);">+ ${_bonusCount} possible bonus items</span>` : ''}
                             </div>
                             <a href="https://www.itemdb.com.br/item/${slugParam}" target="_blank" rel="noopener" class="dti-idb-full" style="font-size:11px;color:var(--accent-text, var(--accent));text-decoration:none;font-weight:600;">Full list on ItemDB ↗</a>
                         </div>
@@ -30013,7 +30048,8 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                                     ${x.image ? `<img src="${noteEsc(x.image)}" alt="" style="width:80px;height:80px;object-fit:contain;" loading="lazy">` : '<div style="width:80px;height:80px;"></div>'}
                                     <span style="font-size:9px;color:var(--text-muted);text-align:center;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;width:100%;">${noteEsc(x.name)}</span>
                                     ${x.isLE ? '<span style="position:absolute;top:4px;right:4px;font-size:7px;font-weight:900;background:var(--accent);color:#fff;border-radius:3px;padding:1px 3px;line-height:1;">LE</span>' : ''}
-                                    ${x.rate != null ? `<span style="font-size:8px;font-weight:700;color:var(--text-muted);opacity:.7;">${x.rate.toFixed(1)}%${x.isLE && poolLeApart(pool.items) ? ' of LEs' : ''}</span>` : ''}
+                                    ${x.gbc ? `<span style="font-size:8px;font-weight:700;color:var(--text-muted);opacity:.7;">${x.gbc === 'le' ? 'Limited edition chance' : 'Always \u2014 2 or more'}</span>`
+                                        : x.rate != null ? `<span style="font-size:8px;font-weight:700;color:var(--text-muted);opacity:.7;">${x.rate.toFixed(1)}%${x.isLE && poolLeApart(pool.items) ? ' of LEs' : ''}</span>` : ''}
                                 </a>`; }).join('')}
                         </div>
                     </div>`; })() : _stk ? `
