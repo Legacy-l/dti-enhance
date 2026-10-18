@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      3.5.1
+// @version      3.5.2
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -15051,6 +15051,51 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             return out.img ? out : null;
         });
     }
+    // An event item's prizes (user asked: "haunted mansion item could also show the event prize items and their release dates"):
+    // itemdb's official list for the event — named on the item's own itemdb page (kept for good, for all its packs) — and the day
+    // each prize came out (the list's own dates; kept an hour: a new one comes most days). itemdb's page data, read cookie-less as the
+    // token pages are, only when an event item's page opens.
+    function rscObject(text, re) {   // the JSON object starting where `re` matches (at its first "{"), or null
+        const m = re.exec(text);
+        if (!m) return null;
+        const i = m.index + m[0].indexOf('{');
+        for (let j = i, depth = 0, str = false, bs = false; j < text.length; j++) {
+            const c = text[j];
+            if (str) { if (bs) bs = false; else if (c === '\\') bs = true; else if (c === '"') str = false; continue; }
+            if (c === '"') str = true;
+            else if (c === '{') depth++;
+            else if (c === '}' && --depth === 0) { try { return JSON.parse(text.slice(i, j + 1)); } catch (_) { return null; } }
+        }
+        return null;
+    }
+    async function eventPrizes(itemSlug, groupKey) {   // → { slug, name, prizes: [{ iid, id, name, img, at, wear }] } | null
+        const K = 'dti_event_lists_v1';
+        let all = {};
+        try { all = JSON.parse(localStorage.getItem(K) || '{}') || {}; } catch (_) {}
+        const save = () => { try { localStorage.setItem(K, JSON.stringify(all)); } catch (_) {} };
+        let list = all['g:' + groupKey];
+        if (!list || (!list.slug && Date.now() - (list.at || 0) > 864e5)) {   // (on no list yet: asked again a day later)
+            const t = await tokStudioGet('https://itemdb.com.br/item/' + itemSlug, true);
+            const slug = t.match(/"data-umami-event":"item-official-list","data-umami-event-label":"([a-z0-9-]+)"/)?.[1] || '';
+            list = all['g:' + groupKey] = slug ? { slug } : { at: Date.now() };
+            save();
+        }
+        if (!list.slug) return null;
+        const kept = all['l:' + list.slug];
+        if (kept && Date.now() - kept.at < 3600e3) return kept;
+        const t = await tokStudioGet('https://itemdb.com.br/lists/official/' + list.slug, true);
+        const map = rscObject(t, /"itemMap":\{/), items = rscObject(t, /"items":\{"\d+":\{"internal_id"/);
+        if (!map || !items) return kept || null;
+        const name = t.match(/"name":"([^"]+)","description":"[^"]*","coverURL"/)?.[1] || list.slug;
+        const prizes = Object.values(map).filter(e => !e.isHighlight && !e.isHidden).map(e => {   // (the highlighted ones are the event's tickets)
+            const it = items[e.item_iid] || {};
+            return { iid: e.item_iid, id: it.item_id || 0, name: it.name || '', img: it.image?.url || '', at: Date.parse(e.seriesStart || e.addedAt) || 0, wear: (it.flags || []).includes('wearable') };
+        }).filter(x => x.name).sort((a, b) => a.at - b.at || a.name.localeCompare(b.name));
+        const out = { at: Date.now(), slug: list.slug, name, prizes };
+        all['l:' + list.slug] = out;
+        save();
+        return out;
+    }
     // A value, for showing: "4-6 caps" (an amount), the list's note as it is, or '' (nothing — "-" on a list is no value)
     function capsLabel(val) {
         const v = String(val ?? '').trim();
@@ -15135,7 +15180,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
         : `NC Collectible${c.n ? ` #${c.n}` : ''}${c.set ? ` of the ${c.set} Collection${c.year ? ` (${c.year})` : ''}` : ''} \u2014 collect the whole set for a bonus item`;
     // Items for a site event (Free the Faeries slingshots, Grave Danger petpet gear) — the description says so. Never a capsule:
     // one of retired items can say it holds "Halloween event item(s)", and it's still a capsule
-    const isEventItem = (desc, name) => !/\bcapsule\b/i.test(name || '') && /\bevent\b|grave danger/i.test(desc || '');
+    const isEventItem = (desc, name) => !/\bcapsule\b/i.test(name || '') && /\bevent\b|grave danger|\bhub page\b|\bdaily prize\b|\bcan be used to (?:play|access)\b|\beach play\b/i.test(desc || '');
     // Gift Box Mystery Capsules ("GBC"): capsules that give an NC item plus Basic Gift Boxes
     const isGbcName = name => /\bgift box\b.*\bcapsule\b/i.test(name || '');
     // An NC Mall item, read: its kind (event · sticker · trinket · collectible · capsule · wearable · styling · cookie · home ·
@@ -16187,6 +16232,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['3.5.2', [
+            'Items sold in packs: their page lists every pack \u2014 its picture, price, what one costs and the saving',
+            'Event items (Haunted Mansion lanterns, Wonderclaw widgets\u2026): marked as event items, with no cap value',
+            'Event items: their page shows the event\u2019s prizes so far and the day each came out',
+        ]],
         ['3.5.1', [
             'Capsules: a Gift Box Mystery Capsule shows just its gift boxes again, marked No trade',
             'My Items: the \u2691 priority button\u2019s menu shows up again',
@@ -29906,6 +29956,12 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 // parentImg only makes sense for capsule pages where the bundle parent shares art.
                 // For pool items (_poolIid set), the parent IS the capsule — its image is wrong for the main display.
                 const parentImg  = _poolIid ? null : (src?.parents?.find(p => p.image)?.image || null);
+                // (an item sold in packs — 1-pack, 5-pack, Double 16-pack — user asked: every pack the NC Mall has, with its picture, its
+                // price and what one costs in it; and an event item says so — no cap value, the mall's own words for it)
+                const _units = n => { const m = String(n || '').match(/(?:(double|triple)\s+)?(\d+)[-\s]*(?:pack|bundle)s?$/i); return m ? +m[2] * (m[1] ? (/triple/i.test(m[1]) ? 3 : 2) : 1) : 0; };
+                const _packs = feedRow && _units(name) && Array.isArray(feed) ? feed.filter(r => _units(r.name) && mallGroupKey(r.name) === mallGroupKey(name)).sort((a, b) => _units(a.name) - _units(b.name)) : [];
+                const _mi = feedRow ? mallInfo(feedRow) : null, _isEvent = _mi?.kind === 'event';
+                const _eachNC = v => (Math.round(v * 10) / 10).toLocaleString();
                 const imgSrcNeo  = slug ? 'https://images.neopets.com/items/' + slug.replace(/-/g, '_') + '.gif' : '';
                 const hasPool = !!(pool && pool.found && pool.items && pool.items.length);
                 // Pool fallback: the guaranteed prize's picture if the main one fails (e.g. gift box capsules) — never just the first
@@ -29949,6 +30005,21 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     : null;
                 // Pre-build parent capsule cards (FOUND INSIDE section)
                 const _parentsOfSelf = hasParents && src.parents.every(p => mallGroupKey(p.name) === mallGroupKey(name));   // (its own bundles)
+                const _packsHtml = _packs.length > 1 ? (() => {
+                    const each = r => mallInfo(r).price / _units(r.name), top = Math.max(..._packs.map(each));
+                    return _packs.map(r => {
+                        const mi = mallInfo(r), me = String(r.item_id) === String(feedRow.item_id), e = each(r), save = top ? Math.round((1 - e / top) * 100) : 0;
+                        const label = r.name.slice(mallGroupKey(r.name).length).trim() || r.name;
+                        return `<a href="/items/${noteEsc(r.item_id)}" class="dti-hover-acc dti-pack-opt${me ? ' me' : ''}" style="display:flex;align-items:center;gap:10px;background:var(--surface-2);border:1.5px solid ${me ? 'var(--accent)' : 'var(--border)'};border-radius:10px;padding:8px 10px;text-decoration:none;transition:border-color .13s;"${me ? ' aria-current="page"' : ''}>
+                            ${r.image ? `<img src="${noteEsc(r.image)}" alt="" style="width:44px;height:44px;object-fit:contain;border-radius:6px;flex-shrink:0;">` : ''}
+                            <div style="flex:1;min-width:0;">
+                                <div style="font-size:12px;font-weight:800;color:var(--text);">${noteEsc(label.charAt(0).toUpperCase() + label.slice(1))}${me ? ' <span style="font-size:9px;font-weight:800;padding:1px 6px;border-radius:99px;background:var(--accent);color:var(--accent-fg, #fff);vertical-align:1px;">Viewing</span>' : ''}</div>
+                                <div style="font-size:11px;color:var(--text);margin-top:2px;">${mi.sale ? `<s style="color:var(--text-muted);">${noteEsc(r.price)}</s> ` : ''}<b>${mi.price.toLocaleString()} NC</b>${_units(r.name) > 1 ? ` <span style="color:var(--text-muted);">\u00b7 ${_eachNC(e)} NC each</span>` : ''}</div>
+                                ${save >= 1 ? `<div style="font-size:10px;font-weight:800;color:var(--success);margin-top:1px;">Save ${save}%</div>` : ''}
+                            </div>
+                        </a>`;
+                    }).join('');
+                })() : '';
                 const _parentsHtml = hasParents ? src.parents.map(p => {
                     const _pb = p.mall && (!p.mall.saleEnd || Date.parse(p.mall.saleEnd) > Date.now());
                     let _pr = '';
@@ -29963,7 +30034,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         ${p.image ? `<img src="${noteEsc(p.image)}" alt="" style="width:44px;height:44px;object-fit:contain;border-radius:6px;flex-shrink:0;">` : ''}
                         <div style="flex:1;min-width:0;">
                             <div style="font-size:11px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${noteEsc(p.name)}</div>
-                            ${p.mall ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${noteEsc(p.mall.price)} NC · <span style="color:${_pb ? 'var(--success)' : 'var(--text-muted)'};">${_pb ? 'In Mall Now' : 'Not in Mall'}</span></div>` : ''}
+                            ${p.mall ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${noteEsc(p.mall.price)} NC${_units(p.name) > 1 && +p.mall.price ? ` (${_eachNC(p.mall.price / _units(p.name))} NC each)` : ''} · <span style="color:${_pb ? 'var(--success)' : 'var(--text-muted)'};">${_pb ? 'In Mall Now' : 'Not in Mall'}</span></div>` : ''}
                             ${_pr ? `<div style="font-size:10px;color:var(--text-muted);opacity:.7;margin-top:1px;">Retires in ${noteEsc(_pr)}</div>` : ''}
                         </div>
                     </a>`;
@@ -29979,13 +30050,13 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                                     <nav class="item-links">
                                         <div class="dti-links-row1">
                                             <abbr class="item-kind" data-type="nc" title="Neocash item">NC</abbr>
-                                            <time class="first-seen-at">${releasedStr ? 'Released ' + releasedStr : _ncSubtype || (hasParents ? 'NC Item' : 'NC Capsule / Collectible')}</time>
+                                            <time class="first-seen-at">${releasedStr ? 'Released ' + releasedStr : _isEvent ? 'Event item' : _ncSubtype || (hasParents ? 'NC Item' : 'NC Capsule / Collectible')}</time>
                                         </div>
                                         <div class="dti-links-row2">
                                             <a href="https://www.itemdb.com.br/item/${slugParam}" target="_blank" rel="noopener">ItemDB</a>
                                         </div>
                                     </nav>
-                                    ${isCapsule ? '' : '<div id="dti-nf-cap-val" class="dti-cap-row loading">… caps</div>'}
+                                    ${isCapsule || _isEvent ? '' : '<div id="dti-nf-cap-val" class="dti-cap-row loading">… caps</div>'}
                                 </div>
                             </div>
                             <div class="dti-col-trades">
@@ -30001,6 +30072,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                                             <a href="${noteEsc(ncMallSearchHref(name))}" target="_blank" rel="noopener" title="Search the NC Mall for it" class="dti-nf-accent-btn" style="display:block;text-align:center;background:var(--accent);color:#fff;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;text-decoration:none;margin-top:6px;">Open in NC Mall →</a>
                                         </div>
                                     </div>` : ''}
+                                ${_packsHtml ? `
+                                    <div class="trades-section" style="display:flex;flex-direction:column;align-items:stretch;gap:8px;flex:1;margin-top:16px;">
+                                        <header>PACK OPTIONS</header>
+                                        ${_packsHtml}
+                                    </div>` : ''}
                                 ${hasParents ? `
                                     <div class="trades-section" style="display:flex;flex-direction:column;align-items:stretch;gap:8px;flex:1;${mall ? 'margin-top:16px;' : ''}">
                                         <header>${_parentsOfSelf ? 'ALSO IN BUNDLES' : 'FOUND INSIDE'}</header>
@@ -30014,7 +30090,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                             </div>
                         </div>
                     </header>
-                    ${_largeImg && !isCapsule && !_stk ? `
+                    ${_largeImg && !isCapsule && !_stk && !_isEvent ? `
                     <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:18px;padding:20px;margin-top:16px;display:flex;flex-direction:column;align-items:center;gap:10px;">
                         <div style="font-size:12px;font-weight:800;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase;align-self:flex-start;">Item Preview</div>
                         <img src="${_largeImg}" alt="" style="max-width:100%;object-fit:contain;" loading="lazy"
@@ -30058,12 +30134,37 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                         ${_stk.jn ? `<a href="https://items.jellyneo.net/item/${_stk.jn}/" target="_blank" rel="noopener" style="display:inline-block;margin-top:10px;font-size:12px;font-weight:700;color:var(--accent-text, var(--accent));">On JellyNeo \u2197</a>` : ''}
                     </div>` : `
                     <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:18px 20px;margin-top:16px;display:flex;align-items:center;justify-content:space-between;gap:16px;">
-                        <p style="font-size:12px;color:var(--text-muted);line-height:1.55;margin:0;flex:1;">This is a collectible NC item that cannot be worn on pets directly. It may contain wearable items or be a prize from an NC event.</p>
+                        <p style="font-size:12px;color:var(--text-muted);line-height:1.55;margin:0;flex:1;">${_isEvent ? `<b style="color:var(--text);">Event item.</b> ${noteEsc(feedRow?.description || '')}` : 'This is a collectible NC item that cannot be worn on pets directly. It may contain wearable items or be a prize from an NC event.'}</p>
                         <a href="https://www.itemdb.com.br/item/${slugParam}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;color:var(--accent-text, var(--accent));background:var(--accent-glow);border:1.5px solid var(--accent);border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;text-decoration:none;flex-shrink:0;">View on ItemDB ↗</a>
                     </div>`}`;
                 if (hasPool) poolStatsFill(content, 'a.dti-pool-tile[data-pin]');   // (its items: cap values, offering and seeking)
-                // NC cap value — only for non-capsule NC items
-                if (!isCapsule) {
+                // (an event item: the event's prizes so far, each with the day it came out — itemdb's official list)
+                if (_isEvent && slug) eventPrizes(slug, mallGroupKey(name)).then(ev => {
+                    const hdr = document.getElementById('dti-nf-header');
+                    if (!ev?.prizes?.length || !hdr || document.getElementById('dti-ev-prizes')) return;
+                    const day = ts => new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' });
+                    hdr.insertAdjacentHTML('afterend', `<div id="dti-ev-prizes" style="background:var(--surface);border:1.5px solid var(--border);border-radius:18px;padding:20px;margin-top:16px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <span style="font-size:13px;font-weight:800;color:var(--text);">Event Prizes</span>
+                                <span style="font-size:10px;font-weight:700;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:1px 8px;">${ev.prizes.length} so far</span>
+                                <span style="font-size:10px;color:var(--text-muted);">${noteEsc(ev.name)}</span>
+                            </div>
+                            <a href="https://itemdb.com.br/lists/official/${noteEsc(ev.slug)}" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent-text, var(--accent));text-decoration:none;font-weight:600;">The list on itemdb \u2197</a>
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;">
+                            ${ev.prizes.map(p => `<a href="/items/${noteEsc(p.id)}" data-pin="${noteEsc(p.name)}" class="dti-pool-tile" title="${noteEsc(p.name)} \u2014 out ${noteEsc(day(p.at))}"
+                                style="position:relative;display:flex;flex-direction:column;align-items:center;gap:5px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:10px 8px;text-decoration:none;">
+                                ${p.img ? `<img src="${noteEsc(p.img)}" alt="" style="width:80px;height:80px;object-fit:contain;" loading="lazy">` : '<div style="width:80px;height:80px;"></div>'}
+                                <span style="font-size:9px;color:var(--text-muted);text-align:center;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;width:100%;">${noteEsc(p.name)}</span>
+                                <span style="font-size:9px;font-weight:800;color:var(--accent-text, var(--accent));">Out ${noteEsc(day(p.at))}</span>
+                            </a>`).join('')}
+                        </div>
+                    </div>`);
+                    poolStatsFill(document.getElementById('dti-ev-prizes'), 'a.dti-pool-tile[data-pin]');   // (each one's cap value, offering and seeking)
+                }).catch(() => {});
+                // NC cap value — only for non-capsule NC items (an event item has none)
+                if (!isCapsule && !_isEvent) {
                     const capJson = json?.nc_trade_value?.value_text;
                     const capEl = () => document.getElementById('dti-nf-cap-val');
                     const capSet = (e, v) => { e.textContent = capsLabel(v) || '? caps'; e.classList.remove('loading'); if (capsLabel(v)) e.dataset.tier = ncValTier(v); };
