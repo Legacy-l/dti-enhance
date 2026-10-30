@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DTI Enhance
 // @namespace    https://github.com/Legacy-l
-// @version      3.6
+// @version      3.6.1
 // @author       Sasuke
 // @description  A complete makeover for Dress to Impress (impress.openneo.net) — modern themes, a better My Items, Notes, Neofriends, My Tokens, Neopets imports and more. Builds on ideas from DTI Remix.
 // @homepageURL  https://github.com/Legacy-l/dti-enhance
@@ -46,6 +46,7 @@
     // turns it off again, and then it stays off)
     if (window.top === window) try { if (!GM_getValue('dti_np_fab_v3', false)) { GM_setValue('dti_np_fab', true); GM_setValue('dti_np_fab_v3', true); } } catch (_) {}   // (never in a frame: those do nothing)
     const DTI_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) || '';
+    const DTI_RAW = 'https://raw.githubusercontent.com/Legacy-l/dti-enhance/main/';   // (the released script, and its version.json)
     // DTI has no pages of its own for My Tokens, Notes, Neofriends, the NC Mall Guide, Trade Finder and Seeking: they're built
     // on an item search that finds nothing (/items?q=dti-enhance#tokens…) — a real DTI page (its layout, Turbo, the form
     // token) with almost nothing on it, so there's nothing to see before they're built (it was the Terms of Use page)
@@ -11311,7 +11312,7 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-cl-match { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); font-size: 12.5px; color: var(--text-muted); }
             .dti-cl-match i { display: block; height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
             .dti-cl-match b { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
-            .dti-cl-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 12px; margin-bottom: 12px; }
+            .dti-cl-top { display: grid; grid-template-columns: minmax(280px, 520px) minmax(0, 1fr); align-items: start; gap: 12px 18px; margin-bottom: 12px; }
             .dti-cl-top:empty { display: none; }
             @media (max-width: 860px) { .dti-cl-top { grid-template-columns: 1fr; } }
             .dti-cl-card { display: flex; flex-direction: column; gap: 7px; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); }
@@ -11327,7 +11328,8 @@ q.addEventListener('input',run);bs.forEach(function(b){b.addEventListener('click
             .dti-cl-card .g { display: flex; flex-direction: column; gap: 3px; font-size: 12px; line-height: 1.5; }
             .dti-cl-card .g span { color: var(--text-muted); }
             .dti-cl-card .g small { font-weight: 800; color: var(--text); }
-            .dti-cl-notes { display: flex; flex-wrap: wrap; align-content: flex-start; align-items: center; gap: 7px; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); }
+            .dti-cl-notes { display: flex; flex-wrap: wrap; align-content: flex-start; align-items: center; gap: 7px; padding: 6px 0 0; }   /* (just their chips, at the top beside the link card: no box round a few words) */
+            .dti-cl-notes:not(:has(.dti-cl-note, .dti-cl-since)) { display: none; }
             .dti-cl-since { flex-basis: 100%; font-size: 12px; font-weight: 700; color: var(--text-muted); }
             .dti-cl-note { height: 30px; padding: 0 12px; border-radius: 99px; border: 1.5px solid var(--border); background: var(--surface); color: var(--text); font-size: 12.5px; cursor: pointer; }
             .dti-cl-note b { font-weight: 800; }
@@ -16697,6 +16699,11 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
     }
     // ── What's new: shown once after an update (never on a fresh install), and any time from the ⚙ panel ──
     const DTI_NEWS = [
+        ['3.6.1', [
+            'Settings › Updates: the version you have, the newest, Look now and Update — and a note when a new version is out',
+            'NC gifts you send: recorded even when Neopets skips its NeoPass step, so what you give goes into the trade with them too',
+            'My Closet: its quick looks (new, extra copies…) are just chips beside Link a DTI list, not a big empty box',
+        ]],
         ['3.6', [   // (hidden till @version is raised — the user names the number at release)
             'NC Items (More ›): capsules and the other NC items your pet doesn’t wear — imported from your Inventory, SDB and Gallery, with Valisar’s values; what you want and what’s up for trade',
             'Customs with several outfits: an item taken off in one outfit stays that outfit’s, and a change that makes it match another outfit is kept — no more items vanishing',
@@ -16895,6 +16902,43 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 <ul>${items.map(t => `<li>${t}</li>`).join('')}</ul></section>`).join('')}
             <div class="dti-news-foot"><a href="https://github.com/Legacy-l/dti-enhance" target="_blank" rel="noopener">DTI Enhance on GitHub \u2197</a><button type="button" class="dti-news-ok">Got it</button></div></div>`;
         content.querySelector('.dti-news-ok').addEventListener('click', () => modal.querySelector('.dti-pm-close')?.click());
+    }
+    // ── Updates (the user, 2026-10-30: "DTI is missing a page to update yourself/check for them"): the newest version on GitHub — its
+    // version.json, a few hundred bytes, no cookies — looked for at most every 6 hours (or now, when asked); kept in GM `dti_upd` ──
+    function dtiVerNewer(a, b) {   // (is version a newer than b: 3.6.1 > 3.6)
+        const x = String(a || '').split('.').map(Number), y = String(b || '').split('.').map(Number);
+        for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d > 0; }
+        return false;
+    }
+    async function dtiUpdCheck(force) {   // → { v, date, notes, at } — or { err, at } when GitHub couldn't be reached
+        const k = GM_getValue('dti_upd', null) || {};
+        if (!force && Date.now() - (k.at || 0) < 6 * 3600e3) return k;
+        if (window.__dtiUpdP) return window.__dtiUpdP;   // (looking already, this moment: the same look)
+        window.__dtiUpdP = dtiUpdFetch(k).finally(() => { window.__dtiUpdP = null; });
+        return window.__dtiUpdP;
+    }
+    async function dtiUpdFetch(k) {
+        try {
+            const r = await fetch(`${DTI_RAW}version.json?t=${Math.floor(Date.now() / 60e3)}`, { cache: 'no-store', credentials: 'omit' });
+            if (!r.ok) throw new Error(String(r.status));
+            const j = await r.json();
+            const next = { v: String(j.version || ''), date: String(j.date || ''), notes: Array.isArray(j.notes) ? j.notes.map(String).slice(0, 8) : [], at: Date.now() };
+            if (!/^\d+(?:\.\d+)*$/.test(next.v)) throw new Error('no version');
+            GM_setValue('dti_upd', next);
+            return next;
+        } catch (_) {
+            const was = { ...k, at: Date.now(), err: 1 };
+            GM_setValue('dti_upd', was);
+            return was;
+        }
+    }
+    function dtiUpdNote() {   // (a newer version out: said once for it, on a DTI page, with Update — ⚙ › Updates has the switch)
+        if (window.top !== window || !DTI_VERSION || GM_getValue('dti_upd_note', true) === false) return;
+        dtiUpdCheck(false).then(u => {
+            if (!u.v || !dtiVerNewer(u.v, DTI_VERSION) || GM_getValue('dti_upd_told', '') === u.v) return;
+            GM_setValue('dti_upd_told', u.v);
+            dtiToast(`DTI Enhance ${u.v} is out \u2014 you have ${DTI_VERSION}`, { duration: 15000, action: { label: 'Update', run: () => window.open(`${DTI_RAW}dti-enhance.user.js`, '_blank', 'noopener') } });
+        }).catch(() => {});
     }
     function dtiCheckWhatsNew() {
         if (window.top !== window || window.__dtiNewsChecked || !DTI_VERSION) return;
@@ -17680,6 +17724,7 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
         dtiSafe('Seeking check', skAutoCheck);
         dtiSafe('NC Mall alert', paintMallAlert);
         dtiSafe('What\u2019s new', dtiCheckWhatsNew);
+        dtiSafe('updates', dtiUpdNote);
         setTimeout(() => dtiSafe('backup reminder', backupReminder), 4000);
         if (/^\/items\/\d+/.test(_path) && !isNotesPage) dtiSafe('item page extras', () => { mountItemNoteStrip(); setTimeout(mountItemNoteStrip, 800); mountItemExtras(); setTimeout(mountItemExtras, 800); });
 
@@ -19655,6 +19700,19 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             .dti-keys-note { margin: 0; font-size: 11.5px; color: var(--text-muted); }
             .dti-more-new.mall { background: color-mix(in srgb, #ec4899 16%, var(--surface)) !important; color: #db2777 !important; }
             .dti-more-dot.mall { background: #ec4899 !important; }
+            .dti-upd-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 0 0 10px; padding: 9px 11px; border-radius: 10px; background: var(--surface-2); font-size: 12.5px; color: var(--text); }
+            .dti-upd-line.is-new { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+            .dti-upd-line b { font-weight: 800; }
+            .dti-upd-line small { flex-basis: 100%; font-size: 11px; color: var(--text-muted); }
+            .dti-upd-row a { flex: 1; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; background: var(--accent); color: var(--accent-fg, #fff); font-size: 12.5px; font-weight: 700; text-decoration: none; }
+            .dti-upd-row a[hidden] { display: none; }
+            .dti-upd-row a:hover { filter: brightness(1.08); }
+            .dti-upd-row button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-text, var(--accent)); }
+            .dti-upd-notes { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 12px; color: var(--text); }
+            .dti-upd-notes[hidden] { display: none; }
+            .dti-upd-notes ul { margin: 6px 0 0; padding-left: 18px; }
+            .dti-upd-notes li { margin: 2px 0; color: var(--text-muted); }
+            .dti-upd-tell { margin-top: 10px; }
             .dti-bk-row { display: flex; gap: 8px; }
             .dti-bk-row button {
                 flex: 1; height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer;
@@ -21499,6 +21557,44 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
             });
         });
         panel.appendChild(makeSection('Backup', '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M3 4.5v7.3c0 .7.5 1.2 1.2 1.2h7.6c.7 0 1.2-.5 1.2-1.2V4.5M3 4.5 4.3 2.6c.2-.3.6-.6 1-.6h5.4c.4 0 .8.3 1 .6L13 4.5M6.3 7.3h3.4"/></svg>', backupBody, 'dti_sec_backup', false));
+
+        // Updates: the version you have, the newest (looked for now and then, or now), Update to it, What's new — and whether to be told
+        const updBody = document.createElement('div'); updBody.className = 'dti-tp-section-body';
+        updBody.innerHTML = `<p class="dti-tp-hint">Tampermonkey updates DTI Enhance by itself, about once a day. Here you can look now, and update straight away.</p>
+            <div class="dti-upd-line"></div>
+            <div class="dti-bk-row dti-upd-row"><a class="dti-upd-go" target="_blank" rel="noopener" hidden></a><button type="button" class="dti-upd-look">Look now</button><button type="button" class="dti-upd-news">What\u2019s new</button></div>
+            <div class="dti-upd-notes" hidden></div>`;
+        const updList = document.createElement('div'); updList.className = 'dti-toggle-list dti-upd-tell';
+        const updTell = document.createElement('button');
+        updTell.type = 'button'; updTell.className = 'dti-toggle-row' + (GM_getValue('dti_upd_note', true) !== false ? ' active' : '');
+        updTell.innerHTML = '<span class="dti-toggle-txt"><b>Tell me when there\u2019s a new version</b><small>A note on a DTI page, once for each new version, with Update (looked for a few times a day: a tiny file from GitHub)</small></span><span class="dti-ts"></span>';
+        updTell.addEventListener('click', () => { const next = GM_getValue('dti_upd_note', true) === false; GM_setValue('dti_upd_note', next); updTell.classList.toggle('active', next); });
+        updList.appendChild(updTell);
+        updBody.appendChild(updList);
+        const updPaint = () => {
+            const u = GM_getValue('dti_upd', null) || {}, newer = !!(u.v && DTI_VERSION && dtiVerNewer(u.v, DTI_VERSION));
+            const when = u.at ? new Date(u.at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+            const line = updBody.querySelector('.dti-upd-line');
+            line.className = 'dti-upd-line' + (newer ? ' is-new' : '');
+            line.innerHTML = `<span>You have <b>${noteEsc(DTI_VERSION || '?')}</b>${u.v ? ` \u00b7 the newest is <b>${noteEsc(u.v)}</b>${newer ? '' : ' (yours)'}` : u.err ? ' \u00b7 GitHub couldn\u2019t be reached just now' : ''}</span>${when ? `<small>Looked ${noteEsc(when)}</small>` : ''}`;
+            const go = updBody.querySelector('.dti-upd-go');
+            go.hidden = !newer;
+            if (newer) { go.href = `${DTI_RAW}dti-enhance.user.js`; go.textContent = `Update to ${u.v}`; }
+            const notes = updBody.querySelector('.dti-upd-notes');
+            notes.hidden = !(newer && u.notes && u.notes.length);
+            notes.innerHTML = newer && u.notes ? `<b>What\u2019s new in ${noteEsc(u.v)}</b><ul>${u.notes.map(n => `<li>${noteEsc(n)}</li>`).join('')}</ul>` : '';
+        };
+        updPaint();
+        updBody.querySelector('.dti-upd-look').addEventListener('click', async e => {
+            const b = e.currentTarget;
+            b.disabled = true; b.textContent = 'Looking\u2026';
+            await dtiUpdCheck(true);
+            b.disabled = false; b.textContent = 'Look now';
+            updPaint();
+        });
+        updBody.querySelector('.dti-upd-news').addEventListener('click', () => { closePanel(); _openWhatsNew(''); });
+        dtiUpdCheck(false).then(updPaint).catch(() => {});   // (as kept — or looked for now, when it's been a while)
+        panel.appendChild(makeSection('Updates', '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 6.4A5.3 5.3 0 0 0 3.3 4.9M2.8 9.6a5.3 5.3 0 0 0 9.9 1.5"/><path d="M3.1 2.3v2.8h2.8M12.9 13.7v-2.8h-2.8"/></svg>', updBody, 'dti_sec_updates', false));
 
         const tpFoot = document.createElement('div');
         tpFoot.className = 'dti-tp-foot';
@@ -38309,9 +38405,9 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                 if (txt === lastTxt) return;
                 lastTxt = txt;
                 const f = flow();
-                if (/Who do you wish to gift this/i.test(txt)) {   // step 1: the item's name and picture
+                if (/Who do you wish to gift this/i.test(txt)) {   // step 1: the item's name and picture — and, as it's chosen, who it's for (pick)
                     const name = pop.querySelector('p b')?.textContent.trim(), img = pop.querySelector('img[src*="/items/"]')?.src || '';
-                    if (name) { f.sendImgs = Object.assign(f.sendImgs || {}, { [name]: img }); setFlow(f); }
+                    if (name) { f.sendImgs = Object.assign(f.sendImgs || {}, { [name]: img }); f.pick = { item: name, img, to: pickTo(pop), at: Date.now() }; setFlow(f); }
                     return;
                 }
                 let m = txt.match(/You are about to give (\S+?) the following item\(s\):\s*(.+?)\.\s+Your gift/i);
@@ -38321,12 +38417,29 @@ html[data-mode="dark"] .dti-ip-collect { color: #c4b5fd; }
                     return;
                 }
                 m = txt.match(/Your gift has been delivered to (\S+?)\./i);
-                if (m && f.sending && f.sending.to.toLowerCase() === m[1].toLowerCase() && Date.now() - f.sending.at < 30 * 60e3) {   // step 3: delivered
-                    record({ uid: 'out:' + f.sending.at, dir: 'out', who: f.sending.to, items: f.sending.items, date: nstDate(), at: Date.now() });
-                    delete f.sending;
-                    setFlow(f);
+                if (m) {   // step 3: delivered — what the NeoPass step said; or, when it didn't show, the first step's item for the one you picked
+                    const to = m[1].toLowerCase(), fresh = (x) => x && Date.now() - x.at < 30 * 60e3;
+                    const s = fresh(f.sending) && f.sending.to.toLowerCase() === to ? f.sending
+                        : fresh(f.pick) && f.pick.item && String(f.pick.to || '').toLowerCase() === to ? { to: m[1], at: f.pick.at, items: [{ name: f.pick.item, img: f.pick.img || '' }] } : null;
+                    if (s) {
+                        record({ uid: 'out:' + s.at, dir: 'out', who: s.to, items: s.items, date: nstDate(), at: Date.now() });
+                        delete f.sending; delete f.pick;
+                        setFlow(f);
+                    }
                 }
             };
+            // (the first step's choice of who it's for — a Neofriend picked, or a name typed — kept as it's made, and as its button's pressed)
+            const pickTo = (pop) => { const typed = (pop.querySelector('#newUser')?.value || '').trim(), friend = (pop.querySelector('#neofriend')?.value || '').trim(); return (typed || friend).replace(/[^\w]/g, '').slice(0, 20); };
+            const pickNow = (e) => {
+                const pop = e.target instanceof Element ? e.target.closest('.popup-body__2020') : null;
+                if (!pop || !pop.querySelector('#newUser, #neofriend')) return;
+                const f = flow();
+                if (!f.pick) return;
+                f.pick.to = pickTo(pop); f.pick.at = Date.now();
+                setFlow(f);
+            };
+            ['input', 'change'].forEach(t => document.addEventListener(t, pickNow, true));
+            document.addEventListener('click', pickNow, true);
             let watchT = 0;   // (read at most every 120 ms — reading it measures the page; a step stays up far longer than that)
             const watchSoon = () => { if (!watchT) watchT = setTimeout(() => { watchT = 0; watch(); }, 120); };
             const start = () => new MutationObserver(watchSoon).observe(document.body, { childList: true, subtree: true, characterData: true });
