@@ -1,9 +1,9 @@
 {
- "version": "3.6.1",
- "date": "2026-10-30",
+ "version": "3.7",
+ "date": "2026-11-18",
  "notes": [
-  "Settings › Updates: the version you have, the newest, Look now and Update",
-  "NC gifts you send: recorded even when Neopets skips its NeoPass step",
-  "My Closet: its quick looks are chips, not a big empty box"
+  "Style tokens are DTI items now: the ones on your DTI lists count in My Tokens",
+  "My Tokens › On DTI: your tokens kept on a DTI list of yours — for traders, or all of them",
+  "Matches, Trade Finder and Seeking count your tokens; DTI’s new Styles grid in your theme"
  ]
 }
